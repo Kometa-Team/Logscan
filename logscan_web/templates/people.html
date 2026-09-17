@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Missing People · Kometa Utilities</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <script src="{{ url_for('static', filename='people_images.js') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js') }}" defer></script>
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="/"><span class="brand-mark">K</span><span>Kometa Utilities</span></a><nav class="header-links"><a href="/">Log Scanner</a><a href="/people/popular">Popular People</a><span class="utility-label">Missing People</span></nav></header>
+  <main class="shell people-shell"><section class="hero"><p class="eyebrow">People Posters</p><h1>Missing People Images</h1><p class="hero-copy">Choose a TMDb profile image for each person, then mark the request complete when the poster has been handled.</p></section><section id="people-gallery" class="people-gallery" aria-live="polite"></section></main>
+</body>
+</html>

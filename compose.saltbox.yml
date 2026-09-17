@@ -1,0 +1,35 @@
+services:
+  logscan:
+    build: .
+    image: kometa-logscan:local
+    container_name: logscan
+    hostname: logscan
+    restart: unless-stopped
+    environment:
+      LOGSCAN_API_KEY: "${LOGSCAN_API_KEY}"
+      TMDB_API_KEY: "${TMDB_API_KEY}"
+      DISCORD_PEOPLE_WEBHOOK_URL: "${DISCORD_PEOPLE_WEBHOOK_URL}"
+      SCAN_STORE: /data/scans
+    networks:
+      - saltbox
+    labels:
+      com.github.saltbox.saltbox_managed: "true"
+      traefik.enable: "true"
+      traefik.http.routers.logscan-http.entrypoints: web
+      traefik.http.routers.logscan-http.middlewares: globalHeaders@file,redirect-to-https@docker,robotHeaders@file,cloudflarewarp@docker
+      traefik.http.routers.logscan-http.rule: Host(`logscan.kometa.team`)
+      traefik.http.routers.logscan-http.service: logscan
+      traefik.http.routers.logscan.entrypoints: websecure
+      traefik.http.routers.logscan.middlewares: globalHeaders@file,secureHeaders@file,robotHeaders@file,cloudflarewarp@docker
+      traefik.http.routers.logscan.rule: Host(`logscan.kometa.team`)
+      traefik.http.routers.logscan.service: logscan
+      traefik.http.routers.logscan.tls.certresolver: cfdns
+      traefik.http.routers.logscan.tls.options: securetls@file
+      traefik.http.services.logscan.loadbalancer.server.port: "8000"
+    volumes:
+      - /opt/logscan/data:/data
+      - /etc/localtime:/etc/localtime:ro
+
+networks:
+  saltbox:
+    external: true

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page Not Found · Kometa Utilities</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="site-header"><a class="brand" href="/" aria-label="Kometa Utilities home"><span class="brand-mark">K</span><span>Kometa Utilities</span></a><span class="utility-label">Log Scanner</span></header>
+  <main class="shell error-page">
+    <section class="error-card">
+      <p class="eyebrow">Error 404</p>
+      <h2>Page not found.</h2>
+      <p>We couldn’t find the page you requested. If you were looking for log results, they may have been deleted by the original uploader.</p>
+      <a class="primary-button error-page-action" href="/"><span>Go to Log Scanner</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+    </section>
+  </main>
+</body>
+</html>

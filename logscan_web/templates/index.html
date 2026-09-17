@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Scan a Kometa log and review practical recommendations.">
+  <title>Kometa Log Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260822-8') }}">
+  <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
+  <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
+  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260822-11') }}" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Kometa Utilities home">
+      <span class="brand-mark">K</span>
+      <span>Kometa Utilities</span>
+    </a>
+    <span class="utility-label">Log Scanner</span>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">Kometa Logscan</p>
+      <h1>Turn your Kometa log into a clear action plan.</h1>
+      <p class="hero-copy">Upload a Kometa log to identify configuration issues, common errors, and practical recommendations. Logs and scan results are automatically deleted after 48 hours. Keep the private deletion link if you want to remove yours sooner.</p>
+    </section>
+
+    <section class="upload-card" id="upload-section">
+      <form id="upload-form">
+        <label class="drop-zone" id="drop-zone" for="log-file">
+          <input id="log-file" name="log" type="file" accept=".log,.txt,.yml,.yaml,.zip,.tar,.tgz,.gz,.1,.2,.3,.4,.5,.6,.7,.8,.9" multiple required>
+          <span class="upload-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+          </span>
+          <span class="drop-title">Drop your Kometa logs here</span>
+          <span class="drop-copy">or choose files from your device</span>
+          <span class="file-pill" id="file-pill">LOG, TXT, YAML, or archive · 500MB max after extraction</span>
+        </label>
+        <div class="form-footer">
+          <p id="form-status" role="status">Ready to scan</p>
+          <button class="primary-button" id="scan-button" type="submit" disabled>
+            <span>Scan logs</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+      </form>
+    </section>
+    <section class="upload-error-details" id="upload-error-details" hidden aria-live="polite">
+      <p class="eyebrow">Archive contents</p>
+      <h2>Unexpected files</h2>
+      <ul id="unexpected-file-list"></ul>
+    </section>
+
+    <section class="batch-results" id="batch-results" hidden aria-live="polite">
+      <p class="eyebrow">Batch complete</p>
+      <div class="batch-results-heading">
+      <h2 id="batch-results-title">Uploaded scan results</h2>
+        <div class="batch-results-actions"><button class="secondary-button icon-action" id="share-batch-results" type="button" hidden aria-label="Share public batch page" title="Share public batch page"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i></button><button class="secondary-button icon-action" id="copy-batch-results" type="button" aria-label="Copy Markdown links" title="Copy Markdown links"><i class="fa-solid fa-copy" aria-hidden="true"></i></button><button class="danger-button icon-action" id="delete-batch" type="button" hidden aria-label="Delete all batch logs" title="Delete all batch logs"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button></div>
+      </div>
+      <p>Each file was scanned separately.</p>
+      <ul id="batch-result-links"></ul>
+      <p id="batch-unscanned-title" class="batch-unscanned" hidden>These files were not scanned:</p>
+      <ul id="batch-unscanned-files" class="batch-unscanned" hidden></ul>
+    </section>
+
+    <section class="results" id="results" hidden>
+      <div class="results-heading">
+        <div>
+          <p class="eyebrow">Scan complete</p>
+          <h2 id="results-title">Recommendations</h2>
+        </div>
+        <div class="results-actions">
+          <button class="secondary-button icon-action" id="view-log" type="button" aria-label="Open log viewer" title="Open log viewer"><i class="fa-solid fa-file-lines" aria-hidden="true"></i></button>
+          <button class="secondary-button icon-action" id="open-download-main" type="button" aria-label="Download log or config" title="Download log or config"><i class="fa-solid fa-download" aria-hidden="true"></i></button>
+          <button class="secondary-button icon-action" id="get-help" type="button" aria-label="Get Help" title="Get Help"><i class="fa-solid fa-circle-question" aria-hidden="true"></i></button>
+          <button class="danger-button icon-action" id="delete-scan" type="button" hidden aria-label="Delete log" title="Delete log"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+        </div>
+      </div>
+
+      <div class="result-layout">
+        <nav class="section-nav" aria-label="Result sections" id="section-nav"></nav>
+        <div class="section-content" id="section-content"></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog class="log-viewer" id="log-viewer">
+    <div class="viewer-shell">
+      <header class="viewer-header">
+        <div>
+          <p class="eyebrow" id="viewer-kind">Log viewer</p>
+          <h2 id="viewer-filename">Uploaded log</h2>
+        </div>
+        <div class="viewer-actions">
+          <button class="secondary-button icon-action" id="open-download" type="button" aria-label="Download files" title="Download files"><i class="fa-solid fa-download" aria-hidden="true"></i></button>
+          <button class="secondary-button icon-action" id="toggle-viewer-content" type="button" aria-label="View config" title="View config"><i class="fa-solid fa-file-code" aria-hidden="true"></i></button>
+          <button class="danger-button icon-action" id="close-viewer" type="button" aria-label="Close log viewer" title="Close log viewer"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+      </header>
+      <div class="viewer-toolbar">
+        <div class="viewer-controls">
+          <div class="highlight-mode-control">
+            <label for="highlight-mode">Change Highlight Mode</label>
+            <select id="highlight-mode">
+              <option value="all">All Warnings, Errors and Critical</option>
+              <option value="critical">Critical Only</option>
+              <option value="error">Error Only</option>
+              <option value="warning">Warning Only</option>
+            </select>
+            <button class="primary-button compact" id="next-highlight" type="button">Next</button>
+          </div>
+          <div class="section-jump-control">
+            <label for="section-jump">Jump to section</label>
+            <select id="section-jump">
+              <option value="">Select a section</option>
+            </select>
+          </div>
+        </div>
+        <p id="viewer-position">Lines 1–1</p>
+      </div>
+      <div class="log-code" id="log-code" tabindex="0" aria-label="Log contents"></div>
+    </div>
+  </dialog>
+  <dialog class="help-dialog" id="recommendation-dialog">
+    <div class="help-dialog-shell">
+      <header class="viewer-header"><div><p class="eyebrow" id="recommendation-severity">Recommendation</p><h2 id="recommendation-title">Recommendation</h2></div><button class="icon-button" id="close-recommendation" type="button" aria-label="Close recommendation">×</button></header>
+      <div class="recommendation-dialog-content" id="recommendation-content"></div>
+    </div>
+  </dialog>
+  <dialog class="help-dialog" id="download-dialog">
+    <div class="help-dialog-shell">
+      <header class="viewer-header"><div><p class="eyebrow">Download</p><h2>Choose files to download</h2></div><button class="danger-button icon-action" id="close-download" type="button" aria-label="Close download options" title="Close download options"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></header>
+      <div class="download-dialog-actions">
+        <button class="secondary-button" id="download-log-option" type="button"><i class="fa-solid fa-file-lines" aria-hidden="true"></i> Log</button>
+        <button class="secondary-button" id="download-config-option" type="button"><i class="fa-solid fa-file-code" aria-hidden="true"></i> Config</button>
+        <button class="primary-button" id="download-both-option" type="button"><i class="fa-solid fa-box-archive" aria-hidden="true"></i> Both</button>
+      </div>
+    </div>
+  </dialog>
+  <dialog class="help-dialog" id="help-dialog">
+    <div class="help-dialog-shell">
+      <header class="viewer-header"><div><p class="eyebrow">Get Help</p><h2>Ask the Kometa Team for Support</h2></div><button class="icon-button" id="close-help" type="button" aria-label="Close help message">×</button></header>
+      <div class="help-dialog-content">
+        <p>Open a Kometa Help support thread, then copy and paste this message:</p>
+        <textarea id="help-message" readonly aria-label="Discord-ready help message"></textarea>
+        <button class="primary-button" id="copy-help-message" type="button">Copy message</button>
+      </div>
+    </div>
+  </dialog>
+
+  <footer>
+    <span>Kometa Utilities</span>
+    <span id="retention-countdown">Logs and results are automatically deleted after 48 hours.</span>
+  </footer>
+</body>
+</html>
