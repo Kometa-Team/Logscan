@@ -1,9 +1,8 @@
 # Kometa Log Scanner
 
-A website that stores and scans Kometa log files, presents recommendations,
-and creates opaque shareable result URLs. Each result has a separate deletion
-token. The included Red cog detects log attachments, asks the author for
-confirmation, uploads the file, and returns its result/deletion URL.
+A Flask website that stores and scans Kometa log files, presents
+recommendations, creates opaque shareable result URLs, and maintains a unified
+People Poster processing queue. Each scan result has a separate deletion token.
 
 ## Requirements
 
@@ -13,17 +12,28 @@ confirmation, uploads the file, and returns its result/deletion URL.
 
 ## Windows installation
 
-Open PowerShell in the extracted `kometa-logscan-web` directory:
+Open PowerShell in the cloned `Logscan` directory:
 
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 python -m logscan_web.app
 ```
 
-Open <http://127.0.0.1:5000>.
+This starts Flask's development server. Open <http://127.0.0.1:5000>.
+Stop it with `Ctrl+C`.
+
+To test with the same Windows WSGI server used for production-like deployments:
+
+```powershell
+waitress-serve --listen=127.0.0.1:5010 --threads=1 logscan_web.app:app
+```
+
+Then open <http://127.0.0.1:5010>. Using port `5010` avoids conflicts when
+another local service already owns port `5000`.
 
 If PowerShell blocks virtual-environment activation, run this once in the
 current PowerShell window:
@@ -39,10 +49,24 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+cp .env.example .env
 python -m logscan_web.app
 ```
 
-Open <http://127.0.0.1:5000>.
+Open <http://127.0.0.1:5000> and stop the development server with `Ctrl+C`.
+
+## Environment configuration
+
+The application loads `.env` from the current working directory for local
+development. Real process environment variables take precedence.
+
+- `LOGSCAN_API_KEY` authenticates automated log uploads. Generate a long random value.
+- `TMDB_API_KEY` enables TMDb identity resolution, profile images, and trending people.
+- `DISCORD_PEOPLE_WEBHOOK_URL` optionally announces newly discovered missing people.
+- `SCAN_STORE` selects persistent storage. For local testing, `./data/scans` keeps data inside the checkout; containers use `/data/scans`.
+
+The unified People page is available at <http://127.0.0.1:5000/people> when
+using Flask, or the equivalent path on the selected Waitress port.
 
 ## Production
 
@@ -121,83 +145,26 @@ application data remains inside `/opt/logscan` on the host. Scans are
 automatically deleted 48 hours after upload. The service checks immediately at
 startup and hourly thereafter.
 
-## Red bot cog
+## People queue
 
-Add this repository to Red's Downloader and install `logscan`:
-
-```text
-[p]repo add logscan <repository-clone-url>
-[p]cog install logscan logscan
-[p]load logscan
-[p]logscanset url https://logscan.kometa.team
-[p]logscanset apikey <the same value from /opt/logscan/.env>
-[p]logscanset channels production <channel-id>
-```
-
-The settings commands are bot-owner only. The API-key command attempts to
-delete the invoking Discord message. Prefer running it in a private channel.
-The cog requires permission to read messages, send messages, attach buttons,
-and read attachment content.
-
-### Cog channel and role configuration
-
-Log scanning is restricted to the active environment's configured channels.
-The cog starts in `production`, with its existing scan channel configured as
-the default. Configure the production channels explicitly after installation;
-supplying multiple IDs permits scanning in all of them:
-
-```text
-[p]logscanset channels production <channel-id> [additional-channel-ids]
-```
-
-For a separate testing setup, configure its channels and switch the cog to the
-`test` environment:
-
-```text
-[p]logscanset channels test <channel-id> [additional-channel-ids]
-[p]logscanset environment test
-```
-
-Switch back with `[p]logscanset environment production`. The configured lists
-are independent: changing the active environment changes which list controls
-automatic attachment detection and the `[p]logscan <message-link>` command.
-Threads are always allowed, so a user can scan a log in a thread even when the
-thread's parent channel is not listed. A log posted in a non-thread channel
-outside the active list receives a short-lived message explaining where scans
-are permitted.
-
-The uploader is always allowed to press the scan button. To let support staff
-act on a user's prompt, configure role IDs:
-
-```text
-[p]logscanset roles <role-id> [additional-role-ids]
-```
-
-Those roles can approve or cancel another user's pending scan; they do not
-bypass the allowed-channel rules. Run `[p]logscanset roles` with no IDs to
-clear the privileged-role list.
-
-The returned link contains the deletion token after `#delete=`. URL fragments
-are not included in HTTP requests, but anyone who receives the complete link
-can view and permanently delete that log. A result URL without the fragment is
-view-only. All links expire when their scan is automatically deleted after 48
-hours.
-
-## Missing People backlog
-
-When a scan encounters a missing People Poster, the website records the person
-in the persistent `/people` backlog. Set `TMDB_API_KEY` in the web service
-environment so the service can resolve a TMDb person ID and load their profile
-images. A person remains in the backlog until someone marks them complete.
-
-The cog sends one non-embedding notification per detected person to channel
-`1539665929330499664`, including the scan, original Discord message (where
-available), TMDb-image status, and the person page.
+The `/people` page combines missing People Posters found in uploaded logs with
+IMDb StarMeter and TMDb trending people. Each person carries `missing`, `trending`,
+or both source tags and is de-duplicated by TMDb person ID. People already present
+in the primary Kometa People Images repository automatically leave the actionable
+queue. Filters and exports use the same union so automation processes both sources.
+Set `TMDB_API_KEY` so the service can resolve people and load profile images.
 
 For website uploads, set `DISCORD_PEOPLE_WEBHOOK_URL` to a webhook created in
 the destination Discord channel. A non-embedding notice is posted only when a
-person is first added to the backlog, preventing repeat notifications for the
-same person.
+person is first added to the queue, preventing repeat notifications for the
+same person. The notification links back to the filtered People queue and the
+source scan when available.
+
+The Missing and Trending filters use OR behavior and are both enabled by
+default. Export downloads the currently selected source union as
+`tmdbid|name`. Marking a person complete clears both sources; candidates also
+leave the queue automatically after their image appears in the primary Kometa
+People Images repository.
 
 ## Reverse proxy notes
 
@@ -220,9 +187,14 @@ routing if full-size uploads must work.
 
 ## Tests
 
-```bash
-python -m unittest discover -s tests -v
+Run the regression suite from the repository root:
+
+```powershell
+py -3.13 -m unittest discover -s tests -v
 ```
+
+On Linux or macOS, use `python -m unittest discover -s tests -v` from the
+activated Python 3.13 virtual environment.
 
 ## Included files
 

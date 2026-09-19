@@ -202,17 +202,20 @@ def create_app() -> Flask:
             seen_ids.add(imdb_id)
             imdb_ids.append(imdb_id)
 
-        def resolve(imdb_id: str) -> tuple[str, dict | None]:
+        def resolve(imdb_id: str) -> tuple[str, dict | None, bool]:
             cached = tmdb_find_cache.get(imdb_id, TMDB_FIND_CACHE_SECONDS)
             if cached is not None:
-                return imdb_id, cached
+                return imdb_id, cached, False
             data = tmdb_get(f"/find/{imdb_id}", {"external_source": "imdb_id"})
             match = next((person for person in (data or {}).get("person_results", []) if person.get("id")), None)
-            tmdb_find_cache.save(imdb_id, match)
-            return imdb_id, match
+            return imdb_id, match, True
 
         with ThreadPoolExecutor(max_workers=TMDB_FIND_MAX_WORKERS, thread_name_prefix="tmdb-find") as executor:
-            resolved = dict(executor.map(resolve, imdb_ids))
+            lookup_results = list(executor.map(resolve, imdb_ids))
+        resolved = {imdb_id: match for imdb_id, match, _ in lookup_results}
+        newly_resolved = {imdb_id: match for imdb_id, match, should_cache in lookup_results if should_cache}
+        if newly_resolved:
+            tmdb_find_cache.save_many(newly_resolved)
         people = []
         for imdb_id in imdb_ids:
             match = resolved.get(imdb_id)
@@ -338,6 +341,7 @@ def create_app() -> Flask:
         kometa_images = kometa_image_urls()
         payload = []
         for person in people:
+            person_id = person.get("id")
             profile_path = person.get("profile_path")
             name = person.get("name", "Unknown person")
             known_for = []
@@ -352,10 +356,10 @@ def create_app() -> Flask:
                 {"label": label, "url": urls[name.casefold()]}
                 for label, urls in kometa_images.items()
                 if label != "Kometa Repo Image" and name.casefold() in urls
-            ] if repo_image else []
+            ]
             payload.append({
-                "tmdb_id": person["id"], "name": name,
-                "tmdb_person_url": f"https://www.themoviedb.org/person/{person['id']}",
+                "tmdb_id": person_id, "name": name,
+                "tmdb_person_url": f"https://www.themoviedb.org/person/{person_id}" if person_id else None,
                 "imdb_person_url": f"https://www.imdb.com/name/{person['imdb_id']}/" if person.get("imdb_id") else None,
                 "tmdb_image_url": f"https://image.tmdb.org/t/p/original{profile_path}" if profile_path else None,
                 "known_for_department": person.get("known_for_department"), "known_for": known_for,
@@ -365,11 +369,104 @@ def create_app() -> Flask:
                 } if profile_path else None,
                 "kometa_image": repo_image,
                 "kometa_variant_images": variant_images,
-                "flag_reason": flags.get(person["id"], {}).get("reason"),
+                "flag_reason": flags.get(person_id, {}).get("reason") if person_id else None,
             })
         return payload
 
-    def save_missing_people(candidates: list[dict], *, filename: str, log_url: str, source_url: str | None) -> list[dict]:
+    def selected_people_sources() -> set[str]:
+        raw = request.args.get("sources", "missing,trending")
+        sources = {value.strip() for value in raw.split(",") if value.strip()}
+        if not sources or not sources <= {"missing", "trending"}:
+            abort(400, description="Choose missing, trending, or both people sources.")
+        return sources
+
+    def filter_people_by_tag(people: list[dict], query: str) -> list[dict]:
+        """Filter source and requester tags with case-insensitive * and ? wildcards."""
+        query = query.strip().casefold()
+        if not query:
+            return people
+        wildcarded = "*" in query or "?" in query
+        expression = re.escape(query).replace(r"\*", ".*").replace(r"\?", ".")
+        pattern = re.compile(f"^{expression}$" if wildcarded else f".*{expression}.*")
+
+        def matches(person: dict) -> bool:
+            tags = list(person.get("sources", []))
+            for requester in person.get("requested_by", []):
+                name = requester.get("name", "")
+                if name:
+                    tags.extend((name, f"Requested by {name}"))
+            return any(pattern.fullmatch(str(tag).casefold()) for tag in tags)
+
+        return [person for person in people if matches(person)]
+
+    def people_union(sources: set[str]) -> list[dict]:
+        """Return missing-log and trending people, keyed by TMDb ID."""
+        primary_images = kometa_image_urls().get("Kometa Repo Image", {})
+        combined: dict[str, dict] = {}
+
+        if sources & {"missing", "trending"} and app.config["TMDB_API_KEY"]:
+            for person in popular_people():
+                name = person.get("name", "Unknown person")
+                if not _has_current_tmdb_image(person):
+                    continue
+                missing_image = name.casefold() not in primary_images
+                if "trending" not in sources and not missing_image:
+                    continue
+                person_sources = {"trending"}
+                if missing_image:
+                    person_sources.add("missing")
+                combined[f"tmdb-{person['id']}"] = {**person, "sources": person_sources}
+
+        if "missing" in sources:
+            trending_by_name = {
+                person.get("name", "").casefold(): person
+                for person in combined.values()
+                if person.get("name")
+            }
+            for record in people_store.list():
+                if record.get("name", "").casefold() in primary_images:
+                    continue
+                person_id = record.get("tmdb_id")
+                if not person_id:
+                    matched = trending_by_name.get(record.get("name", "").casefold())
+                    person_id = matched.get("id") if matched else None
+                key = f"tmdb-{person_id}" if person_id else record["key"]
+                person = combined.get(key)
+                if person is None:
+                    details = tmdb_get(f"/person/{person_id}") if person_id else None
+                    person = {
+                        **(details or {}),
+                        "id": person_id,
+                        "name": (details or {}).get("name", record["name"]),
+                        "sources": set(),
+                    }
+                    combined[key] = person
+                person["sources"].add("missing")
+                person["missing_record"] = record
+
+        people = list(combined.values())
+        flags = popular_people_flags.list()
+        people.sort(key=lambda person: (
+            0 if "missing" in person["sources"] else 1,
+            person.get("starmeter_rank", POPULAR_PEOPLE_LIMIT + 1),
+            person.get("name", "").casefold(),
+        ))
+        payload = popular_people_payload(people, flags)
+        for item, person in zip(payload, people):
+            record = person.get("missing_record", {})
+            item.update(
+                person_key=f"tmdb-{person['id']}" if person.get("id") else record.get("key"),
+                sources=sorted(person["sources"]),
+                log_url=record.get("log_url"),
+                source_url=record.get("source_url"),
+                requested_by=record.get("requested_by", []),
+            )
+        return payload
+
+    def save_missing_people(
+        candidates: list[dict], *, filename: str, log_url: str, source_url: str | None,
+        uploaded_by: str | None = None, uploaded_by_id: str | None = None,
+    ) -> list[dict]:
         saved = []
         for candidate in candidates:
             name = candidate["name"]
@@ -391,8 +488,9 @@ def create_app() -> Flask:
                 "log_name": filename,
                 "log_url": log_url,
                 "source_url": source_url,
+                "requested_by": [{"name": uploaded_by, "id": uploaded_by_id}] if uploaded_by else [],
             })
-            person["people_url"] = url_for("person_page", person_key=person["key"], _external=True)
+            person["people_url"] = url_for("people_page", sources="missing", _external=True)
             person["is_new"] = is_new
             saved.append(person)
         return saved
@@ -477,19 +575,13 @@ def create_app() -> Flask:
     def index():
         return render_template("index.html", initial_scan=None, initial_batch=None)
 
+    @app.get("/favicon.ico")
+    def favicon():
+        return send_file(Path(app.static_folder) / "favicon.png", mimetype="image/png")
+
     @app.get("/people")
     def people_page():
         return render_template("people.html")
-
-    @app.get("/people/popular")
-    def popular_people_page():
-        return render_template("people_popular.html")
-
-    @app.get("/people/<person_key>")
-    def person_page(person_key):
-        if people_store.get(person_key) is None:
-            abort(404)
-        return render_template("person.html", person_key=person_key)
 
     @app.get("/scan/<scan_id>")
     def result_page(scan_id):
@@ -620,6 +712,8 @@ def create_app() -> Flask:
                 filename=result.filename,
                 log_url=result_url,
                 source_url=source_url,
+                uploaded_by=uploaded_by,
+                uploaded_by_id=uploaded_by_id,
             )
             payloads.append({"id": scan_id, "filename": result.filename, "recommendations": result.recommendations, "metadata": result.metadata, "overview": result.overview, "categories": result.categories, "result_url": result_url, "delete_token": delete_token, "expires_at": expires_at, "uploaded_by_bot": is_bot, "missing_people": missing_people})
         notify_people_webhook([person for payload in payloads for person in payload["missing_people"]])
@@ -639,83 +733,75 @@ def create_app() -> Flask:
 
     @app.get("/api/people")
     def people():
-        people = people_store.list()
-        for person in people:
-            person["people_url"] = url_for("person_page", person_key=person["key"], _external=True)
-        return jsonify(people=people)
-
-    @app.get("/api/people/popular")
-    def popular_people_api():
-        if not app.config["TMDB_API_KEY"]:
-            return jsonify(error="TMDb API key is not configured."), 503
+        sources = selected_people_sources()
         page = request.args.get("page", default=1, type=int)
-        missing_image = request.args.get("missing_image") == "1"
-        people = popular_people()
-        people = [person for person in people if _has_current_tmdb_image(person)]
-        if missing_image:
-            primary_images = kometa_image_urls().get("Kometa Repo Image", {})
-            people = [person for person in people if person.get("name", "").casefold() not in primary_images]
-        total_pages = max(1, (len(people) + POPULAR_PEOPLE_PAGE_SIZE - 1) // POPULAR_PEOPLE_PAGE_SIZE)
+        per_page = request.args.get("per_page", default=POPULAR_PEOPLE_PAGE_SIZE, type=int)
+        if per_page is None or not 1 <= per_page <= POPULAR_PEOPLE_PAGE_SIZE:
+            return jsonify(error=f"Per-page count must be between 1 and {POPULAR_PEOPLE_PAGE_SIZE}."), 400
+        tag_query = request.args.get("tag", "")
+        candidates = filter_people_by_tag(people_union(sources), tag_query)
+        total_pages = max(1, (len(candidates) + per_page - 1) // per_page)
         if page is None or not 1 <= page <= total_pages:
             return jsonify(error=f"Page must be between 1 and {total_pages}."), 400
-        first_index = (page - 1) * POPULAR_PEOPLE_PAGE_SIZE
-        page_people = people[first_index:first_index + POPULAR_PEOPLE_PAGE_SIZE]
-        flags = popular_people_flags.list()
-        with popular_people_lock:
-            snapshot_id = popular_people_cache["snapshot_id"]
-        cache_key = (
-            snapshot_id, page, missing_image, tuple(person["id"] for person in page_people),
-            tuple(sorted((person_id, flag.get("reason", "")) for person_id, flag in flags.items())),
+        first_index = (page - 1) * per_page
+        return jsonify(
+            people=candidates[first_index:first_index + per_page],
+            page=page,
+            total=len(candidates),
+            total_pages=total_pages,
+            per_page=per_page,
+            sources=sorted(sources),
+            tag=tag_query,
         )
-        with popular_people_payload_lock:
-            payload = popular_people_payload_cache.get(cache_key)
-        if payload is None:
-            payload = popular_people_payload(page_people, flags)
-            with popular_people_payload_lock:
-                popular_people_payload_cache[cache_key] = payload
-        response = jsonify(people=payload, page=page, total_pages=total_pages)
-        response.set_etag(hashlib.sha256(repr(cache_key).encode("utf-8")).hexdigest())
-        response.headers["Cache-Control"] = "private, max-age=60, stale-while-revalidate=300"
-        return response.make_conditional(request)
 
-    @app.get("/api/people/popular/export")
-    def export_missing_popular_people():
-        """Download people absent from the primary Kometa image repository."""
-        if not app.config["TMDB_API_KEY"]:
-            return jsonify(error="TMDb API key is not configured."), 503
-        primary_images = kometa_image_urls().get("Kometa Repo Image", {})
-        missing_people = [
-            person for person in popular_people()
-            if _has_current_tmdb_image(person) and person.get("name", "").casefold() not in primary_images
-        ]
+    @app.get("/api/people/export")
+    def export_people():
+        candidates = filter_people_by_tag(people_union(selected_people_sources()), request.args.get("tag", ""))
         export = "\n".join(
             f"{person['tmdb_id']}|{person['name']}"
-            for person in popular_people_payload(missing_people, popular_people_flags.list())
+            for person in candidates if person.get("tmdb_id")
         )
         return send_file(
             BytesIO(export.encode("utf-8")),
             mimetype="text/plain",
             as_attachment=True,
-            download_name="missing-trending-people.txt",
+            download_name="people-to-process.txt",
         )
 
-    @app.post("/api/people/popular/<int:person_id>/exclude")
-    def exclude_popular_person(person_id):
-        if popular_people_exclusions.add(person_id):
-            clear_popular_people_payload_cache()
-            return "", 201
-        return "", 204
+    def people_identity(person_key: str) -> tuple[int | None, dict | None]:
+        record = people_store.get(person_key)
+        match = re.fullmatch(r"tmdb-(\d+)", person_key)
+        person_id = int(match.group(1)) if match else record.get("tmdb_id") if record else None
+        if record is None and person_id:
+            record = next((item for item in people_store.list() if item.get("tmdb_id") == person_id), None)
+        return person_id, record
 
-    @app.post("/api/people/popular/<int:person_id>/check")
-    def check_popular_person(person_id):
-        if not popular_people_checks.mark(person_id):
-            abort(400)
-        popular_people_flags.delete(person_id)
+    @app.post("/api/people/<person_key>/check")
+    def check_person(person_key):
+        person_id, record = people_identity(person_key)
+        if person_id:
+            popular_people_checks.mark(person_id)
+            popular_people_flags.delete(person_id)
+        if record:
+            people_store.delete(record["key"])
         clear_popular_people_payload_cache()
         return "", 204
 
-    @app.post("/api/people/popular/<int:person_id>/flag")
-    def flag_popular_person(person_id):
+    @app.post("/api/people/<person_key>/exclude")
+    def exclude_person(person_key):
+        person_id, record = people_identity(person_key)
+        if person_id:
+            popular_people_exclusions.add(person_id)
+        if record:
+            people_store.delete(record["key"])
+        clear_popular_people_payload_cache()
+        return "", 204
+
+    @app.post("/api/people/<person_key>/flag")
+    def flag_person(person_key):
+        person_id, _record = people_identity(person_key)
+        if not person_id:
+            return jsonify(error="This person does not have a resolved TMDb ID."), 400
         payload = request.get_json(silent=True) or {}
         reason = payload.get("reason", "")
         if not isinstance(reason, str) or len(reason.strip()) > 500 or not popular_people_flags.upsert(person_id, reason):
@@ -741,50 +827,6 @@ def create_app() -> Flask:
             app.logger.warning("Unable to download TMDb image %s", image_path)
             abort(502)
         return send_file(BytesIO(image), mimetype="image/jpeg", as_attachment=True, download_name=f"{filename}.jpg")
-
-    @app.get("/api/people/<person_key>/images")
-    def person_images(person_key):
-        person = people_store.get(person_key)
-        if person is None:
-            abort(404)
-        images = []
-        if not person.get("tmdb_id"):
-            match_data = tmdb_get("/search/person", {"query": person["name"]})
-            matches = (match_data or {}).get("results", [])
-            exact = next(
-                (item for item in matches if item.get("name", "").casefold() == person["name"].casefold()),
-                None,
-            )
-            match = exact or (matches[0] if matches else None)
-            if match:
-                person = people_store.upsert({
-                    **person,
-                    "tmdb_id": match["id"],
-                    "name": match.get("name", person["name"]),
-                })
-        if person.get("tmdb_id"):
-            data = tmdb_get(f"/person/{person['tmdb_id']}/images", {"include_image_language": "en,null"})
-            for image in (data or {}).get("profiles", []):
-                path = image.get("file_path")
-                if path:
-                    images.append({
-                        "preview_url": f"https://image.tmdb.org/t/p/w342{path}",
-                        "download_url": url_for("download_tmdb_image", image_path=path, name=person["name"]),
-                        "width": image.get("width"),
-                        "height": image.get("height"),
-                    })
-            if person.get("tmdb_image_found") != bool(images):
-                person = people_store.upsert({**person, "tmdb_image_found": bool(images)})
-        limit = request.args.get("limit", type=int)
-        if limit is not None:
-            images = images[:max(0, min(limit, 100))]
-        return jsonify(person=person, images=images)
-
-    @app.delete("/api/people/<person_key>")
-    def complete_person(person_key):
-        if not people_store.delete(person_key):
-            abort(404)
-        return "", 204
 
     @app.get("/api/scans/<scan_id>/log")
     def stored_log(scan_id):
@@ -819,6 +861,12 @@ def create_app() -> Flask:
         if not store.delete_batch(batch_id, token):
             return jsonify(error="The batch was not found or the private token is invalid."), 403
         return "", 204
+
+    @app.errorhandler(400)
+    def bad_request(error):
+        if request.path.startswith("/api/"):
+            return jsonify(error=getattr(error, "description", "The request is invalid.")), 400
+        return error
 
     @app.errorhandler(404)
     def not_found(_error):

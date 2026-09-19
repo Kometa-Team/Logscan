@@ -147,7 +147,23 @@ class PeopleStore:
             people = self._read()
             existing = next((item for item in people if item["key"] == person["key"]), None)
             if existing:
-                existing.update({key: value for key, value in person.items() if value is not None})
+                incoming_requesters = person.get("requested_by", [])
+                existing.update({key: value for key, value in person.items() if value is not None and key != "requested_by"})
+                requesters = list(existing.get("requested_by", []))
+                for requester in incoming_requesters:
+                    requester_id = requester.get("id")
+                    requester_name = requester.get("name", "").casefold()
+                    match = next((item for item in requesters if (
+                        requester_id and item.get("id") == requester_id
+                    ) or (
+                        not requester_id and requester_name and item.get("name", "").casefold() == requester_name
+                    )), None)
+                    if match:
+                        match.update({key: value for key, value in requester.items() if value})
+                    else:
+                        requesters.append(requester)
+                if requesters:
+                    existing["requested_by"] = requesters
                 existing["last_seen_at"] = datetime.now(UTC).isoformat()
                 result = existing
                 created = False
@@ -226,9 +242,14 @@ class TMDbFindCacheStore:
             return record.get("person") if fresh and isinstance(record.get("person"), dict) else None
 
     def save(self, imdb_id: str, person: dict | None) -> None:
+        self.save_many({imdb_id: person})
+
+    def save_many(self, people: dict[str, dict | None]) -> None:
+        """Persist a batch of resolved people with a single atomic write."""
         with self.lock:
             records = self._read()
-            records[imdb_id] = {"updated_at": datetime.now(UTC).isoformat(), "person": person}
+            updated_at = datetime.now(UTC).isoformat()
+            records.update({imdb_id: {"updated_at": updated_at, "person": person} for imdb_id, person in people.items()})
             temporary = self.path.with_suffix(".tmp")
             temporary.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
             temporary.replace(self.path)
@@ -242,7 +263,7 @@ class TMDbFindCacheStore:
 
 
 class PopularPeopleExclusionStore:
-    """Durable TMDb person-ID exclusions for the Popular People page."""
+    """Durable TMDb person-ID exclusions for the People queue."""
 
     def __init__(self, root: str | os.PathLike[str]):
         self.path = Path(root) / "popular_people_exclusions.json"
@@ -318,7 +339,7 @@ class PopularPeopleCheckStore:
 
 
 class PopularPeopleFlagStore:
-    """Durable review flags and their reasons for Popular People."""
+    """Durable review flags and their reasons for the People queue."""
 
     def __init__(self, root: str | os.PathLike[str]):
         self.path = Path(root) / "popular_people_flags.json"
