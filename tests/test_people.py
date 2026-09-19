@@ -52,6 +52,7 @@ def fake_urlopen(request, timeout=0):
 
 class PeopleUnionTests(unittest.TestCase):
     def setUp(self):
+        app.config["PEOPLE_ACTIONS_ENABLED"] = True
         Path(STORE.name, "people.json").write_text(json.dumps([
             {"key": "tmdb-1", "tmdb_id": 1, "name": "Alice Person", "log_url": "/scan/alice", "requested_by": [{"name": "Request User", "id": "123"}]},
             {"key": "tmdb-3", "tmdb_id": 3, "name": "Bob Person", "log_url": "/scan/bob"},
@@ -135,6 +136,17 @@ class PeopleUnionTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_data(as_text=True).splitlines(), ["1|Alice Person"])
+
+    def test_people_actions_are_hidden_and_rejected_when_disabled(self):
+        app.config["PEOPLE_ACTIONS_ENABLED"] = False
+        try:
+            with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
+                payload = self.client.get("/api/people", query_string={"sources": "trending"}).get_json()
+            self.assertFalse(payload["actions_enabled"])
+            for action in ("check", "flag", "exclude"):
+                self.assertEqual(self.client.post(f"/api/people/tmdb-1/{action}").status_code, 404)
+        finally:
+            app.config["PEOPLE_ACTIONS_ENABLED"] = True
 
     def test_complete_removes_missing_and_temporarily_checks_trending(self):
         response = self.client.post("/api/people/tmdb-1/check")

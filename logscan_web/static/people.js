@@ -10,6 +10,7 @@ const { googleImageSearchTile, imageCard, noImage } = window.PeopleImages;
 const query = new URLSearchParams(location.search);
 const requestedSources = new Set((query.get("sources") || "missing,trending").split(",").filter(Boolean));
 let tagQuery = query.get("tag") || "";
+let actionsEnabled = false;
 let page = Number(query.get("page")) || 1;
 
 function sourceQuery() {
@@ -123,6 +124,7 @@ function addPerson(person) {
   exclude.innerHTML = '<i class="fa-solid fa-ban" aria-hidden="true"></i>';
   exclude.addEventListener("click", () => runAction(person, "exclude", card));
   controls.append(check, flag, exclude);
+  controls.hidden = !actionsEnabled;
 
   const heading = document.createElement("h2");
   if (person.tmdb_person_url) {
@@ -206,7 +208,8 @@ fetch(`/api/people?${apiParams}`).then(async (response) => {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Unable to load people.");
   return data;
-}).then(({ people, page: currentPage, total: totalResults, total_pages: totalPages }) => {
+}).then(({ people, page: currentPage, total: totalResults, total_pages: totalPages, actions_enabled: canManagePeople }) => {
+  actionsEnabled = canManagePeople;
   if (tagQuery) tagCount.textContent = `${totalResults} ${totalResults === 1 ? "result" : "results"}`;
   gallery.replaceChildren();
   if (!people.length) gallery.textContent = "No people match these sources.";

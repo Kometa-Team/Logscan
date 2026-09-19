@@ -114,6 +114,7 @@ def create_app() -> Flask:
     app.config["LOGSCAN_API_KEY"] = os.environ.get("LOGSCAN_API_KEY", "")
     app.config["TMDB_API_KEY"] = os.environ.get("TMDB_API_KEY", "")
     app.config["DISCORD_PEOPLE_WEBHOOK_URL"] = os.environ.get("DISCORD_PEOPLE_WEBHOOK_URL", "")
+    app.config["PEOPLE_ACTIONS_ENABLED"] = os.environ.get("PEOPLE_ACTIONS_ENABLED", "false").casefold() in {"1", "true", "yes"}
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     store = ScanStore(app.config["SCAN_STORE"])
     people_store = PeopleStore(app.config["SCAN_STORE"])
@@ -751,6 +752,7 @@ def create_app() -> Flask:
             total_pages=total_pages,
             per_page=per_page,
             sources=sorted(sources),
+            actions_enabled=app.config["PEOPLE_ACTIONS_ENABLED"],
             tag=tag_query,
         )
 
@@ -776,8 +778,13 @@ def create_app() -> Flask:
             record = next((item for item in people_store.list() if item.get("tmdb_id") == person_id), None)
         return person_id, record
 
+    def require_people_actions() -> None:
+        if not app.config["PEOPLE_ACTIONS_ENABLED"]:
+            abort(404)
+
     @app.post("/api/people/<person_key>/check")
     def check_person(person_key):
+        require_people_actions()
         person_id, record = people_identity(person_key)
         if person_id:
             popular_people_checks.mark(person_id)
@@ -789,6 +796,7 @@ def create_app() -> Flask:
 
     @app.post("/api/people/<person_key>/exclude")
     def exclude_person(person_key):
+        require_people_actions()
         person_id, record = people_identity(person_key)
         if person_id:
             popular_people_exclusions.add(person_id)
@@ -799,6 +807,7 @@ def create_app() -> Flask:
 
     @app.post("/api/people/<person_key>/flag")
     def flag_person(person_key):
+        require_people_actions()
         person_id, _record = people_identity(person_key)
         if not person_id:
             return jsonify(error="This person does not have a resolved TMDb ID."), 400
