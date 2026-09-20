@@ -22,7 +22,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
 
 from logscan_web.app import add_missing_people_recommendations, app
 from logscan_web.scanner import extract_missing_people
-from logscan_web.storage import PeopleStore, UsageStatsStore
+from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
 class Response:
@@ -79,6 +79,26 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         self.assertEqual(extract_missing_people(content), [
             {"name": "Hikaru Kondô", "tmdb_image_found": False},
         ])
+
+
+class AnonymousAnalyticsTests(unittest.TestCase):
+    def test_daily_analytics_are_aggregate_and_persistent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            analytics = AnonymousAnalyticsStore(directory)
+            analytics.record_rejection("not_kometa_log", "web")
+            analytics.record_success(
+                logs=2, lines=1200, bytes_processed=5000, source="discord", batch=True,
+                versions=["2.1.0", "unknown"],
+                recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
+            )
+            analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
+            analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
+            snapshot = AnonymousAnalyticsStore(directory).snapshot()
+            raw = Path(directory, "usage_analytics.json").read_text(encoding="utf-8")
+        self.assertEqual(snapshot["totals"]["successful_logs"], 2)
+        self.assertEqual(snapshot["totals"]["people_addressed"], 1)
+        self.assertEqual(snapshot["totals"]["sources"], {"discord": 2})
+        self.assertNotIn("tmdb-1", raw)
 
 
 class UsageStatsTests(unittest.TestCase):
@@ -315,6 +335,13 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "image/png")
         self.assertGreater(len(response.data), 100)
+
+    def test_anonymous_analytics_endpoint_contains_only_aggregates(self):
+        payload = self.client.get("/api/analytics").get_json()
+        self.assertIn("totals", payload)
+        self.assertIn("days", payload)
+        self.assertNotIn("users", payload)
+        self.assertNotIn("filenames", payload)
 
     def test_old_beta_routes_are_removed(self):
         self.assertEqual(self.client.get("/people/popular").status_code, 404)
