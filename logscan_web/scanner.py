@@ -5,6 +5,7 @@ import zipfile
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote
 
 from .models import ScanContext
 from .rules import RuleRegistry, migrated_rules
@@ -44,7 +45,7 @@ def extract_missing_people(content: str) -> list[dict[str, str | bool]]:
         content,
         re.IGNORECASE,
     ):
-        name = re.sub(r"\.[A-Za-z0-9]+$", "", match.group("name")).replace("%20", " ").strip()
+        name = unquote(re.sub(r"\.[A-Za-z0-9]+$", "", match.group("name"))).strip()
         if name and name not in people:
             people[name] = False
     return [

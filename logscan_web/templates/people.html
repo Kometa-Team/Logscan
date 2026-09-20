@@ -7,18 +7,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260919-4') }}">
-  <script src="{{ url_for('static', filename='people_images.js', v='20260919-4') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20260919-4') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260920-6') }}">
+  <script src="{{ url_for('static', filename='people_images.js', v='20260920-6') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20260920-6') }}" defer></script>
 </head>
 <body>
   <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links"><a href="/">Log Scanner</a><span class="utility-label">People</span></nav></header>
   <main class="shell people-shell">
     <section class="hero"><p class="eyebrow">People Posters</p><h1>People</h1><p class="hero-copy">One queue for people discovered in logs and people currently trending across IMDb and TMDb. IMDb StarMeter people appear first, topped up to 250 from TMDb Popular People, with current TMDb profile images and matching Kometa People Images.</p></section>
     <div class="people-toolbar">
-      <div class="source-filters" role="group" aria-label="People sources">
-        <button class="source-filter" type="button" data-source="missing" aria-pressed="true"><span class="source-dot missing"></span>Missing Images</button>
-        <button class="source-filter" type="button" data-source="trending" aria-pressed="true"><span class="source-dot trending"></span>Trending</button>
-      </div>
       <div class="people-toolbar-actions">
         <form id="tag-search" class="tag-search" role="search">
           <button class="tag-search-submit" type="submit" title="Search tags" aria-label="Search tags"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></button>
@@ -28,6 +24,13 @@
         <output id="tag-search-count" class="tag-search-count" aria-live="polite" hidden></output>
         <a id="people-export" class="secondary-button icon-button" href="/api/people/export" title="Export filtered processing list as a tmdbid|name text file" aria-label="Export filtered processing list as a tmdbid|name text file"><i class="fa-solid fa-file-lines" aria-hidden="true"></i></a>
       </div>
+    </div>
+    <div class="people-tag-row">
+      <div id="dynamic-tag-filters" class="dynamic-tag-filters" aria-label="People filters"></div>
+      <details class="tag-filter-examples">
+        <summary title="Tag filter examples" aria-label="Tag filter examples"><i class="fa-solid fa-circle-info" aria-hidden="true"></i></summary>
+        <div><strong>Filter examples</strong><span><b>Missing Kometa</b> + <b>TMDb Ready</b> finds posters ready to process.</span><span><b>Trending</b> + <b>Missing Kometa</b> finds popular people needing artwork.</span><span><b>Log Upload</b> + <b>Requested by ...</b> narrows work to one requester.</span><small>Tags in the same group match either value; tags from different groups combine.</small></div>
+      </details>
     </div>
     <section id="people-gallery" class="people-gallery" aria-live="polite">Loading people...</section>
     <nav id="people-pagination" class="pagination" aria-label="People pages"></nav>

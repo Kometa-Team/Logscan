@@ -5,27 +5,23 @@ const tagSearch = document.querySelector("#tag-search");
 const tagInput = document.querySelector("#tag-search-input");
 const tagClear = document.querySelector("#tag-search-clear");
 const tagCount = document.querySelector("#tag-search-count");
-const filterButtons = [...document.querySelectorAll(".source-filter")];
+const dynamicTagFilters = document.querySelector("#dynamic-tag-filters");
 const { googleImageSearchTile, imageCard, noImage } = window.PeopleImages;
 const query = new URLSearchParams(location.search);
-const requestedSources = new Set((query.get("sources") || "missing,trending").split(",").filter(Boolean));
 let tagQuery = query.get("tag") || "";
+const selectedTags = new Set(query.getAll("tags"));
 let actionsEnabled = false;
 let page = Number(query.get("page")) || 1;
 
-function sourceQuery() {
-  return [...requestedSources].sort().join(",");
-}
-
 function filteredParams(nextPage) {
-  const params = new URLSearchParams({ sources: sourceQuery() });
+  const params = new URLSearchParams();
   if (tagQuery) params.set("tag", tagQuery);
+  [...selectedTags].sort().forEach((tag) => params.append("tags", tag));
   if (nextPage > 1) params.set("page", nextPage);
   return params;
 }
 
 function updateControls() {
-  filterButtons.forEach((button) => button.setAttribute("aria-pressed", requestedSources.has(button.dataset.source)));
   tagInput.value = tagQuery;
   tagClear.hidden = !tagQuery;
   tagCount.hidden = !tagQuery;
@@ -37,14 +33,6 @@ function navigate(nextPage = 1) {
   location.href = `/people?${filteredParams(nextPage)}`;
 }
 
-filterButtons.forEach((button) => button.addEventListener("click", () => {
-  const source = button.dataset.source;
-  if (requestedSources.has(source) && requestedSources.size === 1) return;
-  if (requestedSources.has(source)) requestedSources.delete(source);
-  else requestedSources.add(source);
-  navigate();
-}));
-
 function applyTagSearch() {
   const nextQuery = tagInput.value.trim();
   if (nextQuery === tagQuery) return;
@@ -55,17 +43,56 @@ tagSearch.addEventListener("submit", (event) => { event.preventDefault(); applyT
 tagInput.addEventListener("input", () => { tagClear.hidden = !tagInput.value; });
 tagClear.addEventListener("click", () => { tagInput.value = ""; applyTagSearch(); });
 
+function renderDynamicTagFilters(availableTags) {
+  dynamicTagFilters.replaceChildren();
+  availableTags.forEach(({ category, tag, count }) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `dynamic-tag-filter ${category}`;
+    button.setAttribute("aria-pressed", selectedTags.has(tag));
+    button.append(document.createTextNode(tag));
+    const total = document.createElement("span");
+    total.textContent = count;
+    button.append(total);
+    button.addEventListener("click", () => {
+      if (selectedTags.has(tag)) selectedTags.delete(tag);
+      else selectedTags.add(tag);
+      navigate();
+    });
+    dynamicTagFilters.append(button);
+  });
+  dynamicTagFilters.hidden = !availableTags.length;
+}
+
 function addImage(images, image, label, missingMessage, name) {
   images.append(image ? imageCard({ ...image, label, alt: `${name} ${label}` }) : noImage(missingMessage));
 }
 
-function sourceBadges(sources, requesters = []) {
+function sourceBadges(sources, requesters = [], metadataTags = [], provenanceTags = [], tmdbImagesUrl = null) {
   const badges = document.createElement("div");
   badges.className = "source-badges";
   sources.forEach((source) => {
     const badge = document.createElement("span");
     badge.className = `source-badge ${source}`;
-    badge.textContent = source[0].toUpperCase() + source.slice(1);
+    badge.textContent = source === "missing" ? "Missing Kometa" : source[0].toUpperCase() + source.slice(1);
+    badges.append(badge);
+  });
+  metadataTags.forEach((tag) => {
+    const badge = document.createElement(tmdbImagesUrl ? "a" : "span");
+    badge.className = `source-badge metadata ${tag === "Missing TMDb" ? "blocked" : "ready"}`;
+    badge.textContent = tag;
+    if (tmdbImagesUrl) {
+      badge.href = tmdbImagesUrl;
+      badge.target = "_blank";
+      badge.rel = "noopener";
+      badge.title = "Open TMDb profile images";
+    }
+    badges.append(badge);
+  });
+  provenanceTags.forEach((tag) => {
+    const badge = document.createElement("span");
+    badge.className = "source-badge provenance";
+    badge.textContent = tag;
     badges.append(badge);
   });
   requesters.forEach((requester) => {
@@ -81,7 +108,7 @@ async function runAction(person, action, card) {
   const response = await fetch(`/api/people/${encodeURIComponent(person.person_key)}/${action}`, { method: "POST" });
   if (!response.ok) return alert(`That person could not be ${action === "check" ? "marked complete" : "excluded"}.`);
   card.remove();
-  if (!gallery.children.length) gallery.textContent = "No people match these sources.";
+  if (!gallery.children.length) gallery.textContent = "No people match these filters.";
 }
 
 function addPerson(person) {
@@ -138,7 +165,7 @@ function addPerson(person) {
 
   const identity = document.createElement("div");
   identity.className = "person-identity";
-  identity.append(heading, sourceBadges(person.sources, person.requested_by));
+  identity.append(heading, sourceBadges(person.sources, person.requested_by, person.metadata_tags, person.provenance_tags, person.tmdb_images_url));
   const detail = document.createElement("p");
   detail.textContent = person.tmdb_id ? `TMDb ID: ${person.tmdb_id}` : "TMDb ID unresolved";
   if (person.log_url) {
@@ -161,6 +188,26 @@ function addPerson(person) {
     knownFor.append(")");
   }
 
+  const guidance = document.createElement("aside");
+  guidance.className = "person-guidance";
+  if (person.metadata_tags?.includes("Missing TMDb")) {
+    const label = document.createElement("strong");
+    label.textContent = "TMDb image required";
+    const message = document.createElement("span");
+    if (person.tmdb_images_url) {
+      message.append("Use the Google Image Search tile below to find an acceptable person poster, then upload it to ");
+      const link = document.createElement("a");
+      link.href = person.tmdb_images_url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "TMDb profile images";
+      message.append(link, ".");
+    } else {
+      message.textContent = "This person could not be resolved on TMDb. Resolve the TMDb person before processing their poster.";
+    }
+    guidance.append(label, message);
+  } else guidance.hidden = true;
+
   const images = document.createElement("div");
   images.className = "image-row";
   addImage(images, person.tmdb_image, "Current TMDb Image", "No current TMDb image", person.name);
@@ -176,7 +223,7 @@ function addPerson(person) {
     const label = document.createElement("strong"); label.textContent = "Flag Reason";
     flagReason.append(label, document.createTextNode(person.flag_reason));
   } else flagReason.hidden = true;
-  card.append(controls, identity, detail, knownFor, flagReason, images);
+  card.append(controls, identity, detail, knownFor, guidance, flagReason, images);
   gallery.append(card);
 }
 
@@ -208,11 +255,12 @@ fetch(`/api/people?${apiParams}`).then(async (response) => {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Unable to load people.");
   return data;
-}).then(({ people, page: currentPage, total: totalResults, total_pages: totalPages, actions_enabled: canManagePeople }) => {
+}).then(({ people, page: currentPage, total: totalResults, total_pages: totalPages, actions_enabled: canManagePeople, available_tags: availableTags }) => {
   actionsEnabled = canManagePeople;
+  renderDynamicTagFilters(availableTags);
   if (tagQuery) tagCount.textContent = `${totalResults} ${totalResults === 1 ? "result" : "results"}`;
   gallery.replaceChildren();
-  if (!people.length) gallery.textContent = "No people match these sources.";
+  if (!people.length) gallery.textContent = "No people match these filters.";
   else people.forEach(addPerson);
   pagination.replaceChildren(pageLink(currentPage - 1, "Previous", currentPage === 1), pageJumper(currentPage, totalPages), pageLink(currentPage + 1, "Next", currentPage === totalPages));
 }).catch((error) => { gallery.textContent = error.message; });

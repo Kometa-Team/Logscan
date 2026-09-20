@@ -127,7 +127,7 @@ h1 { margin: 0; max-width: 740px; font-size: clamp(2.5rem, 6vw, 4.35rem); line-h
 .error-card h1 { max-width: 620px; }
 .error-card > p:not(.eyebrow) { max-width: 580px; margin: 22px 0 30px; color: var(--muted); font-size: 1.02rem; line-height: 1.7; }
 .error-page-action { width: fit-content; text-decoration: none; }
-.people-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: -22px 0 20px; }
+.people-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin: -22px 0 20px; }
 .source-filters { display: inline-flex; gap: 8px; }
 .people-toolbar-actions { display: flex; align-items: center; gap: 8px; }
 .tag-search { display: flex; align-items: center; width: min(310px, 36vw); height: 42px; padding: 0 8px 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); color: var(--muted); }
@@ -146,8 +146,32 @@ h1 { margin: 0; max-width: 740px; font-size: clamp(2.5rem, 6vw, 4.35rem); line-h
 .source-dot.trending { background: #22d3ee; }
 .person-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-right: 130px; }
 .source-badges { display: inline-flex; flex-wrap: wrap; gap: 7px; }
-.source-badge { padding: 5px 8px; border: 1px solid currentColor; border-radius: 6px; font-size: .68rem; font-weight: 700; text-transform: uppercase; }
+.source-badge { padding: 5px 8px; border: 1px solid currentColor; border-radius: 6px; font-size: .68rem; font-weight: 700; text-decoration: none; text-transform: uppercase; }
+a.source-badge:hover { filter: brightness(1.2); }
 .source-badge.requester { background: rgba(148, 151, 255, .12); color: #c7d2fe; text-transform: none; }
+.source-badge.metadata.ready { background: rgba(74, 222, 128, .12); color: #bbf7d0; }
+.source-badge.metadata.blocked { background: rgba(251, 113, 133, .14); color: #fecdd3; }
+.source-badge.provenance { background: rgba(96, 165, 250, .12); color: #bfdbfe; }
+.person-guidance { display: flex; gap: 9px; margin: 16px 0 0; padding: 11px 13px; border-left: 3px solid var(--critical); background: rgba(251, 113, 133, .08); color: #fecdd3; font-size: .82rem; line-height: 1.5; }
+.person-guidance strong { color: #ffe4e6; white-space: nowrap; }
+.person-guidance a { color: #c7d2fe; }
+.people-tag-row { display: flex; align-items: flex-start; gap: 8px; margin: -8px 0 20px; }
+.dynamic-tag-filters { display: flex; flex: 1; flex-wrap: wrap; gap: 7px; }
+.dynamic-tag-filter { min-height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-soft); color: var(--muted); font-size: .72rem; }
+.dynamic-tag-filter span { margin-left: 6px; color: #737c99; font-size: .66rem; }
+.dynamic-tag-filter[aria-pressed="true"] { border-color: rgba(148, 151, 255, .7); background: rgba(114, 119, 248, .18); color: var(--text); }
+.dynamic-tag-filter.availability[aria-pressed="true"] { border-color: rgba(251, 191, 36, .68); }
+.dynamic-tag-filter.discovery[aria-pressed="true"] { border-color: rgba(34, 211, 238, .68); }
+.dynamic-tag-filter.tmdb[aria-pressed="true"] { border-color: rgba(74, 222, 128, .6); }
+.dynamic-tag-filter.requester[aria-pressed="true"] { border-color: rgba(96, 165, 250, .65); }
+.tag-filter-examples { position: relative; flex: 0 0 auto; }
+.tag-filter-examples summary { display: grid; width: 30px; height: 30px; cursor: pointer; list-style: none; place-items: center; color: var(--muted); }
+.tag-filter-examples summary::-webkit-details-marker { display: none; }
+.tag-filter-examples summary:hover, .tag-filter-examples[open] summary { color: var(--text); }
+.tag-filter-examples > div { position: absolute; z-index: 5; top: 36px; right: 0; display: grid; width: min(360px, calc(100vw - 40px)); gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); box-shadow: 0 14px 36px rgba(0, 0, 0, .35); color: var(--muted); font-size: .75rem; line-height: 1.45; }
+.tag-filter-examples strong { color: var(--text); }
+.tag-filter-examples span, .tag-filter-examples small { display: block; }
+.tag-filter-examples b { color: #c7d2fe; font-weight: 600; }
 .people-toolbar .icon-button { display: grid; width: 42px; min-height: 42px; padding: 0; place-items: center; text-decoration: none; border-color: rgba(34,211,238,.46); background: rgba(34,211,238,.13); color: #a5f3fc; }
 .people-toolbar .icon-button:hover { border-color: rgba(34,211,238,.76); background: rgba(34,211,238,.24); color: #cffafe; }
 .popular-actions .secondary-button { text-decoration: none; }
