@@ -1058,7 +1058,7 @@ def create_app() -> Flask:
     def too_large(_error):
         if request.path in {"/api/scan", "/api/bot/scan"}:
             analytics.record_rejection("too_large", "discord" if request.path == "/api/bot/scan" else "web")
-        return jsonify(error="The selected file is larger than the 100 MB limit."), 413
+        return jsonify(error="The selected file is larger than the 1 GB limit."), 413
 
     return app
 

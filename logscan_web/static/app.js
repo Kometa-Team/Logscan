@@ -160,7 +160,7 @@ function selectedFiles(files) {
   scanButton.disabled = !chosenFiles.length;
   filePill.textContent = chosenFiles.length === 1
     ? `${chosen.name} · ${formatBytes(chosen.size)}`
-    : chosenFiles.length ? `${chosenFiles.length} files selected · ${formatBytes(chosenFiles.reduce((total, file) => total + file.size, 0))}` : "LOG, TXT, YAML or archive · up to 500 MB each";
+    : chosenFiles.length ? `${chosenFiles.length} files selected · ${formatBytes(chosenFiles.reduce((total, file) => total + file.size, 0))}` : "LOG, TXT, YAML or archive · up to 1 GB each";
   status.textContent = chosenFiles.length ? `${chosenFiles.length} file${chosenFiles.length === 1 ? "" : "s"} selected` : "Ready to scan";
   status.classList.remove("error");
   uploadErrorDetails.hidden = true;

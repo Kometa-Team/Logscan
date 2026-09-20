@@ -12,7 +12,7 @@ from .rules import RuleRegistry, migrated_rules
 from .categories import category_configuration
 
 
-MAX_FILE_BYTES = 500 * 1024 * 1024
+MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_DEPTH = 3
 ALLOWED_SUFFIXES = {".txt", ".log", ".yml", ".yaml"}
 ARCHIVE_SUFFIXES = {".zip", ".tar", ".tgz", ".gz"}
@@ -80,7 +80,7 @@ def _combine_nested_files(files: list[tuple[str, bytes]], archive_depth: int) ->
             raise
         extracted_size += len(prepared)
         if extracted_size > MAX_FILE_BYTES:
-            raise ScanError("The extracted archive contents are larger than the 500 MB limit.")
+            raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
         prepared_files.append(prepared)
     return b"\n\n".join(prepared_files)
 
@@ -93,7 +93,7 @@ def _extract_zip(filename: str, content_bytes: bytes, archive_depth: int) -> tup
             if any(entry.flag_bits & 0x1 for entry in entries):
                 raise ScanError("The ZIP contains encrypted files and cannot be scanned.")
             if sum(entry.file_size for entry in entries) > MAX_FILE_BYTES:
-                raise ScanError("The extracted ZIP contents are larger than the 500 MB limit.")
+                raise ScanError("The extracted ZIP contents are larger than the 1 GB limit.")
             extracted_files = []
             extracted_size = 0
             for entry in entries:
@@ -101,7 +101,7 @@ def _extract_zip(filename: str, content_bytes: bytes, archive_depth: int) -> tup
                     extracted_file = member.read(MAX_FILE_BYTES - extracted_size + 1)
                 extracted_size += len(extracted_file)
                 if extracted_size > MAX_FILE_BYTES:
-                    raise ScanError("The extracted ZIP contents are larger than the 500 MB limit.")
+                    raise ScanError("The extracted ZIP contents are larger than the 1 GB limit.")
                 extracted_files.append(extracted_file)
             extracted = _combine_nested_files(list(zip(files, extracted_files)), archive_depth)
     except zipfile.BadZipFile as exc:
@@ -121,7 +121,7 @@ def _extract_tar(filename: str, content_bytes: bytes, archive_depth: int) -> tup
             members_by_name = {member.name: member for member in files}
             scannable_members = [members_by_name[name] for name in names]
             if sum(member.size for member in scannable_members) > MAX_FILE_BYTES:
-                raise ScanError("The extracted TAR contents are larger than the 500 MB limit.")
+                raise ScanError("The extracted TAR contents are larger than the 1 GB limit.")
             extracted_files = []
             extracted_size = 0
             for name in names:
@@ -133,7 +133,7 @@ def _extract_tar(filename: str, content_bytes: bytes, archive_depth: int) -> tup
                     extracted_file = source.read(MAX_FILE_BYTES - extracted_size + 1)
                 extracted_size += len(extracted_file)
                 if extracted_size > MAX_FILE_BYTES:
-                    raise ScanError("The extracted TAR contents are larger than the 500 MB limit.")
+                    raise ScanError("The extracted TAR contents are larger than the 1 GB limit.")
                 extracted_files.append(extracted_file)
             extracted = _combine_nested_files(list(zip(names, extracted_files)), archive_depth)
     except tarfile.TarError as exc:
@@ -152,7 +152,7 @@ def _extract_gzip(filename: str, content_bytes: bytes, archive_depth: int) -> tu
     if not extracted:
         raise ScanError("The GZIP file does not contain any text to scan.")
     if len(extracted) > MAX_FILE_BYTES:
-        raise ScanError("The extracted GZIP contents are larger than the 500 MB limit.")
+        raise ScanError("The extracted GZIP contents are larger than the 1 GB limit.")
     _inner_filename, extracted = prepare_scan_input(Path(filename).stem, extracted, archive_depth)
     return f"{Path(filename).stem}.log", extracted
 
@@ -283,7 +283,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     if not content_bytes:
         raise ScanError("The selected file is empty.")
     if len(content_bytes) > MAX_FILE_BYTES:
-        raise ScanError("The selected file is larger than the 500 MB limit.")
+        raise ScanError("The selected file is larger than the 1 GB limit.")
 
     content = content_bytes.decode("utf-8", errors="replace")
     lowered = content.lower()
@@ -355,7 +355,7 @@ def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, by
                     if any(entry.flag_bits & 0x1 for entry in entries):
                         raise ScanError("The ZIP contains encrypted files and cannot be scanned.")
                     if sum(entry.file_size for entry in entries) > MAX_FILE_BYTES:
-                        raise ScanError("The extracted ZIP contents are larger than the 500 MB limit.")
+                        raise ScanError("The extracted ZIP contents are larger than the 1 GB limit.")
                     results = []
                     for entry in entries:
                         with archive.open(entry) as member:
@@ -376,7 +376,7 @@ def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, by
     scans = collect(filename, content_bytes, 0)
     total_size = sum(len(content) for _name, content, _result in scans)
     if total_size > MAX_FILE_BYTES:
-        raise ScanError("The extracted archive contents are larger than the 500 MB limit.")
+        raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
     if not scans:
         raise ScanError("The archive does not contain a complete Kometa log file.")
     return scans

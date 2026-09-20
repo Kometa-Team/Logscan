@@ -21,7 +21,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
 }), encoding="utf-8")
 
 from logscan_web.app import add_missing_people_recommendations, app
-from logscan_web.scanner import extract_missing_people, scan_log
+from logscan_web.scanner import MAX_FILE_BYTES, extract_missing_people, scan_log
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -79,6 +79,13 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         self.assertEqual(extract_missing_people(content), [
             {"name": "Hikaru Kondô", "tmdb_image_found": False},
         ])
+
+
+class UploadLimitTests(unittest.TestCase):
+    def test_extracted_log_limit_is_one_gibibyte_and_visible(self):
+        self.assertEqual(MAX_FILE_BYTES, 1024 ** 3)
+        html = app.test_client().get("/").get_data(as_text=True)
+        self.assertIn("1 GB max after extraction", html)
 
 
 class RuntimeMetadataTests(unittest.TestCase):
