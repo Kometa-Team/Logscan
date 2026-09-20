@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
+  <title>Analytics · Kometa Utilities</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260920-10') }}">
+  <script src="{{ url_for('static', filename='analytics.js', v='20260920-1') }}" defer></script>
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links" aria-label="Utilities"><a href="/">Log Scanner</a><a href="{{ url_for('people_page') }}">People</a><span class="utility-label">Analytics</span></nav></header>
+  <main class="shell analytics-shell">
+    <section class="analytics-heading"><p class="eyebrow">Service Activity</p><h1>Analytics</h1><p class="hero-copy">Anonymous aggregate activity only. No IP addresses, filenames, log content, Discord identities, or individual histories are retained.</p></section>
+    <section id="analytics-summary" class="analytics-summary" aria-label="Lifetime totals"></section>
+    <section class="analytics-section"><div class="section-heading"><h2>Daily activity</h2><span id="analytics-since"></span></div><div class="analytics-table-wrap"><table><thead><tr><th>Date</th><th>Logs</th><th>Lines</th><th>Data</th><th>People submitted</th><th>People addressed</th></tr></thead><tbody id="analytics-days"></tbody></table></div></section>
+    <section class="analytics-breakdowns" aria-label="Analytics breakdowns">
+      <div><h2>Upload sources</h2><div id="analytics-sources" class="metric-bars"></div></div>
+      <div><h2>Kometa versions</h2><div id="analytics-versions" class="metric-bars"></div></div>
+      <div><h2>Recommendation severity</h2><div id="analytics-severity" class="metric-bars"></div></div>
+      <div><h2>Rejected uploads</h2><div id="analytics-rejections" class="metric-bars"></div></div>
+    </section>
+    <section class="analytics-section"><div class="section-heading"><h2>Frequent recommendations</h2></div><div id="analytics-recommendations" class="metric-bars wide"></div></section>
+  </main>
+</body>
+</html>

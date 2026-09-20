@@ -686,6 +686,10 @@ def create_app() -> Flask:
     def people_page():
         return render_template("people.html")
 
+    @app.get("/analytics")
+    def analytics_page():
+        return render_template("analytics.html")
+
     @app.get("/scan/<scan_id>")
     def result_page(scan_id):
         record = store.get(scan_id)

@@ -336,6 +336,13 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(response.mimetype, "image/png")
         self.assertGreater(len(response.data), 100)
 
+    def test_analytics_page_is_linked_and_loads_dashboard(self):
+        scanner = self.client.get("/").get_data(as_text=True)
+        response = self.client.get("/analytics")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/analytics">Analytics</a>', scanner)
+        self.assertIn('id="analytics-summary"', response.get_data(as_text=True))
+
     def test_anonymous_analytics_endpoint_contains_only_aggregates(self):
         payload = self.client.get("/api/analytics").get_json()
         self.assertIn("totals", payload)
