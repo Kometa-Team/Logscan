@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260920-11') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
-  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260920-1') }}" defer></script>
+  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260920-2') }}" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -53,7 +53,7 @@
           </span>
           <span class="drop-title">Drop your Kometa logs here</span>
           <span class="drop-copy">or choose files from your device</span>
-          <span class="file-pill" id="file-pill">LOG, TXT, YAML, or archive · 500MB max after extraction</span>
+          <span class="file-pill" id="file-pill">LOG, TXT, YAML, or archive · 1 GB max after extraction</span>
         </label>
         <div class="form-footer">
           <p id="form-status" role="status">Ready to scan</p>
