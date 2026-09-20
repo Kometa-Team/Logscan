@@ -125,6 +125,218 @@ class ScanStore:
         return bool(scan_id) and scan_id.replace("-", "").replace("_", "").isalnum()
 
 
+class AnonymousAnalyticsStore:
+    """Daily aggregates containing no request, user, filename, or log identifiers."""
+
+    def __init__(self, root: str | os.PathLike[str]):
+        self.path = Path(root) / "usage_analytics.json"
+        self.lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock:
+            if not self.path.exists():
+                self._write(self._read())
+
+    def record_rejection(self, category: str, source: str) -> None:
+        with self.lock:
+            data = self._read()
+            day = self._day(data)
+            self._increment(day["rejections"], category)
+            self._increment(day["rejection_sources"], source)
+            self._write(data)
+
+    def record_success(
+        self, *, logs: int, lines: int, bytes_processed: int, source: str,
+        batch: bool, versions: list[str], recommendations: list[dict], people: int,
+    ) -> None:
+        with self.lock:
+            data = self._read()
+            day = self._day(data)
+            day["successful_logs"] += max(0, int(logs))
+            day["lines_processed"] += max(0, int(lines))
+            day["bytes_processed"] += max(0, int(bytes_processed))
+            day["people_submitted"] += max(0, int(people))
+            day["batches"] += int(bool(batch))
+            self._increment(day["sources"], source, max(0, int(logs)))
+            for version in versions:
+                self._increment(day["kometa_versions"], version)
+            for finding in recommendations:
+                self._increment(day["recommendations_by_id"], finding.get("id", "unknown"))
+                self._increment(day["recommendations_by_severity"], finding.get("severity", "unknown"))
+            self._write(data)
+
+    def record_addressed(self, records: list[dict]) -> None:
+        now = datetime.now(UTC)
+        with self.lock:
+            data = self._read()
+            known = set(data["addressed_keys"])
+            day = self._day(data)
+            changed = False
+            for record in records:
+                key = record.get("key")
+                if not key:
+                    continue
+                digest = hashlib.sha256(str(key).encode()).hexdigest()
+                if digest in known:
+                    continue
+                known.add(digest)
+                day["people_addressed"] += 1
+                try:
+                    created = datetime.fromisoformat(record["created_at"])
+                    duration = max(0, int((now - created).total_seconds()))
+                except (KeyError, TypeError, ValueError):
+                    duration = None
+                if duration is not None:
+                    day["address_seconds_total"] += duration
+                    day["address_duration_count"] += 1
+                changed = True
+            if changed:
+                data["addressed_keys"] = sorted(known)
+                self._write(data)
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            data = self._read()
+        totals = self._empty_day()
+        for day in data["days"].values():
+            for key in (
+                "successful_logs", "lines_processed", "bytes_processed", "people_submitted",
+                "people_addressed", "address_seconds_total", "address_duration_count", "batches",
+            ):
+                totals[key] += day.get(key, 0)
+            for key in (
+                "sources", "rejections", "rejection_sources", "kometa_versions",
+                "recommendations_by_id", "recommendations_by_severity",
+            ):
+                for label, count in day.get(key, {}).items():
+                    self._increment(totals[key], label, count)
+        count = totals.pop("address_duration_count")
+        seconds = totals.pop("address_seconds_total")
+        totals["average_address_seconds"] = round(seconds / count) if count else None
+        return {"started_at": data["started_at"], "totals": totals, "days": data["days"]}
+
+    @staticmethod
+    def _increment(values: dict, key: str, amount: int = 1) -> None:
+        safe_key = str(key or "unknown")[:80]
+        values[safe_key] = values.get(safe_key, 0) + amount
+
+    @staticmethod
+    def _empty_day() -> dict:
+        return {
+            "successful_logs": 0, "lines_processed": 0, "bytes_processed": 0,
+            "people_submitted": 0, "people_addressed": 0, "address_seconds_total": 0,
+            "address_duration_count": 0, "batches": 0, "sources": {}, "rejections": {},
+            "rejection_sources": {}, "kometa_versions": {}, "recommendations_by_id": {},
+            "recommendations_by_severity": {},
+        }
+
+    def _day(self, data: dict) -> dict:
+        return data["days"].setdefault(datetime.now(UTC).date().isoformat(), self._empty_day())
+
+    def _read(self) -> dict:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return {
+            "started_at": data.get("started_at") if isinstance(data.get("started_at"), str) else datetime.now(UTC).isoformat(),
+            "days": data.get("days") if isinstance(data.get("days"), dict) else {},
+            "addressed_keys": data.get("addressed_keys") if isinstance(data.get("addressed_keys"), list) else [],
+        }
+
+    def _write(self, data: dict) -> None:
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(self.path)
+
+
+class UsageStatsStore:
+    """Durable lifetime activity counters that are independent of scan expiry."""
+
+    def __init__(self, root: str | os.PathLike[str]):
+        self.path = Path(root) / "usage_stats.json"
+        self.lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock:
+            if not self.path.exists():
+                self._write(self._default())
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            stats = self._read()
+            return {
+                "logs_submitted": stats["logs_submitted"],
+                "lines_processed": stats["lines_processed"],
+                "people_submitted": stats["people_submitted"],
+                "people_addressed": stats["people_addressed"],
+                "started_at": stats["started_at"],
+            }
+
+    def record_submission(self, *, logs: int = 0, lines: int = 0, people: int = 0) -> dict:
+        with self.lock:
+            stats = self._read()
+            stats["logs_submitted"] += max(0, int(logs))
+            stats["lines_processed"] += max(0, int(lines))
+            stats["people_submitted"] += max(0, int(people))
+            self._write(stats)
+            return stats.copy()
+
+    def ensure_people_baseline(self, people: int) -> None:
+        """Seed a new stats file from the durable backlog without lowering later totals."""
+        with self.lock:
+            stats = self._read()
+            baseline = max(0, int(people))
+            if baseline > stats["people_submitted"]:
+                stats["people_submitted"] = baseline
+                self._write(stats)
+
+    def mark_addressed(self, person_keys) -> int:
+        with self.lock:
+            stats = self._read()
+            addressed = set(stats["addressed_person_keys"])
+            new_keys = {str(key) for key in person_keys if key and str(key) not in addressed}
+            if new_keys:
+                addressed.update(new_keys)
+                stats["addressed_person_keys"] = sorted(addressed)
+                stats["people_addressed"] += len(new_keys)
+                self._write(stats)
+            return len(new_keys)
+
+    @staticmethod
+    def _default() -> dict:
+        return {
+            "logs_submitted": 0,
+            "lines_processed": 0,
+            "people_submitted": 0,
+            "people_addressed": 0,
+            "addressed_person_keys": [],
+            "started_at": datetime.now(UTC).isoformat(),
+        }
+
+    def _read(self) -> dict:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            raw = {}
+        defaults = self._default()
+        if not isinstance(raw, dict):
+            return defaults
+        for key in ("logs_submitted", "lines_processed", "people_submitted", "people_addressed"):
+            value = raw.get(key)
+            defaults[key] = value if isinstance(value, int) and value >= 0 else 0
+        keys = raw.get("addressed_person_keys")
+        defaults["addressed_person_keys"] = [str(key) for key in keys if key] if isinstance(keys, list) else []
+        if isinstance(raw.get("started_at"), str):
+            defaults["started_at"] = raw["started_at"]
+        return defaults
+
+    def _write(self, stats: dict) -> None:
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(stats, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(self.path)
+
+
 class PeopleStore:
     """A small durable backlog for People Posters work, independent of scan expiry."""
 

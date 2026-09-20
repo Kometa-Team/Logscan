@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260822-8') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260920-9') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
   <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260822-11') }}" defer></script>
@@ -23,7 +23,11 @@
       <img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt="">
       <span>Kometa Utilities</span>
     </a>
-    <span class="utility-label">Log Scanner</span>
+    <nav class="header-links" aria-label="Utilities">
+      <span class="utility-label">Log Scanner</span>
+      <a href="{{ url_for('people_page') }}">People</a>
+      <a href="{{ url_for('analytics_page') }}">Analytics</a>
+    </nav>
   </header>
 
   <main class="shell">
@@ -31,6 +35,12 @@
       <p class="eyebrow">Kometa Logscan</p>
       <h1>Turn your Kometa log into a clear action plan.</h1>
       <p class="hero-copy">Upload a Kometa log to identify configuration issues, common errors, and practical recommendations. Logs and scan results are automatically deleted after 48 hours. Keep the private deletion link if you want to remove yours sooner.</p>
+      <dl class="usage-stats" aria-label="Service activity since tracking began">
+        <div><dt>Logs processed</dt><dd>{{ "{:,}".format(usage_stats.logs_submitted) }}</dd></div>
+        <div><dt>Lines processed</dt><dd>{{ "{:,}".format(usage_stats.lines_processed) }}</dd></div>
+        <div><dt>People submitted</dt><dd>{{ "{:,}".format(usage_stats.people_submitted) }}</dd></div>
+        <div><dt>People addressed</dt><dd>{{ "{:,}".format(usage_stats.people_addressed) }}</dd></div>
+      </dl>
     </section>
 
     <section class="upload-card" id="upload-section">

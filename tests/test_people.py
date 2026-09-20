@@ -22,7 +22,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
 
 from logscan_web.app import add_missing_people_recommendations, app
 from logscan_web.scanner import extract_missing_people
-from logscan_web.storage import PeopleStore
+from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
 class Response:
@@ -79,6 +79,42 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         self.assertEqual(extract_missing_people(content), [
             {"name": "Hikaru Kondô", "tmdb_image_found": False},
         ])
+
+
+class AnonymousAnalyticsTests(unittest.TestCase):
+    def test_daily_analytics_are_aggregate_and_persistent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            analytics = AnonymousAnalyticsStore(directory)
+            analytics.record_rejection("not_kometa_log", "web")
+            analytics.record_success(
+                logs=2, lines=1200, bytes_processed=5000, source="discord", batch=True,
+                versions=["2.1.0", "unknown"],
+                recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
+            )
+            analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
+            analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
+            snapshot = AnonymousAnalyticsStore(directory).snapshot()
+            raw = Path(directory, "usage_analytics.json").read_text(encoding="utf-8")
+        self.assertEqual(snapshot["totals"]["successful_logs"], 2)
+        self.assertEqual(snapshot["totals"]["people_addressed"], 1)
+        self.assertEqual(snapshot["totals"]["sources"], {"discord": 2})
+        self.assertNotIn("tmdb-1", raw)
+
+
+class UsageStatsTests(unittest.TestCase):
+    def test_counters_persist_and_addressed_people_are_only_counted_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stats = UsageStatsStore(directory)
+            stats.ensure_people_baseline(2)
+            stats.record_submission(logs=2, lines=12500, people=1)
+            stats.ensure_people_baseline(1)
+            self.assertEqual(stats.mark_addressed(["tmdb-1", "tmdb-2"]), 2)
+            self.assertEqual(stats.mark_addressed(["tmdb-1"]), 0)
+            restored = UsageStatsStore(directory).snapshot()
+        self.assertEqual(restored["logs_submitted"], 2)
+        self.assertEqual(restored["lines_processed"], 12500)
+        self.assertEqual(restored["people_submitted"], 3)
+        self.assertEqual(restored["people_addressed"], 2)
 
 
 class PeopleUnionTests(unittest.TestCase):
@@ -274,6 +310,20 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertNotIn("people-status-note", html)
         self.assertNotIn("Image status", html)
 
+    def test_service_activity_is_visible_on_scanner_and_people_pages(self):
+        for path in ("/", "/people"):
+            html = self.client.get(path).get_data(as_text=True)
+            self.assertIn('class="usage-stats"', html)
+            self.assertIn("Logs processed", html)
+            self.assertIn("Lines processed", html)
+            self.assertIn("People submitted", html)
+            self.assertIn("People addressed", html)
+
+    def test_log_scanner_header_links_to_people(self):
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn('href="/people">People</a>', html)
+        self.assertIn('aria-label="Utilities"', html)
+
     def test_people_header_uses_official_kometa_icon(self):
         response = self.client.get("/people")
         self.assertEqual(response.status_code, 200)
@@ -285,6 +335,20 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "image/png")
         self.assertGreater(len(response.data), 100)
+
+    def test_analytics_page_is_linked_and_loads_dashboard(self):
+        scanner = self.client.get("/").get_data(as_text=True)
+        response = self.client.get("/analytics")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/analytics">Analytics</a>', scanner)
+        self.assertIn('id="analytics-summary"', response.get_data(as_text=True))
+
+    def test_anonymous_analytics_endpoint_contains_only_aggregates(self):
+        payload = self.client.get("/api/analytics").get_json()
+        self.assertIn("totals", payload)
+        self.assertIn("days", payload)
+        self.assertNotIn("users", payload)
+        self.assertNotIn("filenames", payload)
 
     def test_old_beta_routes_are_removed(self):
         self.assertEqual(self.client.get("/people/popular").status_code, 404)

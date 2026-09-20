@@ -20,7 +20,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .models import Finding
 from .recommendations import validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_missing_people, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
-from .storage import PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore
+from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
@@ -122,6 +122,9 @@ def create_app() -> Flask:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     store = ScanStore(app.config["SCAN_STORE"])
     people_store = PeopleStore(app.config["SCAN_STORE"])
+    usage_stats = UsageStatsStore(app.config["SCAN_STORE"])
+    analytics = AnonymousAnalyticsStore(app.config["SCAN_STORE"])
+    usage_stats.ensure_people_baseline(len(people_store.list()))
     popular_people_exclusions = PopularPeopleExclusionStore(app.config["SCAN_STORE"])
     popular_people_checks = PopularPeopleCheckStore(app.config["SCAN_STORE"])
     popular_people_flags = PopularPeopleFlagStore(app.config["SCAN_STORE"])
@@ -379,6 +382,29 @@ def create_app() -> Flask:
             })
         return payload
 
+    def normalized_kometa_version(value: str | None) -> str:
+        """Keep only a conservative version token; never persist arbitrary log text."""
+        if not value:
+            return "unknown"
+        match = re.search(r"(?i)(?:v)?(\d+\.\d+(?:\.\d+)?)", value)
+        return match.group(1) if match else "unknown"
+
+    def rejection_category(message: str) -> str:
+        lowered = message.casefold()
+        if "larger than" in lowered:
+            return "too_large"
+        if "encrypted" in lowered:
+            return "encrypted_archive"
+        if "archive" in lowered or "zip" in lowered or "gzip" in lowered or "tar" in lowered:
+            return "invalid_archive"
+        if "empty" in lowered:
+            return "empty_file"
+        if "complete kometa log" in lowered or "valid kometa logs" in lowered:
+            return "not_kometa_log"
+        if "choose" in lowered or "extension" in lowered:
+            return "unsupported_file"
+        return "invalid_upload"
+
     def selected_people_sources() -> set[str]:
         """The unified page always builds both discovery sources before tag filtering."""
         return {"missing", "trending"}
@@ -484,6 +510,8 @@ def create_app() -> Flask:
             }
             for record in people_store.list():
                 if record.get("name", "").casefold() in primary_images:
+                    usage_stats.mark_addressed([record.get("key")])
+                    analytics.record_addressed([record])
                     continue
                 person_id = record.get("tmdb_id")
                 if not person_id:
@@ -642,6 +670,10 @@ def create_app() -> Flask:
     if not app.config.get("TESTING"):
         threading.Thread(target=cleanup_loop, name="logscan-cleanup", daemon=True).start()
 
+    @app.context_processor
+    def service_usage():
+        return {"usage_stats": usage_stats.snapshot()}
+
     @app.get("/")
     def index():
         return render_template("index.html", initial_scan=None, initial_batch=None)
@@ -653,6 +685,10 @@ def create_app() -> Flask:
     @app.get("/people")
     def people_page():
         return render_template("people.html")
+
+    @app.get("/analytics")
+    def analytics_page():
+        return render_template("analytics.html")
 
     @app.get("/scan/<scan_id>")
     def result_page(scan_id):
@@ -717,9 +753,11 @@ def create_app() -> Flask:
     def scan():
         is_bot = bot_request_is_authorized()
         if request.path == "/api/bot/scan" and not is_bot:
+            analytics.record_rejection("unauthorized_bot", "discord")
             return jsonify(error="Invalid API key."), 401
         uploads = [upload for upload in request.files.getlist("log") if upload.filename]
         if not uploads:
+            analytics.record_rejection("missing_file", "discord" if is_bot else "web")
             return jsonify(error="Choose a log file to scan."), 400
         upload = uploads[0]
         upload_filename = upload.filename
@@ -738,6 +776,7 @@ def create_app() -> Flask:
                 filename, content = prepare_scan_input(upload_filename, content)
                 scans = [(filename, content, scan_log(filename, content))]
         except ScanError as exc:
+            analytics.record_rejection(rejection_category(str(exc)), "discord" if is_bot else "web")
             return jsonify(error=str(exc)), 400
         source_url = request.form.get("source_url") if is_bot else None
         uploaded_by = request.form.get("uploaded_by") if is_bot else None
@@ -795,7 +834,21 @@ def create_app() -> Flask:
                 uploaded_by_id=uploaded_by_id,
             )
             payloads.append({"id": scan_id, "filename": result.filename, "recommendations": result.recommendations, "metadata": result.metadata, "overview": result.overview, "categories": result.categories, "result_url": result_url, "delete_token": delete_token, "expires_at": expires_at, "uploaded_by_bot": is_bot, "missing_people": missing_people})
-        notify_people_webhook([person for payload in payloads for person in payload["missing_people"]])
+        submitted_people = [person for payload in payloads for person in payload["missing_people"]]
+        submitted_count = sum(bool(person.get("is_new")) for person in submitted_people)
+        processed_lines = sum(payload["metadata"].get("line_count", 0) for payload in payloads)
+        usage_stats.record_submission(logs=len(payloads), lines=processed_lines, people=submitted_count)
+        analytics.record_success(
+            logs=len(payloads),
+            lines=processed_lines,
+            bytes_processed=sum(len(scan_content) for _name, scan_content, _result in scans),
+            source="discord" if is_bot else "web",
+            batch=len(payloads) > 1,
+            versions=[normalized_kometa_version(payload["metadata"].get("kometa_version")) for payload in payloads],
+            recommendations=[item for payload in payloads for item in payload["recommendations"]],
+            people=submitted_count,
+        )
+        notify_people_webhook(submitted_people)
         if len(payloads) > 1:
             batch_id, admin_token = store.create_batch(payloads, unscanned_files)
             response = {
@@ -809,6 +862,10 @@ def create_app() -> Flask:
             response = {"scans": payloads}
             return jsonify(response)
         return jsonify({"scans": payloads}) if len(payloads) > 1 else jsonify(payloads[0])
+
+    @app.get("/api/analytics")
+    def usage_analytics():
+        return jsonify(analytics.snapshot())
 
     @app.get("/api/people")
     def people():
@@ -973,6 +1030,8 @@ def create_app() -> Flask:
 
     @app.errorhandler(413)
     def too_large(_error):
+        if request.path in {"/api/scan", "/api/bot/scan"}:
+            analytics.record_rejection("too_large", "discord" if request.path == "/api/bot/scan" else "web")
         return jsonify(error="The selected file is larger than the 100 MB limit."), 413
 
     return app
