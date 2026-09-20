@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -19,7 +20,8 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
     ],
 }), encoding="utf-8")
 
-from logscan_web.app import app
+from logscan_web.app import add_missing_people_recommendations, app
+from logscan_web.scanner import extract_missing_people
 from logscan_web.storage import PeopleStore
 
 
@@ -47,7 +49,36 @@ def fake_urlopen(request, timeout=0):
         return Response({"id": 1, "name": "Alice Person", "profile_path": "/alice.jpg", "known_for_department": "Acting"})
     if "/person/3?" in url:
         return Response({"id": 3, "name": "Bob Person", "profile_path": "/bob.jpg", "known_for_department": "Directing"})
+    if "/person/5?" in url:
+        return Response({"id": 5, "name": "Blocked Person", "profile_path": None, "known_for_department": "Acting"})
     raise AssertionError(f"Unexpected URL: {url}")
+
+
+class MissingPeopleExtractionTests(unittest.TestCase):
+    def test_pending_recommendation_links_to_filtered_people_queue(self):
+        result = SimpleNamespace(
+            recommendations=[],
+            metadata={"counts": {"advice": 0}},
+            overview={"recommendation_count": 0},
+        )
+        people_url = "https://logscan.example/people?tags=Missing+Kometa&tags=Requested+by+User"
+        add_missing_people_recommendations(
+            result,
+            [{"name": "Hikaru Kondô", "tmdb_image_found": True}],
+            {},
+            people_url,
+        )
+        self.assertIn(people_url, result.recommendations[0]["solution"])
+
+    def test_repository_filename_is_fully_url_decoded(self):
+        content = (
+            "Collection Warning: No Poster Found at "
+            "https://raw.githubusercontent.com/Kometa-Team/People-Images/master/"
+            "Hikaru%20Kond%C3%B4.jpg\n"
+        )
+        self.assertEqual(extract_missing_people(content), [
+            {"name": "Hikaru Kondô", "tmdb_image_found": False},
+        ])
 
 
 class PeopleUnionTests(unittest.TestCase):
@@ -62,9 +93,11 @@ class PeopleUnionTests(unittest.TestCase):
             Path(STORE.name, filename).write_text("[]" if filename != "popular_people_flags.json" else "{}", encoding="utf-8")
         self.client = app.test_client()
 
-    def request_people(self, sources="missing,trending", tag=""):
+    def request_people(self, sources="missing,trending", tag="", selected_tags=()):
+        query = [("sources", sources), ("tag", tag)]
+        query.extend(("tags", value) for value in selected_tags)
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
-            response = self.client.get("/api/people", query_string={"sources": sources, "tag": tag})
+            response = self.client.get("/api/people", query_string=query)
         self.assertEqual(response.status_code, 200)
         return response.get_json()["people"]
 
@@ -75,13 +108,28 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(people[1]["sources"], ["missing"])
         self.assertEqual(people[2]["sources"], ["trending"])
 
-    def test_source_filters_use_or_semantics(self):
-        self.assertEqual([person["tmdb_id"] for person in self.request_people("missing")], [1, 3])
-        self.assertEqual([person["tmdb_id"] for person in self.request_people("trending")], [1, 2])
+    def test_legacy_source_parameter_is_ignored_for_the_unified_page(self):
+        self.assertEqual([person["tmdb_id"] for person in self.request_people("missing")], [1, 3, 2])
+        self.assertEqual([person["tmdb_id"] for person in self.request_people("trending")], [1, 3, 2])
+
+    def test_trending_and_missing_kometa_tags_find_the_intersection(self):
+        people = self.request_people(selected_tags=("Trending", "Missing Kometa"))
+        self.assertEqual([person["tmdb_id"] for person in people], [1])
 
     def test_known_requester_is_returned_with_missing_person(self):
         person = next(person for person in self.request_people() if person["tmdb_id"] == 1)
         self.assertEqual(person["requested_by"], [{"name": "Request User", "id": "123"}])
+        self.assertEqual(person["provenance_tags"], ["Log Upload"])
+
+    def test_log_upload_tag_is_searchable_for_historical_records(self):
+        people = self.request_people(tag="log upload")
+        self.assertEqual([person["tmdb_id"] for person in people], [1, 3])
+        self.assertTrue(all(person["provenance_tags"] == ["Log Upload"] for person in people))
+
+    def test_historical_log_record_uses_searchable_unknown_requester(self):
+        people = self.request_people(tag="unknown")
+        self.assertEqual([person["tmdb_id"] for person in people], [3])
+        self.assertEqual(people[0]["requested_by"], [{"name": "Unknown", "id": None}])
 
     def test_requesters_accumulate_without_duplicates(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -111,11 +159,64 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual([person["tmdb_id"] for person in self.request_people(tag="Request*User")], [1])
         self.assertEqual([person["tmdb_id"] for person in self.request_people(tag="trend?ng")], [1, 2])
 
+    def test_dynamic_tags_include_counts_and_group_requesters_with_or_semantics(self):
+        with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
+            response = self.client.get("/api/people", query_string=[
+                ("sources", "missing,trending"),
+                ("tags", "Requested by Request User"),
+                ("tags", "Requested by Unknown"),
+            ])
+        payload = response.get_json()
+        self.assertEqual([person["tmdb_id"] for person in payload["people"]], [1, 3])
+        facets = {(item["category"], item["tag"]): item["count"] for item in payload["available_tags"]}
+        self.assertEqual(facets[("discovery", "Log Upload")], 2)
+        self.assertEqual(facets[("requester", "Requested by Unknown")], 1)
+        self.assertEqual(facets[("requester", "Requested by Request User")], 1)
+
+    def test_dynamic_tags_combine_different_categories_with_and_semantics(self):
+        with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
+            response = self.client.get("/api/people", query_string=[
+                ("sources", "missing,trending"),
+                ("tags", "Log Upload"),
+                ("tags", "Requested by Unknown"),
+            ])
+        self.assertEqual([person["tmdb_id"] for person in response.get_json()["people"]], [3])
+
     def test_missing_filter_includes_trending_gaps_without_uploaded_logs(self):
         Path(STORE.name, "people.json").write_text("[]", encoding="utf-8")
-        people = self.request_people("missing")
+        people = self.request_people(selected_tags=("Missing Kometa",))
         self.assertEqual([person["tmdb_id"] for person in people], [1])
         self.assertEqual(people[0]["sources"], ["missing", "trending"])
+
+    def test_missing_tmdb_is_searchable_and_excluded_from_processing_export(self):
+        Path(STORE.name, "people.json").write_text(json.dumps([
+            {"key": "tmdb-5", "tmdb_id": 5, "name": "Blocked Person", "log_url": "/scan/blocked"},
+        ]), encoding="utf-8")
+        people = self.request_people("missing", "Missing TMDb")
+        blocked = next(person for person in people if person["tmdb_id"] == 5)
+        self.assertEqual(blocked["metadata_tags"], ["Missing TMDb"])
+        self.assertEqual(blocked["tmdb_images_url"], "https://www.themoviedb.org/person/5/images/profiles")
+        with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
+            response = self.client.get(
+                "/api/people/export",
+                query_string={"sources": "missing", "tag": "Missing TMDb"},
+            )
+        self.assertEqual(response.get_data(as_text=True), "")
+
+    def test_missing_people_with_tmdb_images_are_ready(self):
+        person = next(person for person in self.request_people("missing") if person["tmdb_id"] == 3)
+        self.assertEqual(person["metadata_tags"], ["TMDb Ready"])
+        self.assertEqual(person["tmdb_images_url"], "https://www.themoviedb.org/person/3/images/profiles")
+
+    def test_verified_tmdb_image_survives_transient_profile_lookup_gap(self):
+        Path(STORE.name, "people.json").write_text(json.dumps([
+            {"key": "tmdb-5", "tmdb_id": 5, "name": "Blocked Person", "tmdb_image_found": True},
+        ]), encoding="utf-8")
+        person = next(person for person in self.request_people("missing") if person["tmdb_id"] == 5)
+        self.assertEqual(person["metadata_tags"], ["TMDb Ready"])
+        with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
+            response = self.client.get("/api/people/export", query_string={"sources": "missing"})
+        self.assertEqual(response.get_data(as_text=True).splitlines(), ["1|Alice Person", "5|Blocked Person", "2|Completed Person"])
 
     def test_repository_image_reconciliation_only_removes_missing_source(self):
         completed = next(person for person in self.request_people() if person["name"] == "Completed Person")
@@ -127,6 +228,20 @@ class PeopleUnionTests(unittest.TestCase):
             response = self.client.get("/api/people/export", query_string={"sources": "missing,trending"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_data(as_text=True).splitlines(), ["1|Alice Person", "3|Bob Person", "2|Completed Person"])
+
+    def test_export_preserves_original_accented_log_name(self):
+        Path(STORE.name, "people.json").write_text(json.dumps([
+            {
+                "key": "tmdb-1", "tmdb_id": 1, "name": "Hikaru Kondo",
+                "original_name": "Hikaru Kondô", "log_url": "/scan/hikaru",
+            },
+        ]), encoding="utf-8")
+        with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
+            response = self.client.get(
+                "/api/people/export",
+                query_string=[("tags", "Log Upload")],
+            )
+        self.assertEqual(response.get_data(as_text=True).splitlines(), ["1|Hikaru Kondô"])
 
     def test_export_respects_requester_tag_filter(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
@@ -153,6 +268,12 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual([person["tmdb_id"] for person in self.request_people()], [3, 2])
 
+    def test_people_page_uses_card_level_tmdb_guidance(self):
+        response = self.client.get("/people")
+        html = response.get_data(as_text=True)
+        self.assertNotIn("people-status-note", html)
+        self.assertNotIn("Image status", html)
+
     def test_people_header_uses_official_kometa_icon(self):
         response = self.client.get("/people")
         self.assertEqual(response.status_code, 200)
@@ -170,10 +291,17 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(self.client.get("/people/tmdb-1").status_code, 404)
         self.assertEqual(self.client.get("/api/people/popular").status_code, 404)
 
-    def test_invalid_source_filter_is_json_error(self):
-        response = self.client.get("/api/people?sources=unknown")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("error", response.get_json())
+    def test_legacy_source_filter_does_not_limit_the_unified_page(self):
+        with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
+            response = self.client.get("/api/people?sources=unknown")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["total"], 3)
+
+    def test_people_page_uses_dynamic_tags_and_discreet_examples(self):
+        html = self.client.get("/people").get_data(as_text=True)
+        self.assertNotIn('class="source-filter"', html)
+        self.assertIn('class="tag-filter-examples"', html)
+        self.assertIn("Missing Kometa", html)
 
 
 if __name__ == "__main__":

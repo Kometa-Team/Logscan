@@ -41,7 +41,9 @@ TMDB_FIND_CACHE_SECONDS = 7 * 24 * 60 * 60
 TMDB_FIND_MAX_WORKERS = 8
 
 
-def add_missing_people_recommendations(result, candidates: list[dict], repository_people: dict[str, str]) -> None:
+def add_missing_people_recommendations(
+    result, candidates: list[dict], repository_people: dict[str, str], people_url: str | None = None,
+) -> None:
     """Add advice for missing people images, split by repository availability."""
     found = []
     pending = []
@@ -68,7 +70,8 @@ def add_missing_people_recommendations(result, candidates: list[dict], repositor
             "Missing people images need to be created",
             "Missing person images were identified in this log. The Kometa team have been made aware and will action these as soon as possible. "
             f"\nPeople: {people}.",
-            "Wait for the People Images repository to be updated, then rerun Kometa to create the affected collection image.",
+            "Wait for the People Images repository to be updated, then rerun Kometa to create the affected collection image."
+            + (f" Review the submitted people here: {people_url}" if people_url else ""),
         )
     if found or pending:
         result.recommendations.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
@@ -361,6 +364,7 @@ def create_app() -> Flask:
             payload.append({
                 "tmdb_id": person_id, "name": name,
                 "tmdb_person_url": f"https://www.themoviedb.org/person/{person_id}" if person_id else None,
+                "tmdb_images_url": f"https://www.themoviedb.org/person/{person_id}/images/profiles" if person_id else None,
                 "imdb_person_url": f"https://www.imdb.com/name/{person['imdb_id']}/" if person.get("imdb_id") else None,
                 "tmdb_image_url": f"https://image.tmdb.org/t/p/original{profile_path}" if profile_path else None,
                 "known_for_department": person.get("known_for_department"), "known_for": known_for,
@@ -375,11 +379,50 @@ def create_app() -> Flask:
         return payload
 
     def selected_people_sources() -> set[str]:
-        raw = request.args.get("sources", "missing,trending")
-        sources = {value.strip() for value in raw.split(",") if value.strip()}
-        if not sources or not sources <= {"missing", "trending"}:
-            abort(400, description="Choose missing, trending, or both people sources.")
-        return sources
+        """The unified page always builds both discovery sources before tag filtering."""
+        return {"missing", "trending"}
+
+    def categorized_people_tags(person: dict) -> dict[str, list[str]]:
+        requesters = [
+            f"Requested by {requester['name']}"
+            for requester in person.get("requested_by", [])
+            if requester.get("name")
+        ]
+        discovery = []
+        if "trending" in person.get("sources", []):
+            discovery.append("Trending")
+        discovery.extend(person.get("provenance_tags", []))
+        availability = ["Missing Kometa"] if "missing" in person.get("sources", []) else []
+        return {
+            "availability": availability,
+            "discovery": discovery,
+            "tmdb": list(person.get("metadata_tags", [])),
+            "requester": requesters,
+        }
+
+    def searchable_people_tags(person: dict) -> list[str]:
+        tags = list(person.get("sources", []))
+        if "missing" in tags:
+            tags.append("Missing Kometa")
+        groups = categorized_people_tags(person)
+        for values in groups.values():
+            tags.extend(values)
+        tags.extend(tag.removeprefix("Requested by ") for tag in groups["requester"])
+        return tags
+
+    def available_people_tags(people: list[dict]) -> list[dict]:
+        counts: dict[tuple[str, str], int] = {}
+        for person in people:
+            for category, tags in categorized_people_tags(person).items():
+                for tag in set(tags):
+                    counts[(category, tag)] = counts.get((category, tag), 0) + 1
+        category_order = {"availability": 0, "discovery": 1, "tmdb": 2, "requester": 3}
+        return [
+            {"category": category, "tag": tag, "count": count}
+            for (category, tag), count in sorted(
+                counts.items(), key=lambda item: (category_order[item[0][0]], item[0][1].casefold())
+            )
+        ]
 
     def filter_people_by_tag(people: list[dict], query: str) -> list[dict]:
         """Filter source and requester tags with case-insensitive * and ? wildcards."""
@@ -389,14 +432,28 @@ def create_app() -> Flask:
         wildcarded = "*" in query or "?" in query
         expression = re.escape(query).replace(r"\*", ".*").replace(r"\?", ".")
         pattern = re.compile(f"^{expression}$" if wildcarded else f".*{expression}.*")
+        return [
+            person for person in people
+            if any(pattern.fullmatch(tag.casefold()) for tag in searchable_people_tags(person))
+        ]
+
+    def filter_people_by_selected_tags(people: list[dict], selected: list[str], available: list[dict]) -> list[dict]:
+        if not selected:
+            return people
+        categories = {item["tag"].casefold(): item["category"] for item in available}
+        selected_by_category: dict[str, set[str]] = {}
+        for tag in selected:
+            category = categories.get(tag.casefold())
+            if category is None:
+                return []
+            selected_by_category.setdefault(category, set()).add(tag.casefold())
 
         def matches(person: dict) -> bool:
-            tags = list(person.get("sources", []))
-            for requester in person.get("requested_by", []):
-                name = requester.get("name", "")
-                if name:
-                    tags.extend((name, f"Requested by {name}"))
-            return any(pattern.fullmatch(str(tag).casefold()) for tag in tags)
+            groups = categorized_people_tags(person)
+            return all(
+                selected_tags & {tag.casefold() for tag in groups.get(category, [])}
+                for category, selected_tags in selected_by_category.items()
+            )
 
         return [person for person in people if matches(person)]
 
@@ -455,12 +512,23 @@ def create_app() -> Flask:
         payload = popular_people_payload(people, flags)
         for item, person in zip(payload, people):
             record = person.get("missing_record", {})
+            sources = sorted(person["sources"])
+            metadata_tags = []
+            tmdb_ready = bool(item.get("tmdb_image")) or bool(record.get("tmdb_image_found"))
+            if "missing" in sources:
+                metadata_tags.append("TMDb Ready" if tmdb_ready else "Missing TMDb")
+            requesters = record.get("requested_by", [])
+            if record and not requesters:
+                requesters = [{"name": "Unknown", "id": None}]
             item.update(
                 person_key=f"tmdb-{person['id']}" if person.get("id") else record.get("key"),
-                sources=sorted(person["sources"]),
+                sources=sources,
+                metadata_tags=metadata_tags,
+                provenance_tags=["Log Upload"] if record else [],
                 log_url=record.get("log_url"),
                 source_url=record.get("source_url"),
-                requested_by=record.get("requested_by", []),
+                original_name=record.get("original_name", record.get("name", item["name"])),
+                requested_by=requesters,
             )
         return payload
 
@@ -483,6 +551,7 @@ def create_app() -> Flask:
             person, is_new = people_store.upsert_with_status({
                 "key": key,
                 "name": match.get("name", name) if match else name,
+                "original_name": name,
                 "tmdb_id": tmdb_id,
                 "tmdb_image_found": tmdb_image_found,
                 "log_tmdb_image_found": bool(candidate["tmdb_image_found"]),
@@ -491,7 +560,7 @@ def create_app() -> Flask:
                 "source_url": source_url,
                 "requested_by": [{"name": uploaded_by, "id": uploaded_by_id}] if uploaded_by else [],
             })
-            person["people_url"] = url_for("people_page", sources="missing", _external=True)
+            person["people_url"] = url_for("people_page", tags="Missing Kometa", _external=True)
             person["is_new"] = is_new
             saved.append(person)
         return saved
@@ -705,7 +774,15 @@ def create_app() -> Flask:
             if missing_candidates:
                 repository_people = kometa_image_urls().get("Kometa Repo Image")
                 if repository_people is not None:
-                    add_missing_people_recommendations(result, missing_candidates, repository_people)
+                    people_tags = ["Missing Kometa"]
+                    if uploaded_by:
+                        people_tags.append(f"Requested by {uploaded_by}")
+                    add_missing_people_recommendations(
+                        result,
+                        missing_candidates,
+                        repository_people,
+                        url_for("people_page", tags=people_tags, _external=True),
+                    )
             scan_id, delete_token = store.create(filename, content, result)
             result_url = url_for("result_page", scan_id=scan_id, _external=True)
             missing_people = save_missing_people(
@@ -740,7 +817,11 @@ def create_app() -> Flask:
         if per_page is None or not 1 <= per_page <= POPULAR_PEOPLE_PAGE_SIZE:
             return jsonify(error=f"Per-page count must be between 1 and {POPULAR_PEOPLE_PAGE_SIZE}."), 400
         tag_query = request.args.get("tag", "")
-        candidates = filter_people_by_tag(people_union(sources), tag_query)
+        selected_tags = request.args.getlist("tags")
+        base_candidates = people_union(sources)
+        available_tags = available_people_tags(base_candidates)
+        candidates = filter_people_by_tag(base_candidates, tag_query)
+        candidates = filter_people_by_selected_tags(candidates, selected_tags, available_tags)
         total_pages = max(1, (len(candidates) + per_page - 1) // per_page)
         if page is None or not 1 <= page <= total_pages:
             return jsonify(error=f"Page must be between 1 and {total_pages}."), 400
@@ -754,14 +835,20 @@ def create_app() -> Flask:
             sources=sorted(sources),
             actions_enabled=app.config["PEOPLE_ACTIONS_ENABLED"],
             tag=tag_query,
+            selected_tags=selected_tags,
+            available_tags=available_tags,
         )
 
     @app.get("/api/people/export")
     def export_people():
-        candidates = filter_people_by_tag(people_union(selected_people_sources()), request.args.get("tag", ""))
+        base_candidates = people_union(selected_people_sources())
+        available_tags = available_people_tags(base_candidates)
+        candidates = filter_people_by_tag(base_candidates, request.args.get("tag", ""))
+        candidates = filter_people_by_selected_tags(candidates, request.args.getlist("tags"), available_tags)
         export = "\n".join(
-            f"{person['tmdb_id']}|{person['name']}"
-            for person in candidates if person.get("tmdb_id")
+            f"{person['tmdb_id']}|{person.get('original_name', person['name'])}"
+            for person in candidates
+            if person.get("tmdb_id") and "Missing TMDb" not in person.get("metadata_tags", [])
         )
         return send_file(
             BytesIO(export.encode("utf-8")),
