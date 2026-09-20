@@ -20,7 +20,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .models import Finding
 from .recommendations import validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_missing_people, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
-from .storage import PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore
+from .storage import PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
@@ -122,6 +122,8 @@ def create_app() -> Flask:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     store = ScanStore(app.config["SCAN_STORE"])
     people_store = PeopleStore(app.config["SCAN_STORE"])
+    usage_stats = UsageStatsStore(app.config["SCAN_STORE"])
+    usage_stats.ensure_people_baseline(len(people_store.list()))
     popular_people_exclusions = PopularPeopleExclusionStore(app.config["SCAN_STORE"])
     popular_people_checks = PopularPeopleCheckStore(app.config["SCAN_STORE"])
     popular_people_flags = PopularPeopleFlagStore(app.config["SCAN_STORE"])
@@ -484,6 +486,7 @@ def create_app() -> Flask:
             }
             for record in people_store.list():
                 if record.get("name", "").casefold() in primary_images:
+                    usage_stats.mark_addressed([record.get("key")])
                     continue
                 person_id = record.get("tmdb_id")
                 if not person_id:
@@ -642,6 +645,10 @@ def create_app() -> Flask:
     if not app.config.get("TESTING"):
         threading.Thread(target=cleanup_loop, name="logscan-cleanup", daemon=True).start()
 
+    @app.context_processor
+    def service_usage():
+        return {"usage_stats": usage_stats.snapshot()}
+
     @app.get("/")
     def index():
         return render_template("index.html", initial_scan=None, initial_batch=None)
@@ -795,7 +802,12 @@ def create_app() -> Flask:
                 uploaded_by_id=uploaded_by_id,
             )
             payloads.append({"id": scan_id, "filename": result.filename, "recommendations": result.recommendations, "metadata": result.metadata, "overview": result.overview, "categories": result.categories, "result_url": result_url, "delete_token": delete_token, "expires_at": expires_at, "uploaded_by_bot": is_bot, "missing_people": missing_people})
-        notify_people_webhook([person for payload in payloads for person in payload["missing_people"]])
+        submitted_people = [person for payload in payloads for person in payload["missing_people"]]
+        usage_stats.record_submission(
+            logs=len(payloads),
+            people=sum(bool(person.get("is_new")) for person in submitted_people),
+        )
+        notify_people_webhook(submitted_people)
         if len(payloads) > 1:
             batch_id, admin_token = store.create_batch(payloads, unscanned_files)
             response = {

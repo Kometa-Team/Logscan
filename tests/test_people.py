@@ -22,7 +22,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
 
 from logscan_web.app import add_missing_people_recommendations, app
 from logscan_web.scanner import extract_missing_people
-from logscan_web.storage import PeopleStore
+from logscan_web.storage import PeopleStore, UsageStatsStore
 
 
 class Response:
@@ -79,6 +79,21 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         self.assertEqual(extract_missing_people(content), [
             {"name": "Hikaru Kondô", "tmdb_image_found": False},
         ])
+
+
+class UsageStatsTests(unittest.TestCase):
+    def test_counters_persist_and_addressed_people_are_only_counted_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stats = UsageStatsStore(directory)
+            stats.ensure_people_baseline(2)
+            stats.record_submission(logs=2, people=1)
+            stats.ensure_people_baseline(1)
+            self.assertEqual(stats.mark_addressed(["tmdb-1", "tmdb-2"]), 2)
+            self.assertEqual(stats.mark_addressed(["tmdb-1"]), 0)
+            restored = UsageStatsStore(directory).snapshot()
+        self.assertEqual(restored["logs_submitted"], 2)
+        self.assertEqual(restored["people_submitted"], 3)
+        self.assertEqual(restored["people_addressed"], 2)
 
 
 class PeopleUnionTests(unittest.TestCase):
@@ -273,6 +288,14 @@ class PeopleUnionTests(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertNotIn("people-status-note", html)
         self.assertNotIn("Image status", html)
+
+    def test_service_activity_is_visible_on_scanner_and_people_pages(self):
+        for path in ("/", "/people"):
+            html = self.client.get(path).get_data(as_text=True)
+            self.assertIn('class="usage-stats"', html)
+            self.assertIn("Logs processed", html)
+            self.assertIn("People submitted", html)
+            self.assertIn("People addressed", html)
 
     def test_log_scanner_header_links_to_people(self):
         html = self.client.get("/").get_data(as_text=True)

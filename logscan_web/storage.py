@@ -125,6 +125,89 @@ class ScanStore:
         return bool(scan_id) and scan_id.replace("-", "").replace("_", "").isalnum()
 
 
+class UsageStatsStore:
+    """Durable lifetime activity counters that are independent of scan expiry."""
+
+    def __init__(self, root: str | os.PathLike[str]):
+        self.path = Path(root) / "usage_stats.json"
+        self.lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock:
+            if not self.path.exists():
+                self._write(self._default())
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            stats = self._read()
+            return {
+                "logs_submitted": stats["logs_submitted"],
+                "people_submitted": stats["people_submitted"],
+                "people_addressed": stats["people_addressed"],
+                "started_at": stats["started_at"],
+            }
+
+    def record_submission(self, *, logs: int = 0, people: int = 0) -> dict:
+        with self.lock:
+            stats = self._read()
+            stats["logs_submitted"] += max(0, int(logs))
+            stats["people_submitted"] += max(0, int(people))
+            self._write(stats)
+            return stats.copy()
+
+    def ensure_people_baseline(self, people: int) -> None:
+        """Seed a new stats file from the durable backlog without lowering later totals."""
+        with self.lock:
+            stats = self._read()
+            baseline = max(0, int(people))
+            if baseline > stats["people_submitted"]:
+                stats["people_submitted"] = baseline
+                self._write(stats)
+
+    def mark_addressed(self, person_keys) -> int:
+        with self.lock:
+            stats = self._read()
+            addressed = set(stats["addressed_person_keys"])
+            new_keys = {str(key) for key in person_keys if key and str(key) not in addressed}
+            if new_keys:
+                addressed.update(new_keys)
+                stats["addressed_person_keys"] = sorted(addressed)
+                stats["people_addressed"] += len(new_keys)
+                self._write(stats)
+            return len(new_keys)
+
+    @staticmethod
+    def _default() -> dict:
+        return {
+            "logs_submitted": 0,
+            "people_submitted": 0,
+            "people_addressed": 0,
+            "addressed_person_keys": [],
+            "started_at": datetime.now(UTC).isoformat(),
+        }
+
+    def _read(self) -> dict:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            raw = {}
+        defaults = self._default()
+        if not isinstance(raw, dict):
+            return defaults
+        for key in ("logs_submitted", "people_submitted", "people_addressed"):
+            value = raw.get(key)
+            defaults[key] = value if isinstance(value, int) and value >= 0 else 0
+        keys = raw.get("addressed_person_keys")
+        defaults["addressed_person_keys"] = [str(key) for key in keys if key] if isinstance(keys, list) else []
+        if isinstance(raw.get("started_at"), str):
+            defaults["started_at"] = raw["started_at"]
+        return defaults
+
+    def _write(self, stats: dict) -> None:
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(stats, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(self.path)
+
+
 class PeopleStore:
     """A small durable backlog for People Posters work, independent of scan expiry."""
 
