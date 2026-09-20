@@ -274,6 +274,11 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertNotIn("people-status-note", html)
         self.assertNotIn("Image status", html)
 
+    def test_log_scanner_header_links_to_people(self):
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn('href="/people">People</a>', html)
+        self.assertIn('aria-label="Utilities"', html)
+
     def test_people_header_uses_official_kometa_icon(self):
         response = self.client.get("/people")
         self.assertEqual(response.status_code, 200)

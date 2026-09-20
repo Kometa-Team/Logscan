@@ -23,7 +23,10 @@
       <img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt="">
       <span>Kometa Utilities</span>
     </a>
-    <span class="utility-label">Log Scanner</span>
+    <nav class="header-links" aria-label="Utilities">
+      <span class="utility-label">Log Scanner</span>
+      <a href="{{ url_for('people_page') }}">People</a>
+    </nav>
   </header>
 
   <main class="shell">
