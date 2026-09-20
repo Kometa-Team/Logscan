@@ -146,7 +146,9 @@ class AnonymousAnalyticsStore:
 
     def record_success(
         self, *, logs: int, lines: int, bytes_processed: int, source: str,
-        batch: bool, versions: list[str], recommendations: list[dict], people: int,
+        batch: bool, versions: list[str], kometa_branches: list[str], launchers: list[str],
+        quickstart_versions: list[str], quickstart_branches: list[str],
+        recommendations: list[dict], people: int,
     ) -> None:
         with self.lock:
             data = self._read()
@@ -159,6 +161,14 @@ class AnonymousAnalyticsStore:
             self._increment(day["sources"], source, max(0, int(logs)))
             for version in versions:
                 self._increment(day["kometa_versions"], version)
+            for branch in kometa_branches:
+                self._increment(day["kometa_branches"], branch)
+            for launcher in launchers:
+                self._increment(day["launchers"], launcher)
+            for version in quickstart_versions:
+                self._increment(day["quickstart_versions"], version)
+            for branch in quickstart_branches:
+                self._increment(day["quickstart_branches"], branch)
             for finding in recommendations:
                 self._increment(day["recommendations_by_id"], finding.get("id", "unknown"))
                 self._increment(day["recommendations_by_severity"], finding.get("severity", "unknown"))
@@ -204,7 +214,8 @@ class AnonymousAnalyticsStore:
             ):
                 totals[key] += day.get(key, 0)
             for key in (
-                "sources", "rejections", "rejection_sources", "kometa_versions",
+                "sources", "rejections", "rejection_sources", "kometa_versions", "kometa_branches",
+                "launchers", "quickstart_versions", "quickstart_branches",
                 "recommendations_by_id", "recommendations_by_severity",
             ):
                 for label, count in day.get(key, {}).items():
@@ -225,7 +236,8 @@ class AnonymousAnalyticsStore:
             "successful_logs": 0, "lines_processed": 0, "bytes_processed": 0,
             "people_submitted": 0, "people_addressed": 0, "address_seconds_total": 0,
             "address_duration_count": 0, "batches": 0, "sources": {}, "rejections": {},
-            "rejection_sources": {}, "kometa_versions": {}, "recommendations_by_id": {},
+            "rejection_sources": {}, "kometa_versions": {}, "kometa_branches": {},
+            "launchers": {}, "quickstart_versions": {}, "quickstart_branches": {}, "recommendations_by_id": {},
             "recommendations_by_severity": {},
         }
 

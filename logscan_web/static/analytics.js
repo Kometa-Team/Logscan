@@ -73,6 +73,10 @@ fetch("/api/analytics").then((response) => {
   document.querySelector("#analytics-since").textContent = `Tracking since ${new Date(startedAt).toLocaleDateString()}`;
   renderBars("#analytics-sources", totals.sources);
   renderBars("#analytics-versions", totals.kometa_versions);
+  renderBars("#analytics-kometa-branches", totals.kometa_branches);
+  renderBars("#analytics-launchers", totals.launchers);
+  renderBars("#analytics-quickstart-versions", totals.quickstart_versions);
+  renderBars("#analytics-quickstart-branches", totals.quickstart_branches);
   renderBars("#analytics-severity", totals.recommendations_by_severity);
   renderBars("#analytics-rejections", totals.rejections);
   renderBars("#analytics-recommendations", totals.recommendations_by_id);

@@ -386,8 +386,18 @@ def create_app() -> Flask:
         """Keep only a conservative version token; never persist arbitrary log text."""
         if not value:
             return "unknown"
-        match = re.search(r"(?i)(?:v)?(\d+\.\d+(?:\.\d+)?)", value)
+        match = re.search(r"(?i)(?:v)?(\d+\.\d+(?:\.\d+)?(?:-build\d+)?)", value)
         return match.group(1) if match else "unknown"
+
+    def normalized_quickstart_version(value: str | None) -> str:
+        if not value:
+            return "unknown"
+        match = re.fullmatch(r"(?i)v?(\d+\.\d+(?:\.\d+)?(?:-build\d+)?)", value.strip())
+        return match.group(1) if match else "unknown"
+
+    def safe_branch(value: str | None, allowed: set[str]) -> str:
+        branch = (value or "").casefold()
+        return branch if branch in allowed else "unknown"
 
     def rejection_category(message: str) -> str:
         lowered = message.casefold()
@@ -851,6 +861,16 @@ def create_app() -> Flask:
             source="discord" if is_bot else "web",
             batch=len(payloads) > 1,
             versions=[normalized_kometa_version(payload["metadata"].get("kometa_version")) for payload in payloads],
+            kometa_branches=[safe_branch(payload["metadata"].get("kometa_branch"), {"master", "develop", "nightly"}) for payload in payloads],
+            launchers=["quickstart" if payload["metadata"].get("quickstart_run") else "direct" for payload in payloads],
+            quickstart_versions=[
+                normalized_quickstart_version(payload["metadata"].get("quickstart_version"))
+                for payload in payloads if payload["metadata"].get("quickstart_run")
+            ],
+            quickstart_branches=[
+                safe_branch(payload["metadata"].get("quickstart_branch"), {"master", "develop"})
+                for payload in payloads if payload["metadata"].get("quickstart_run")
+            ],
             recommendations=[item for payload in payloads for item in payload["recommendations"]],
             people=submitted_count,
         )

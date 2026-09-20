@@ -292,6 +292,16 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
 
     version_match = re.search(r"\bVersion:\s*([^|\r\n]+)", content)
     kometa_version = version_match.group(1).strip() if version_match else None
+    kometa_branch_match = re.search(r"\(Branch:\s*(master|develop|nightly)\)", content, re.IGNORECASE)
+    kometa_branch = kometa_branch_match.group(1).casefold() if kometa_branch_match else "unknown"
+    quickstart_marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", content, re.IGNORECASE)
+    quickstart_fields = {
+        key.casefold(): value
+        for key, value in re.findall(r"\b(quickstart|branch)=([^\s|]+)", quickstart_marker.group(0), re.IGNORECASE)
+    } if quickstart_marker else {}
+    quickstart_branch = quickstart_fields.get("branch", "unknown").casefold()
+    if quickstart_branch not in {"master", "develop"}:
+        quickstart_branch = "unknown"
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", content)
     detected_run_time = run_match.group(1).strip() if run_match else None
     context = ScanContext.from_content(
@@ -309,6 +319,10 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
 
     metadata = {
         "kometa_version": kometa_version,
+        "kometa_branch": kometa_branch,
+        "quickstart_run": bool(quickstart_marker),
+        "quickstart_version": quickstart_fields.get("quickstart"),
+        "quickstart_branch": quickstart_branch,
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": detected_run_time is not None,
         "header_found": kometa_version is not None,
