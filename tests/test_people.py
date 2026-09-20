@@ -21,7 +21,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
 }), encoding="utf-8")
 
 from logscan_web.app import add_missing_people_recommendations, app
-from logscan_web.scanner import extract_missing_people
+from logscan_web.scanner import extract_missing_people, scan_log
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -81,6 +81,19 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         ])
 
 
+class RuntimeMetadataTests(unittest.TestCase):
+    def test_kometa_and_quickstart_channels_are_extracted_from_safe_markers(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Python 3.12.1) (Branch: nightly) |",
+            "[Quickstart] Run marker: started=private config=private quickstart=0.10.4-build302 branch=develop",
+        ])
+        metadata = scan_log("meta.log", content.encode())["metadata"] if isinstance(scan_log("meta.log", content.encode()), dict) else scan_log("meta.log", content.encode()).metadata
+        self.assertEqual(metadata["kometa_branch"], "nightly")
+        self.assertTrue(metadata["quickstart_run"])
+        self.assertEqual(metadata["quickstart_version"], "0.10.4-build302")
+        self.assertEqual(metadata["quickstart_branch"], "develop")
+
+
 class AnonymousAnalyticsTests(unittest.TestCase):
     def test_daily_analytics_are_aggregate_and_persistent(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -88,8 +101,9 @@ class AnonymousAnalyticsTests(unittest.TestCase):
             analytics.record_rejection("not_kometa_log", "web")
             analytics.record_success(
                 logs=2, lines=1200, bytes_processed=5000, source="discord", batch=True,
-                versions=["2.1.0", "unknown"],
-                recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
+                versions=["2.1.0", "unknown"], kometa_branches=["master", "nightly"],
+                launchers=["direct", "quickstart"], quickstart_versions=["0.10.4-build302"],
+                quickstart_branches=["develop"], recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
             )
             analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
             analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
@@ -98,6 +112,9 @@ class AnonymousAnalyticsTests(unittest.TestCase):
         self.assertEqual(snapshot["totals"]["successful_logs"], 2)
         self.assertEqual(snapshot["totals"]["people_addressed"], 1)
         self.assertEqual(snapshot["totals"]["sources"], {"discord": 2})
+        self.assertEqual(snapshot["totals"]["kometa_branches"], {"master": 1, "nightly": 1})
+        self.assertEqual(snapshot["totals"]["launchers"], {"direct": 1, "quickstart": 1})
+        self.assertEqual(snapshot["totals"]["quickstart_branches"], {"develop": 1})
         self.assertNotIn("tmdb-1", raw)
 
 
