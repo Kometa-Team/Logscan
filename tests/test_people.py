@@ -86,12 +86,13 @@ class UsageStatsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             stats = UsageStatsStore(directory)
             stats.ensure_people_baseline(2)
-            stats.record_submission(logs=2, people=1)
+            stats.record_submission(logs=2, lines=12500, people=1)
             stats.ensure_people_baseline(1)
             self.assertEqual(stats.mark_addressed(["tmdb-1", "tmdb-2"]), 2)
             self.assertEqual(stats.mark_addressed(["tmdb-1"]), 0)
             restored = UsageStatsStore(directory).snapshot()
         self.assertEqual(restored["logs_submitted"], 2)
+        self.assertEqual(restored["lines_processed"], 12500)
         self.assertEqual(restored["people_submitted"], 3)
         self.assertEqual(restored["people_addressed"], 2)
 
@@ -294,6 +295,7 @@ class PeopleUnionTests(unittest.TestCase):
             html = self.client.get(path).get_data(as_text=True)
             self.assertIn('class="usage-stats"', html)
             self.assertIn("Logs processed", html)
+            self.assertIn("Lines processed", html)
             self.assertIn("People submitted", html)
             self.assertIn("People addressed", html)
 

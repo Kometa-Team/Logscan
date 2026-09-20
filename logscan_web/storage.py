@@ -141,15 +141,17 @@ class UsageStatsStore:
             stats = self._read()
             return {
                 "logs_submitted": stats["logs_submitted"],
+                "lines_processed": stats["lines_processed"],
                 "people_submitted": stats["people_submitted"],
                 "people_addressed": stats["people_addressed"],
                 "started_at": stats["started_at"],
             }
 
-    def record_submission(self, *, logs: int = 0, people: int = 0) -> dict:
+    def record_submission(self, *, logs: int = 0, lines: int = 0, people: int = 0) -> dict:
         with self.lock:
             stats = self._read()
             stats["logs_submitted"] += max(0, int(logs))
+            stats["lines_processed"] += max(0, int(lines))
             stats["people_submitted"] += max(0, int(people))
             self._write(stats)
             return stats.copy()
@@ -179,6 +181,7 @@ class UsageStatsStore:
     def _default() -> dict:
         return {
             "logs_submitted": 0,
+            "lines_processed": 0,
             "people_submitted": 0,
             "people_addressed": 0,
             "addressed_person_keys": [],
@@ -193,7 +196,7 @@ class UsageStatsStore:
         defaults = self._default()
         if not isinstance(raw, dict):
             return defaults
-        for key in ("logs_submitted", "people_submitted", "people_addressed"):
+        for key in ("logs_submitted", "lines_processed", "people_submitted", "people_addressed"):
             value = raw.get(key)
             defaults[key] = value if isinstance(value, int) and value >= 0 else 0
         keys = raw.get("addressed_person_keys")

@@ -15,9 +15,10 @@
   <main class="shell people-shell">
     <section class="hero"><p class="eyebrow">People Posters</p><h1>People</h1><p class="hero-copy">One queue for people discovered in logs and people currently trending across IMDb and TMDb. IMDb StarMeter people appear first, topped up to 250 from TMDb Popular People, with current TMDb profile images and matching Kometa People Images.</p>
       <dl class="usage-stats" aria-label="Service activity since tracking began">
-        <div><dt>Logs processed</dt><dd>{{ usage_stats.logs_submitted }}</dd></div>
-        <div><dt>People submitted</dt><dd>{{ usage_stats.people_submitted }}</dd></div>
-        <div><dt>People addressed</dt><dd>{{ usage_stats.people_addressed }}</dd></div>
+        <div><dt>Logs processed</dt><dd>{{ "{:,}".format(usage_stats.logs_submitted) }}</dd></div>
+        <div><dt>Lines processed</dt><dd>{{ "{:,}".format(usage_stats.lines_processed) }}</dd></div>
+        <div><dt>People submitted</dt><dd>{{ "{:,}".format(usage_stats.people_submitted) }}</dd></div>
+        <div><dt>People addressed</dt><dd>{{ "{:,}".format(usage_stats.people_addressed) }}</dd></div>
       </dl></section>
     <div class="people-toolbar">
       <div class="people-toolbar-actions">

@@ -35,9 +35,10 @@
       <h1>Turn your Kometa log into a clear action plan.</h1>
       <p class="hero-copy">Upload a Kometa log to identify configuration issues, common errors, and practical recommendations. Logs and scan results are automatically deleted after 48 hours. Keep the private deletion link if you want to remove yours sooner.</p>
       <dl class="usage-stats" aria-label="Service activity since tracking began">
-        <div><dt>Logs processed</dt><dd>{{ usage_stats.logs_submitted }}</dd></div>
-        <div><dt>People submitted</dt><dd>{{ usage_stats.people_submitted }}</dd></div>
-        <div><dt>People addressed</dt><dd>{{ usage_stats.people_addressed }}</dd></div>
+        <div><dt>Logs processed</dt><dd>{{ "{:,}".format(usage_stats.logs_submitted) }}</dd></div>
+        <div><dt>Lines processed</dt><dd>{{ "{:,}".format(usage_stats.lines_processed) }}</dd></div>
+        <div><dt>People submitted</dt><dd>{{ "{:,}".format(usage_stats.people_submitted) }}</dd></div>
+        <div><dt>People addressed</dt><dd>{{ "{:,}".format(usage_stats.people_addressed) }}</dd></div>
       </dl>
     </section>
 

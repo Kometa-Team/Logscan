@@ -805,6 +805,7 @@ def create_app() -> Flask:
         submitted_people = [person for payload in payloads for person in payload["missing_people"]]
         usage_stats.record_submission(
             logs=len(payloads),
+            lines=sum(payload["metadata"].get("line_count", 0) for payload in payloads),
             people=sum(bool(person.get("is_new")) for person in submitted_people),
         )
         notify_people_webhook(submitted_people)
