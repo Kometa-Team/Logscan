@@ -126,6 +126,7 @@ h1 { margin: 0; max-width: 740px; font-size: clamp(2.5rem, 6vw, 4.35rem); line-h
 .usage-stats div { display: flex; flex-direction: column-reverse; gap: 3px; }
 .usage-stats dt { color: var(--muted); font-size: .68rem; font-weight: 600; }
 .usage-stats dd { margin: 0; color: var(--text); font-size: 1.25rem; font-weight: 700; }
+.usage-since { margin: 9px 0 0; color: #737c99; font-size: .66rem; }
 .analytics-shell { padding-bottom: 80px; }
 .analytics-heading { max-width: 760px; padding: 52px 0 34px; }
 .analytics-heading h1 { font-size: clamp(2.5rem, 6vw, 4.35rem); }
@@ -336,6 +337,10 @@ details[open] .chevron { transform: rotate(90deg); }
 .recommendation-meta { margin-top: 6px; color: #939dbb; font-size: .76rem; font-style: italic; }
 .line-link { margin: 0 2px; padding: 1px 4px; border: 0; border-radius: 4px; background: rgba(114,119,248,.12); color: #b8bdff; font: inherit; font-style: italic; text-decoration: underline; text-decoration-color: rgba(184,189,255,.38); text-underline-offset: 2px; }
 .line-link:hover { background: rgba(114,119,248,.22); color: white; }
+.line-reference-overflow { font-style: normal; }
+.line-reference-overflow summary { width: fit-content; cursor: pointer; color: #b8bdff; font-weight: 600; }
+.line-reference-overflow[open] summary { margin-bottom: 8px; }
+.line-reference-overflow > div { max-height: 180px; overflow-y: auto; padding: 8px; border-left: 2px solid var(--border); color: #939dbb; line-height: 1.9; }
 .empty-state { padding: 48px 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); text-align: center; color: var(--muted); }
 #form-status.error { color: #fda4af !important; }
 .loading .upload-icon { animation: pulse 1.3s ease-in-out infinite; }

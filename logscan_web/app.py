@@ -672,7 +672,13 @@ def create_app() -> Flask:
 
     @app.context_processor
     def service_usage():
-        return {"usage_stats": usage_stats.snapshot()}
+        stats = usage_stats.snapshot()
+        try:
+            started = datetime.fromisoformat(stats["started_at"])
+            stats["tracking_since"] = started.strftime("%B %d, %Y").replace(" 0", " ")
+        except (KeyError, TypeError, ValueError):
+            stats["tracking_since"] = "tracking began"
+        return {"usage_stats": stats}
 
     @app.get("/")
     def index():
