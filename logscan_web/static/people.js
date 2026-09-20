@@ -215,7 +215,18 @@ function addPerson(person) {
     addImage(images, { preview_url: person.kometa_image, download_url: person.kometa_image }, "Kometa Repo Image", "", person.name);
   }
   images.append(googleImageSearchTile(person.name));
-  (person.kometa_variant_images || []).forEach((variant) => addImage(images, { preview_url: variant.url, download_url: variant.url }, variant.label, "", person.name));
+
+  const variants = person.kometa_variant_images || [];
+  const variantSection = document.createElement("details");
+  variantSection.className = "people-variant-section";
+  if (variants.length) {
+    const summary = document.createElement("summary");
+    summary.textContent = `Show ${variants.length} more repository ${variants.length === 1 ? "style" : "styles"}`;
+    const variantImages = document.createElement("div");
+    variantImages.className = "image-row variant-image-row";
+    variants.forEach((variant) => addImage(variantImages, { preview_url: variant.url, download_url: variant.url }, variant.label, "", person.name));
+    variantSection.append(summary, variantImages);
+  } else variantSection.hidden = true;
 
   const flagReason = document.createElement("aside");
   flagReason.className = "flag-reason";
@@ -223,7 +234,7 @@ function addPerson(person) {
     const label = document.createElement("strong"); label.textContent = "Flag Reason";
     flagReason.append(label, document.createTextNode(person.flag_reason));
   } else flagReason.hidden = true;
-  card.append(controls, identity, detail, knownFor, guidance, flagReason, images);
+  card.append(controls, identity, detail, knownFor, guidance, flagReason, images, variantSection);
   gallery.append(card);
 }
 

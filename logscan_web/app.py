@@ -28,6 +28,7 @@ POPULAR_PEOPLE_PAGE_SIZE = 25
 TMDB_POPULAR_PAGE_SIZE = 20
 KOMETA_IMAGE_SOURCES = (
     ("Kometa Repo Image", "https://raw.githubusercontent.com/Kometa-Team/People-Images/refs/heads/master/README.md"),
+    ("Black & White", "https://raw.githubusercontent.com/Kometa-Team/People-Images-bw/master/README.md"),
     ("DIIIVOY", "https://raw.githubusercontent.com/Kometa-Team/People-Images-diiivoy/master/README.md"),
     ("DIIIVOY Color", "https://raw.githubusercontent.com/Kometa-Team/People-Images-diiivoycolor/master/README.md"),
     ("Rainier", "https://raw.githubusercontent.com/Kometa-Team/People-Images-rainier/master/README.md"),
