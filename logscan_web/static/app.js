@@ -218,14 +218,7 @@ function appendInlineFormatting(container, text) {
   container.append(document.createTextNode(text.slice(cursor)));
 }
 
-function appendRecommendationMeta(container, text) {
-  const marker = /^(.*?Line number\(s\):\s*)(.*)$/i.exec(text);
-  if (!marker) {
-    appendInlineFormatting(container, text);
-    return;
-  }
-  appendInlineFormatting(container, marker[1]);
-  const references = marker[2];
+function appendLineReferenceLinks(container, references) {
   const rangePattern = /\d+(?:-\d+)?/g;
   let cursor = 0;
   for (const match of references.matchAll(rangePattern)) {
@@ -241,6 +234,29 @@ function appendRecommendationMeta(container, text) {
     cursor = match.index + match[0].length;
   }
   container.append(document.createTextNode(references.slice(cursor)));
+}
+
+function appendRecommendationMeta(container, text) {
+  const marker = /^(.*?Line number\(s\):\s*)(.*)$/i.exec(text);
+  if (!marker) {
+    appendInlineFormatting(container, text);
+    return;
+  }
+  const references = marker[2];
+  const referenceCount = [...references.matchAll(/\d+(?:-\d+)?/g)].length;
+  if (referenceCount <= 12) {
+    appendInlineFormatting(container, marker[1]);
+    appendLineReferenceLinks(container, references);
+    return;
+  }
+  const details = document.createElement("details");
+  details.className = "line-reference-overflow";
+  const summary = document.createElement("summary");
+  summary.textContent = `${referenceCount} matching line references`;
+  const links = document.createElement("div");
+  appendLineReferenceLinks(links, references);
+  details.append(summary, links);
+  container.append(details);
 }
 
 function formatLineRanges(lineNumbers) {

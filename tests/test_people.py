@@ -318,6 +318,7 @@ class PeopleUnionTests(unittest.TestCase):
             self.assertIn("Lines processed", html)
             self.assertIn("People submitted", html)
             self.assertIn("People addressed", html)
+            self.assertIn("Tracking since", html)
 
     def test_log_scanner_header_links_to_people(self):
         html = self.client.get("/").get_data(as_text=True)
