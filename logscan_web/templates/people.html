@@ -2,14 +2,35 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Missing People · Kometa Utilities</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
+  <title>People · Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-  <script src="{{ url_for('static', filename='people_images.js') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js') }}" defer></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260919-4') }}">
+  <script src="{{ url_for('static', filename='people_images.js', v='20260919-4') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20260919-4') }}" defer></script>
 </head>
 <body>
-  <header class="site-header"><a class="brand" href="/"><span class="brand-mark">K</span><span>Kometa Utilities</span></a><nav class="header-links"><a href="/">Log Scanner</a><a href="/people/popular">Popular People</a><span class="utility-label">Missing People</span></nav></header>
-  <main class="shell people-shell"><section class="hero"><p class="eyebrow">People Posters</p><h1>Missing People Images</h1><p class="hero-copy">Choose a TMDb profile image for each person, then mark the request complete when the poster has been handled.</p></section><section id="people-gallery" class="people-gallery" aria-live="polite"></section></main>
+  <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links"><a href="/">Log Scanner</a><span class="utility-label">People</span></nav></header>
+  <main class="shell people-shell">
+    <section class="hero"><p class="eyebrow">People Posters</p><h1>People</h1><p class="hero-copy">One queue for people discovered in logs and people currently trending across IMDb and TMDb. IMDb StarMeter people appear first, topped up to 250 from TMDb Popular People, with current TMDb profile images and matching Kometa People Images.</p></section>
+    <div class="people-toolbar">
+      <div class="source-filters" role="group" aria-label="People sources">
+        <button class="source-filter" type="button" data-source="missing" aria-pressed="true"><span class="source-dot missing"></span>Missing Images</button>
+        <button class="source-filter" type="button" data-source="trending" aria-pressed="true"><span class="source-dot trending"></span>Trending</button>
+      </div>
+      <div class="people-toolbar-actions">
+        <form id="tag-search" class="tag-search" role="search">
+          <button class="tag-search-submit" type="submit" title="Search tags" aria-label="Search tags"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></button>
+          <input id="tag-search-input" type="search" name="tag" placeholder="Filter tags" autocomplete="off" title="Filter tags; * matches any text and ? matches one character" aria-label="Filter tags; wildcards supported">
+          <button id="tag-search-clear" type="button" title="Clear tag filter" aria-label="Clear tag filter"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </form>
+        <output id="tag-search-count" class="tag-search-count" aria-live="polite" hidden></output>
+        <a id="people-export" class="secondary-button icon-button" href="/api/people/export" title="Export filtered processing list as a tmdbid|name text file" aria-label="Export filtered processing list as a tmdbid|name text file"><i class="fa-solid fa-file-lines" aria-hidden="true"></i></a>
+      </div>
+    </div>
+    <section id="people-gallery" class="people-gallery" aria-live="polite">Loading people...</section>
+    <nav id="people-pagination" class="pagination" aria-label="People pages"></nav>
+  </main>
 </body>
 </html>

@@ -18,6 +18,8 @@ window.PeopleImages = {
     imageElement.src = image.preview_url;
     imageElement.alt = image.alt || "Profile image";
     imageElement.loading = "lazy";
+    imageElement.decoding = "async";
+    imageElement.fetchPriority = "low";
     link.append(imageElement);
     const imageFrame = document.createElement("div");
     imageFrame.className = "image-frame";
@@ -57,6 +59,8 @@ window.PeopleImages = {
     image.src = "/static/google.jpg";
     image.alt = "Google Image Search";
     image.loading = "lazy";
+    image.decoding = "async";
+    image.fetchPriority = "low";
     const label = document.createElement("div");
     label.className = "image-label";
     label.textContent = "Google Image Search";
