@@ -102,6 +102,25 @@ class RuntimeMetadataTests(unittest.TestCase):
 
 
 class AnonymousAnalyticsTests(unittest.TestCase):
+    def test_existing_daily_buckets_migrate_when_new_dimensions_are_added(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "usage_analytics.json").write_text(json.dumps({
+                "started_at": datetime.now(UTC).isoformat(),
+                "days": {datetime.now(UTC).date().isoformat(): {"successful_logs": 4}},
+                "addressed_keys": [],
+            }), encoding="utf-8")
+            analytics = AnonymousAnalyticsStore(directory)
+            analytics.record_success(
+                logs=1, lines=10, bytes_processed=100, source="discord", batch=False,
+                versions=["2.3.1-build24"], kometa_branches=["nightly"], launchers=["quickstart"],
+                quickstart_versions=["0.10.4-build302"], quickstart_branches=["develop"],
+                recommendations=[], people=0,
+            )
+            totals = analytics.snapshot()["totals"]
+        self.assertEqual(totals["successful_logs"], 5)
+        self.assertEqual(totals["kometa_branches"], {"nightly": 1})
+        self.assertEqual(totals["quickstart_branches"], {"develop": 1})
+
     def test_daily_analytics_are_aggregate_and_persistent(self):
         with tempfile.TemporaryDirectory() as directory:
             analytics = AnonymousAnalyticsStore(directory)
@@ -374,6 +393,17 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertIn("days", payload)
         self.assertNotIn("users", payload)
         self.assertNotIn("filenames", payload)
+
+    def test_api_internal_errors_are_returned_as_json(self):
+        app.config["PROPAGATE_EXCEPTIONS"] = False
+        try:
+            with patch("logscan_web.storage.AnonymousAnalyticsStore.snapshot", side_effect=RuntimeError("private failure detail")):
+                response = self.client.get("/api/analytics")
+        finally:
+            app.config.pop("PROPAGATE_EXCEPTIONS", None)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.mimetype, "application/json")
+        self.assertNotIn("private failure detail", response.get_data(as_text=True))
 
     def test_old_beta_routes_are_removed(self):
         self.assertEqual(self.client.get("/people/popular").status_code, 404)
