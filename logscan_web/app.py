@@ -791,8 +791,27 @@ def create_app() -> Flask:
         upload = request.files.get("log")
         if upload is None or not upload.filename:
             return jsonify(error="Choose a log file to scan."), 400
+        upload_filename = upload.filename
+        content = upload.read()
+        supplied_job_id = request.headers.get("X-Scan-Job-ID", "")
+        job_id = supplied_job_id if re.fullmatch(r"[A-Za-z0-9_-]{20,80}", supplied_job_id) else None
+        if job_id:
+            update_scan_job(job_id, "queued")
+
+            def run_background_validation():
+                update_scan_job(job_id, "validating")
+                try:
+                    files = find_scannable_archive_logs(upload_filename, content)
+                except ScanError as exc:
+                    update_scan_job(job_id, "failed", error=str(exc))
+                    return
+                result = {"files": [{"filename": filename, "content_size": size} for filename, size in files]}
+                update_scan_job(job_id, "complete", result=result)
+
+            background_scan_executor.submit(run_background_validation)
+            return jsonify(job_id=job_id, phase="queued"), 202
         try:
-            files = find_scannable_archive_logs(upload.filename, upload.read())
+            files = find_scannable_archive_logs(upload_filename, content)
         except ScanError as exc:
             return jsonify(error=str(exc)), 400
         return jsonify(files=[{"filename": filename, "content_size": size} for filename, size in files])
@@ -810,7 +829,7 @@ def create_app() -> Flask:
                 waiting = sorted(
                     (candidate_id, candidate)
                     for candidate_id, candidate in scan_jobs.items()
-                    if candidate.get("phase") in {"uploading", "queued", "scanning", "saving"}
+                    if candidate.get("phase") in {"uploading", "queued", "validating", "scanning", "saving"}
                 )
                 waiting.sort(key=lambda item: item[1].get("started_at", 0))
                 position = next(
