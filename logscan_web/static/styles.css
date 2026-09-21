@@ -118,17 +118,18 @@ button { cursor: pointer; }
 
 .shell { width: min(1040px, calc(100% - 40px)); margin: 0 auto; }
 .shell.people-shell { width: min(1180px, calc(100% - 40px)); }
-.hero { max-width: 760px; padding: 52px 0 42px; }
+.hero { width: 100%; max-width: none; padding: 52px 0 42px; }
+.hero h1, .hero .hero-copy, .analytics-heading h1, .analytics-heading .hero-copy { width: 100%; max-width: none; }
 .eyebrow { margin: 0 0 14px; color: var(--accent-bright); font-size: .76rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
 h1 { margin: 0; max-width: 740px; font-size: clamp(2.5rem, 6vw, 4.35rem); line-height: 1.03; letter-spacing: -.055em; }
 .hero-copy { max-width: 680px; margin: 24px 0 0; color: var(--muted); font-size: 1.03rem; line-height: 1.75; }
-.usage-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 680px; margin: 28px 0 0; padding-top: 16px; border-top: 1px solid var(--border); }
+.usage-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; margin: 28px 0 0; padding-top: 16px; border-top: 1px solid var(--border); }
 .usage-stats div { display: flex; flex-direction: column-reverse; gap: 3px; }
 .usage-stats dt { color: var(--muted); font-size: .68rem; font-weight: 600; }
 .usage-stats dd { margin: 0; color: var(--text); font-size: 1.25rem; font-weight: 700; }
 .usage-since { margin: 9px 0 0; color: #737c99; font-size: .66rem; }
 .analytics-shell { padding-bottom: 80px; }
-.analytics-heading { max-width: 760px; padding: 52px 0 34px; }
+.analytics-heading { width: 100%; max-width: none; padding: 52px 0 34px; }
 .analytics-heading h1 { font-size: clamp(2.5rem, 6vw, 4.35rem); }
 .analytics-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--border); }
 .analytics-summary > div { display: flex; min-height: 112px; padding: 18px 16px; flex-direction: column-reverse; justify-content: center; gap: 7px; border-right: 1px solid var(--border); }
@@ -454,6 +455,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   @media (max-width: 520px) {
     .overview-grid { grid-template-columns: 1fr; }
   .site-header, .shell, footer { width: min(100% - 24px, 1040px); }
+  .shell.people-shell { width: min(100% - 24px, 1180px); }
   .utility-label { display: none; }
   .form-footer, .results-heading, footer { align-items: stretch; flex-direction: column; }
   .results-actions, .viewer-actions { flex-direction: column; }
