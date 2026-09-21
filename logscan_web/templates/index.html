@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260921-1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260921-2') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
   <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260921-1') }}" defer></script>
@@ -31,7 +31,7 @@
   </header>
 
   <main class="shell">
-    <section class="hero">
+    <section class="hero home-hero">
       <p class="eyebrow">Kometa Logscan</p>
       <h1>Turn your Kometa log into a clear action plan.</h1>
       <p class="hero-copy">Upload a Kometa log to identify configuration issues, common errors, and practical recommendations. Logs and scan results are automatically deleted after 48 hours. Keep the private deletion link if you want to remove yours sooner.</p>
