@@ -18,4 +18,4 @@ USER appuser
 EXPOSE 8000
 VOLUME ["/data"]
 
-CMD ["sh", "-c", "gunicorn --workers 1 --threads 1 --timeout 900 --access-logfile - --error-logfile - --log-level info --bind 0.0.0.0:${PORT:-8000} logscan_web.app:app"]
+CMD ["sh", "-c", "gunicorn --workers 1 --threads 4 --timeout 900 --access-logfile - --error-logfile - --log-level info --bind 0.0.0.0:${PORT:-8000} logscan_web.app:app"]

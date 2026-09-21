@@ -776,6 +776,47 @@ dropZone.addEventListener("drop", (event) => {
   if (files.length) selectedFiles(files);
 });
 
+let scanStatusTimer = null;
+const scanPhaseLabels = {
+  uploading: "Uploading",
+  queued: "Waiting for scanner",
+  scanning: "Extracting and scanning",
+  saving: "Saving results",
+  complete: "Scan complete",
+  failed: "Scan failed",
+};
+function elapsedLabel(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+function stopScanStatus() {
+  if (scanStatusTimer) clearInterval(scanStatusTimer);
+  scanStatusTimer = null;
+}
+async function refreshScanStatus(jobId, recover = false) {
+  const response = await fetch(`/api/scan-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+  if (!response.ok) return;
+  const job = await response.json();
+  status.textContent = `${scanPhaseLabels[job.phase] || "Scanning"} · ${elapsedLabel(job.elapsed_seconds || 0)}`;
+  if (job.phase === "failed") {
+    status.textContent = job.error || "The scan could not be completed.";
+    status.classList.add("error");
+    sessionStorage.removeItem("activeScanJob");
+    stopScanStatus();
+    dropZone.classList.remove("loading");
+    scanButton.disabled = false;
+  } else if (job.phase === "complete") {
+    sessionStorage.removeItem("activeScanJob");
+    stopScanStatus();
+    if (recover && job.redirect_url) location.assign(job.redirect_url);
+  }
+}
+function watchScanStatus(jobId, recover = false) {
+  stopScanStatus();
+  refreshScanStatus(jobId, recover).catch(() => {});
+  scanStatusTimer = setInterval(() => refreshScanStatus(jobId, recover).catch(() => {}), 2000);
+}
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const files = [...input.files];
@@ -784,13 +825,17 @@ form.addEventListener("submit", async (event) => {
   scanButton.disabled = true;
   status.textContent = `Scanning 0 of ${files.length} logs…`;
   status.classList.remove("error");
+  const jobId = crypto.randomUUID();
+  sessionStorage.setItem("activeScanJob", jobId);
+  watchScanStatus(jobId);
   try {
     const failures = [];
     status.textContent = `Scanning ${files.length} log${files.length === 1 ? "" : "s"}…`;
     const body = new FormData();
     files.forEach((file) => body.append("log", file));
-    const response = await fetch("/api/scan", { method: "POST", body });
+    const response = await fetch("/api/scan", { method: "POST", body, headers: { "X-Scan-Job-ID": jobId } });
     const data = await response.json().catch(() => ({}));
+    sessionStorage.removeItem("activeScanJob");
     if (!response.ok) {
       failures.push({ filename: files.map((file) => file.name).join(", "), message: data.error || "The scan could not be completed." });
     }
@@ -826,9 +871,21 @@ form.addEventListener("submit", async (event) => {
       status.textContent = error.message;
     }
     status.classList.add("error");
+    // A lost connection does not mean the server stopped scanning. Keep the
+    // job ID so this tab (or a refreshed one) can recover the result.
+    if (error instanceof TypeError) {
+      status.textContent = "Connection interrupted. Checking scan status…";
+      status.classList.remove("error");
+      watchScanStatus(jobId, true);
+      return;
+    }
+    sessionStorage.removeItem("activeScanJob");
   } finally {
-    dropZone.classList.remove("loading");
-    scanButton.disabled = false;
+    if (!sessionStorage.getItem("activeScanJob")) {
+      stopScanStatus();
+      dropZone.classList.remove("loading");
+      scanButton.disabled = false;
+    }
   }
 });
 
@@ -1020,6 +1077,13 @@ function updateRetentionCountdown(scan) {
   };
   render();
   retentionTimer = setInterval(render, 30000);
+}
+
+const activeScanJob = sessionStorage.getItem("activeScanJob");
+if (activeScanJob) {
+  dropZone.classList.add("loading");
+  scanButton.disabled = true;
+  watchScanStatus(activeScanJob, true);
 }
 
 if (initialScan) {

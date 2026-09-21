@@ -136,6 +136,26 @@ def create_app() -> Flask:
     popular_people_cache = {"expires_at": 0.0, "snapshot_id": "", "people": []}
     popular_people_lock = threading.Lock()
     popular_people_refreshing = False
+    scan_jobs: dict[str, dict] = {}
+    scan_jobs_lock = threading.Lock()
+    scan_slot = threading.Semaphore(1)
+
+    def update_scan_job(job_id: str | None, phase: str, *, error: str | None = None, redirect_url: str | None = None) -> None:
+        if not job_id:
+            return
+        now = time.time()
+        with scan_jobs_lock:
+            for expired_id in [
+                key for key, value in scan_jobs.items()
+                if now - value.get("updated_at", now) > 3600
+            ]:
+                scan_jobs.pop(expired_id, None)
+            job = scan_jobs.setdefault(job_id, {"started_at": now})
+            job.update(phase=phase, updated_at=now)
+            if error:
+                job["error"] = error
+            if redirect_url:
+                job["redirect_url"] = redirect_url
     popular_people_payload_cache: dict[tuple, list[dict]] = {}
     popular_people_payload_lock = threading.Lock()
 
@@ -772,10 +792,25 @@ def create_app() -> Flask:
             return jsonify(error=str(exc)), 400
         return jsonify(files=[{"filename": filename, "content_size": size} for filename, size in files])
 
+    @app.get("/api/scan-jobs/<job_id>")
+    def scan_job_status(job_id):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{20,80}", job_id):
+            abort(404)
+        with scan_jobs_lock:
+            job = scan_jobs.get(job_id)
+            if job is None:
+                abort(404)
+            payload = dict(job)
+        payload["elapsed_seconds"] = max(0, round(time.time() - payload["started_at"]))
+        return jsonify(payload)
+
     @app.post("/api/scan")
     @app.post("/api/bot/scan")
     def scan():
         is_bot = bot_request_is_authorized()
+        supplied_job_id = request.headers.get("X-Scan-Job-ID", "")
+        job_id = supplied_job_id if not is_bot and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", supplied_job_id) else None
+        update_scan_job(job_id, "uploading")
         if request.path == "/api/bot/scan" and not is_bot:
             analytics.record_rejection("unauthorized_bot", "discord")
             return jsonify(error="Invalid API key."), 401
@@ -795,13 +830,22 @@ def create_app() -> Flask:
                         archive.writestr(item.filename, item.read())
                 content = bundled_uploads.getvalue()
                 upload_filename = "website-log-batch.zip"
-            scans = scan_archive_logs(upload_filename, content)
+            if not scan_slot.acquire(blocking=False):
+                update_scan_job(job_id, "queued")
+                scan_slot.acquire()
+            update_scan_job(job_id, "scanning")
+            try:
+                scans = scan_archive_logs(upload_filename, content)
+            finally:
+                scan_slot.release()
             if not scans:
                 filename, content = prepare_scan_input(upload_filename, content)
                 scans = [(filename, content, scan_log(filename, content))]
         except ScanError as exc:
             analytics.record_rejection(rejection_category(str(exc)), "discord" if is_bot else "web")
+            update_scan_job(job_id, "failed", error=str(exc))
             return jsonify(error=str(exc)), 400
+        update_scan_job(job_id, "saving")
         source_url = request.form.get("source_url") if is_bot else None
         uploaded_by = request.form.get("uploaded_by") if is_bot else None
         uploaded_by_id = request.form.get("uploaded_by_id") if is_bot else None
@@ -892,10 +936,13 @@ def create_app() -> Flask:
                 "batch_admin_url": url_for("batch_admin_page", batch_id=batch_id, token=admin_token, _external=True),
                 "unscanned_files": unscanned_files,
             }
+            update_scan_job(job_id, "complete", redirect_url=response["batch_admin_url"])
             return jsonify(response)
         if request.path == "/api/bot/scan":
             response = {"scans": payloads}
             return jsonify(response)
+        private_result_url = "{}#delete={}".format(payloads[0]["result_url"], payloads[0]["delete_token"])
+        update_scan_job(job_id, "complete", redirect_url=private_result_url)
         return jsonify({"scans": payloads}) if len(payloads) > 1 else jsonify(payloads[0])
 
     @app.get("/api/analytics")
@@ -1065,6 +1112,11 @@ def create_app() -> Flask:
 
     @app.errorhandler(500)
     def internal_server_error(error):
+        update_scan_job(
+            request.headers.get("X-Scan-Job-ID"),
+            "failed",
+            error="The Logscan service encountered an internal error. Check the service logs for details.",
+        )
         if request.path.startswith("/api/"):
             return jsonify(error="The Logscan service encountered an internal error. Check the service logs for details."), 500
         return error

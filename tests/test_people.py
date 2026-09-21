@@ -91,6 +91,23 @@ class UploadLimitTests(unittest.TestCase):
 
 
 class StreamingScanTests(unittest.TestCase):
+    def test_web_upload_reports_live_job_status_and_private_result(self):
+        job_id = "12345678-1234-1234-1234-123456789abc"
+        response = app.test_client().post(
+            "/api/scan",
+            data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "meta.log")},
+            content_type="multipart/form-data",
+            headers={"X-Scan-Job-ID": job_id},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        status = app.test_client().get(f"/api/scan-jobs/{job_id}")
+        self.assertEqual(status.status_code, 200)
+        payload = status.get_json()
+        self.assertEqual(payload["phase"], "complete")
+        self.assertGreaterEqual(payload["elapsed_seconds"], 0)
+        self.assertIn("#delete=", payload["redirect_url"])
+
     def test_disk_backed_http_upload_persists_before_removing_temporary_file(self):
         content = b"[kometa.py:1] [WARNING] | timed out.\n"
         archive_bytes = BytesIO()
