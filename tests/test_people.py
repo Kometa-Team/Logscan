@@ -117,6 +117,44 @@ class StreamingScanTests(unittest.TestCase):
         self.assertGreaterEqual(payload["elapsed_seconds"], 0)
         self.assertIn("#delete=", payload["redirect_url"])
 
+    def test_bot_upload_runs_in_background_and_preserves_requester(self):
+        job_id = "discord-background-123456789012"
+        previous_key = app.config["LOGSCAN_API_KEY"]
+        app.config["LOGSCAN_API_KEY"] = "test-secret"
+        try:
+            response = app.test_client().post(
+                "/api/bot/scan",
+                data={
+                    "log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "discord.log"),
+                    "uploaded_by": "ExampleUser",
+                    "uploaded_by_id": "12345",
+                    "source_url": "https://discord.com/channels/1/2/3",
+                },
+                content_type="multipart/form-data",
+                headers={
+                    "Authorization": "Bearer test-secret",
+                    "X-Scan-Job-ID": job_id,
+                },
+            )
+            self.assertEqual(response.status_code, 202)
+
+            deadline = time.monotonic() + 5
+            while True:
+                payload = app.test_client().get(f"/api/scan-jobs/{job_id}").get_json()
+                if payload["phase"] in {"complete", "failed"}:
+                    break
+                if time.monotonic() >= deadline:
+                    self.fail(f"Discord background scan did not finish: {payload}")
+                time.sleep(0.01)
+            self.assertEqual(payload["phase"], "complete")
+            self.assertIn("result", payload)
+            scan = payload["result"]["scans"][0]
+            self.assertEqual(scan["overview"]["uploaded_by"], "ExampleUser")
+            self.assertEqual(scan["overview"]["uploaded_by_id"], "12345")
+            self.assertIn("delete_token", scan)
+        finally:
+            app.config["LOGSCAN_API_KEY"] = previous_key
+
     def test_queued_web_scan_reports_position_and_ahead_count(self):
         started = threading.Event()
         release = threading.Event()
