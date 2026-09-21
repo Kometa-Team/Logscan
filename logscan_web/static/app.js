@@ -835,6 +835,10 @@ form.addEventListener("submit", async (event) => {
     files.forEach((file) => body.append("log", file));
     const response = await fetch("/api/scan", { method: "POST", body, headers: { "X-Scan-Job-ID": jobId } });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 202) {
+      watchScanStatus(jobId, true);
+      return;
+    }
     sessionStorage.removeItem("activeScanJob");
     if (!response.ok) {
       failures.push({ filename: files.map((file) => file.name).join(", "), message: data.error || "The scan could not be completed." });

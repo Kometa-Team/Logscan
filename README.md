@@ -75,19 +75,19 @@ Do not use Flask's development server for a public deployment.
 Linux production command:
 
 ```bash
-gunicorn --workers 1 --threads 1 --timeout 900 --bind 0.0.0.0:8000 logscan_web.app:app
+gunicorn --workers 1 --threads 4 --timeout 900 --bind 0.0.0.0:8000 logscan_web.app:app
 ```
 
 Windows production command:
 
 ```powershell
-waitress-serve --listen=0.0.0.0:8000 --threads=1 logscan_web.app:app
+waitress-serve --listen=0.0.0.0:8000 --threads=4 logscan_web.app:app
 ```
 
-One worker/thread is intentional because the inherited recommendation engine
-has process-global divider state. It also avoids allowing simultaneous large
-scans to exhaust memory. Put a reverse proxy and rate limiting in front of a
-public instance.
+One process is intentional because scan job status is held in memory.
+Four threads keep status polling responsive while the single background scan
+worker serializes memory-intensive scans. Put a reverse proxy and rate limiting
+in front of a public instance.
 
 ## Docker
 
@@ -168,7 +168,7 @@ People Images repository.
 
 ## Reverse proxy notes
 
-The application accepts uploads and extracted archive contents up to 1 GiB. Large archive members are streamed to temporary disk storage while scanning. Your reverse proxy must accept the compressed upload plus multipart overhead.
+The application accepts uploads and extracted archive contents up to 1 GiB. Large archive members are streamed to temporary disk storage while scanning. Browser uploads return `202 Accepted` after intake and continue as background jobs, so long scans are not tied to the proxy read timeout. The authenticated bot endpoint remains synchronous. Your reverse proxy must accept the compressed upload plus multipart overhead.
 
 For Nginx, include this in the applicable `server` or `location` block:
 

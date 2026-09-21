@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import zipfile
@@ -139,6 +140,8 @@ def create_app() -> Flask:
     scan_jobs: dict[str, dict] = {}
     scan_jobs_lock = threading.Lock()
     scan_slot = threading.Semaphore(1)
+    background_scan_token = secrets.token_urlsafe(32)
+    background_scan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="logscan")
 
     def update_scan_job(job_id: str | None, phase: str, *, error: str | None = None, redirect_url: str | None = None) -> None:
         if not job_id:
@@ -808,8 +811,9 @@ def create_app() -> Flask:
     @app.post("/api/bot/scan")
     def scan():
         is_bot = bot_request_is_authorized()
+        is_background_scan = hmac.compare_digest(request.headers.get("X-Background-Scan", ""), background_scan_token)
         supplied_job_id = request.headers.get("X-Scan-Job-ID", "")
-        job_id = supplied_job_id if not is_bot and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", supplied_job_id) else None
+        job_id = supplied_job_id if (not is_bot or is_background_scan) and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", supplied_job_id) else None
         update_scan_job(job_id, "uploading")
         if request.path == "/api/bot/scan" and not is_bot:
             analytics.record_rejection("unauthorized_bot", "discord")
@@ -830,6 +834,32 @@ def create_app() -> Flask:
                         archive.writestr(item.filename, item.read())
                 content = bundled_uploads.getvalue()
                 upload_filename = "website-log-batch.zip"
+            if job_id and not is_bot and not is_background_scan:
+                origin = request.url_root
+                update_scan_job(job_id, "queued")
+
+                def run_background_scan():
+                    try:
+                        response = app.test_client().post(
+                            "/api/scan",
+                            data={"log": (BytesIO(content), upload_filename)},
+                            content_type="multipart/form-data",
+                            headers={
+                                "X-Scan-Job-ID": job_id,
+                                "X-Background-Scan": background_scan_token,
+                            },
+                            base_url=origin,
+                        )
+                        if response.status_code >= 400:
+                            payload = response.get_json(silent=True) or {}
+                            update_scan_job(job_id, "failed", error=payload.get("error", "The scan could not be completed."))
+                    except Exception:
+                        app.logger.exception("Background scan %s failed", job_id)
+                        update_scan_job(job_id, "failed", error="The scan could not be completed.")
+
+                background_scan_executor.submit(run_background_scan)
+                return jsonify(job_id=job_id, phase="queued"), 202
+
             if not scan_slot.acquire(blocking=False):
                 update_scan_job(job_id, "queued")
                 scan_slot.acquire()

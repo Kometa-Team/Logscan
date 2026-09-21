@@ -3,6 +3,7 @@ from io import BytesIO
 import zipfile
 import os
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from datetime import UTC, datetime
@@ -99,11 +100,18 @@ class StreamingScanTests(unittest.TestCase):
             content_type="multipart/form-data",
             headers={"X-Scan-Job-ID": job_id},
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 202)
 
-        status = app.test_client().get(f"/api/scan-jobs/{job_id}")
-        self.assertEqual(status.status_code, 200)
-        payload = status.get_json()
+        deadline = time.monotonic() + 5
+        while True:
+            status = app.test_client().get(f"/api/scan-jobs/{job_id}")
+            self.assertEqual(status.status_code, 200)
+            payload = status.get_json()
+            if payload["phase"] in {"complete", "failed"}:
+                break
+            if time.monotonic() >= deadline:
+                self.fail(f"Background scan did not finish: {payload}")
+            time.sleep(0.01)
         self.assertEqual(payload["phase"], "complete")
         self.assertGreaterEqual(payload["elapsed_seconds"], 0)
         self.assertIn("#delete=", payload["redirect_url"])
