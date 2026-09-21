@@ -252,6 +252,40 @@ def _date_first(value: str | None) -> str | None:
     return f"{match.group(2)} {match.group(1)}" if match else value
 
 
+def _log_message(line: str) -> str:
+    """Return the readable message from a Kometa log line."""
+    match = re.match(
+        r"^(?:\[[^\]]+\]\s+)*\[[^\]]+\.py:\d+\]\s+\[[A-Z]+\]\s*\|\s?(.*?)\s*\|?\s*$",
+        line,
+    )
+    return match.group(1).strip() if match else line.strip().strip("|").strip()
+
+
+def extract_plex_configurations(content: str) -> list[dict[str, object]]:
+    """Extract the informational Plex configuration blocks shown by Kometa."""
+    sections: list[dict[str, object]] = []
+    current: list[str] | None = None
+    for raw_line in content.splitlines():
+        message = _log_message(raw_line)
+        if "Plex Configuration" in message:
+            if current:
+                sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+            current = []
+            continue
+        if current is None:
+            continue
+        if re.search(r"\bScanning\b", message) or "Library Connection Failed" in message:
+            if current:
+                sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+            current = None
+            continue
+        if message and not re.fullmatch(r"[-=]+", message):
+            current.append(message)
+    if current:
+        sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+    return sections
+
+
 def _log_overview(
     filename: str,
     content: str,
@@ -281,6 +315,7 @@ def _log_overview(
         ),
         "yaml_validation": yaml_status,
         "yaml_issue_count": len(yaml_findings),
+        "plex_configurations": extract_plex_configurations(content),
     }
 
 
@@ -296,7 +331,11 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         b"[quickstart]", b"finished:", b"run time:", b"start time:", b"started:",
         b"platform:", b"memory:", b"available memory:", b"run command:",
         b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
-        b"scheduled maintenance", b"connected to server", b"run_order:",
+        b"plex configuration", b"using asset directory", b"scheduled maintenance",
+        b"connected to server", b"running on", b"plexpass:", b"connected to library",
+        b"type:", b"agent:", b"scanner:", b"ratings source:",
+        b"library connection successful", b"library connection failed",
+        b"scanning metadata", b"run_order:",
         b"- operations", b"mass_user_rating_update", b"mass_episode_user_ratings_update",
     )
     missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found")

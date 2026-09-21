@@ -148,6 +148,36 @@ function showOverview(group, overview) {
     grid.append(item);
   });
   sectionContent.append(grid);
+  const plexConfigurations = overview.plex_configurations || [];
+  if (plexConfigurations.length) {
+    const plexHeading = document.createElement("h4");
+    plexHeading.className = "overview-subheading";
+    plexHeading.textContent = "Plex Configuration";
+    sectionContent.append(plexHeading);
+    const plexList = document.createElement("div");
+    plexList.className = "plex-configuration-list";
+    plexConfigurations.forEach((configuration) => {
+      const panel = document.createElement("details");
+      panel.className = "plex-configuration";
+      const summary = document.createElement("summary");
+      const title = document.createElement("span");
+      title.textContent = configuration.title;
+      const chevron = document.createElement("span");
+      chevron.className = "chevron";
+      chevron.textContent = "\u203a";
+      summary.append(title, chevron);
+      const body = document.createElement("div");
+      body.className = "plex-configuration-body";
+      (configuration.lines || []).forEach((line) => {
+        const row = document.createElement("p");
+        row.textContent = line;
+        body.append(row);
+      });
+      panel.append(summary, body);
+      plexList.append(panel);
+    });
+    sectionContent.append(plexList);
+  }
 }
 
 function selectedFiles(files) {
