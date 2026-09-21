@@ -23,7 +23,10 @@ class ScanStore:
         delete_token = secrets.token_urlsafe(32)
         directory = self.root / scan_id
         directory.mkdir()
-        (directory / "log").write_bytes(content)
+        if isinstance(content, Path):
+            shutil.copyfile(content, directory / "log")
+        else:
+            (directory / "log").write_bytes(content)
         record = {
             "id": scan_id,
             "filename": result.filename,

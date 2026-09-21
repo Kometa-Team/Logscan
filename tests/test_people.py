@@ -1,4 +1,6 @@
 import json
+from io import BytesIO
+import zipfile
 import os
 import tempfile
 import unittest
@@ -21,7 +23,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
 }), encoding="utf-8")
 
 from logscan_web.app import add_missing_people_recommendations, app
-from logscan_web.scanner import MAX_FILE_BYTES, extract_missing_people, scan_log
+from logscan_web.scanner import MAX_FILE_BYTES, extract_missing_people, scan_archive_logs, scan_log
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -86,6 +88,45 @@ class UploadLimitTests(unittest.TestCase):
         self.assertEqual(MAX_FILE_BYTES, 1024 ** 3)
         html = app.test_client().get("/").get_data(as_text=True)
         self.assertIn("1 GB max after extraction", html)
+
+
+class StreamingScanTests(unittest.TestCase):
+    def test_disk_backed_http_upload_persists_before_removing_temporary_file(self):
+        content = b"[kometa.py:1] [WARNING] | timed out.\n"
+        archive_bytes = BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("meta.log", content)
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+            response = app.test_client().post(
+                "/api/scan",
+                data={"log": (BytesIO(archive_bytes.getvalue()), "meta.zip")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(Path(STORE.name, payload["id"], "log").is_file())
+    def test_disk_backed_zip_scan_matches_regular_scan(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
+            "[kometa.py:2] [WARNING] | timed out.",
+            "[Quickstart] Run marker: quickstart=0.10.6-build7 branch=develop",
+        ]).encode()
+        expected = scan_log("meta.log", content)
+        archive_bytes = BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("meta.log", content)
+
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+            scans = scan_archive_logs("meta.zip", archive_bytes.getvalue())
+        self.assertEqual(len(scans), 1)
+        _filename, disk_content, actual = scans[0]
+        try:
+            self.assertIsInstance(disk_content, Path)
+            self.assertEqual(actual.recommendations, expected.recommendations)
+            self.assertEqual(actual.metadata, expected.metadata)
+            self.assertEqual(actual.missing_people, expected.missing_people)
+        finally:
+            disk_content.unlink(missing_ok=True)
 
 
 class RuntimeMetadataTests(unittest.TestCase):

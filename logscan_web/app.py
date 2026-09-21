@@ -19,7 +19,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
 from .recommendations import validate_redacted_config
-from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_missing_people, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
+from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 
 RETENTION_SECONDS = 48 * 60 * 60
@@ -833,7 +833,7 @@ def create_app() -> Flask:
                 result.overview["uploaded_by"] = uploaded_by
                 result.overview["uploaded_by_id"] = uploaded_by_id
                 result.overview["message_url"] = source_url
-            missing_candidates = extract_missing_people(content.decode("utf-8", errors="replace"))
+            missing_candidates = result.missing_people
             repository_people = None
             if missing_candidates:
                 repository_people = kometa_image_urls().get("Kometa Repo Image")
@@ -848,6 +848,8 @@ def create_app() -> Flask:
                         url_for("people_page", tags=people_tags, _external=True),
                     )
             scan_id, delete_token = store.create(filename, content, result)
+            if isinstance(content, Path) and content.name.startswith("logscan-"):
+                content.unlink(missing_ok=True)
             result_url = url_for("result_page", scan_id=scan_id, _external=True)
             missing_people = save_missing_people(
                 _people_needing_repository_images(missing_candidates, repository_people),
@@ -864,7 +866,7 @@ def create_app() -> Flask:
         analytics.record_success(
             logs=len(payloads),
             lines=processed_lines,
-            bytes_processed=sum(len(scan_content) for _name, scan_content, _result in scans),
+            bytes_processed=sum(result.metadata["size_bytes"] for _name, _content, result in scans),
             source="discord" if is_bot else "web",
             batch=len(payloads) > 1,
             versions=[normalized_kometa_version(payload["metadata"].get("kometa_version")) for payload in payloads],

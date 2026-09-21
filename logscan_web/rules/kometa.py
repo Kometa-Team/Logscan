@@ -71,12 +71,15 @@ class RunOrderRule:
         return self.definition.id
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        evidence = tuple(number for number, line in enumerate(context.lines, 1)
-                         if "run_order:" in line.lower()
-                         and number < len(context.lines)
-                         and "- operations" not in context.lines[number].lower())
+        evidence = []
+        previous_number = None
+        previous_line = None
+        for number, line in enumerate(context.lines, 1):
+            if previous_line is not None and "run_order:" in previous_line.lower() and "- operations" not in line.lower():
+                evidence.append(previous_number)
+            previous_number, previous_line = number, line
         return [Finding(self.id, self.definition.category, self.definition.title,
-                        self.definition.description, self.definition.solution, evidence)] if evidence else []
+                        self.definition.description, self.definition.solution, tuple(evidence))] if evidence else []
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,7 @@
 import gzip
+import mmap
+import shutil
+import tempfile
 import re
 import tarfile
 import zipfile
@@ -9,11 +12,13 @@ from urllib.parse import unquote
 
 from .models import ScanContext
 from .rules import RuleRegistry, migrated_rules
+from .rules.base import TextRule, evaluate_text_rules_bytes
 from .categories import category_configuration
 
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_DEPTH = 3
+STREAM_SCAN_THRESHOLD = 64 * 1024 * 1024
 ALLOWED_SUFFIXES = {".txt", ".log", ".yml", ".yaml"}
 ARCHIVE_SUFFIXES = {".zip", ".tar", ".tgz", ".gz"}
 
@@ -181,6 +186,7 @@ class ScanResult:
     metadata: dict
     overview: dict
     categories: list[dict]
+    missing_people: list[dict[str, str | bool]]
 
 
 def _plain_title(value: str) -> str:
@@ -278,6 +284,129 @@ def _log_overview(
     }
 
 
+def _scan_large_log(filename: str, content_bytes) -> ScanResult:
+    """Scan a large log while decoding only lines needed by structural rules."""
+    rules = migrated_rules()
+    text_rules = [rule for rule in rules if isinstance(rule, TextRule)]
+    custom_rules = [rule for rule in rules if not isinstance(rule, TextRule)]
+    findings = evaluate_text_rules_bytes(text_rules, content_bytes)
+
+    sample_terms = (
+        b"[kometa.py:", b"[plex_meta_manager.py:", b"version:", b"branch:",
+        b"[quickstart]", b"finished:", b"run time:", b"start time:", b"started:",
+        b"platform:", b"memory:", b"available memory:", b"run command:",
+        b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
+        b"scheduled maintenance", b"connected to server", b"run_order:",
+        b"- operations", b"mass_user_rating_update", b"mass_episode_user_ratings_update",
+    )
+    missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found")
+    sparse_pattern = re.compile(b"|".join(re.escape(term) for term in sample_terms + missing_terms), re.I)
+    sampled_lines: dict[int, str] = {}
+    missing_lines: list[str] = []
+    marker_found = False
+    complete_log = False
+    content_length = len(content_bytes)
+    chunk_size = 4 * 1024 * 1024
+    overlap = 64 * 1024
+    chunk_start = 0
+    lines_before_chunk = 0
+
+    def decoded_line(start: int) -> tuple[str, int]:
+        end = content_bytes.find(b"\n", start)
+        if end < 0:
+            end = content_length
+        return content_bytes[start:end].decode("utf-8", errors="replace").rstrip("\r"), end
+
+    while chunk_start < content_length:
+        chunk_end = min(content_length, chunk_start + chunk_size)
+        scan_end = min(content_length, chunk_end + overlap)
+        chunk = content_bytes[chunk_start:scan_end]
+        core_length = chunk_end - chunk_start
+        newline_cursor = 0
+        current_line = lines_before_chunk + 1
+        for match in sparse_pattern.finditer(chunk):
+            if match.start() >= core_length:
+                break
+            current_line += chunk.count(b"\n", newline_cursor, match.start())
+            newline_cursor = match.start()
+            global_match = chunk_start + match.start()
+            line_start = content_bytes.rfind(b"\n", 0, global_match) + 1
+            line, line_end = decoded_line(line_start)
+            lowered_term = match.group(0).lower()
+            if lowered_term in (b"[kometa.py:", b"[plex_meta_manager.py:"):
+                marker_found = True
+            if lowered_term in sample_terms:
+                sampled_lines.setdefault(current_line, line)
+                if lowered_term == b"run_order:" and line_end < content_length:
+                    next_line, _next_end = decoded_line(line_end + 1)
+                    sampled_lines.setdefault(current_line + 1, next_line)
+                complete_log |= b"finished:" in line.lower().encode() and b"run time:" in line.lower().encode()
+            if lowered_term in missing_terms:
+                block_end = line_end
+                for _ in range(4 if lowered_term == b"tmdb_person updated poster" else 0):
+                    if block_end >= content_length:
+                        break
+                    _next_line, block_end = decoded_line(block_end + 1)
+                missing_lines.append(content_bytes[line_start:block_end].decode("utf-8", errors="replace"))
+        core = chunk[:core_length]
+        lines_before_chunk += core.count(b"\n")
+        chunk_start = chunk_end
+
+    line_count = lines_before_chunk + int(bool(content_length) and content_bytes[content_length - 1] != 10)
+    sampled = [
+        "\n" * max(0, number - previous - 1) + sampled_lines[number]
+        for previous, number in zip([0, *sorted(sampled_lines)[:-1]], sorted(sampled_lines))
+    ]
+    if not marker_found:
+        raise ScanError("This does not appear to be a complete Kometa log file.")
+
+    sample_content = "\n".join(sampled)
+    version_match = re.search(r"\bVersion:\s*([^|\r\n]+)", sample_content)
+    kometa_version = version_match.group(1).strip() if version_match else None
+    branch_match = re.search(r"\(Branch:\s*(master|develop|nightly)\)", sample_content, re.I)
+    kometa_branch = branch_match.group(1).casefold() if branch_match else "unknown"
+    quickstart_marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", sample_content, re.I)
+    quickstart_fields = {
+        key.casefold(): value
+        for key, value in re.findall(r"\b(quickstart|branch)=([^\s|]+)", quickstart_marker.group(0), re.I)
+    } if quickstart_marker else {}
+    quickstart_branch = quickstart_fields.get("branch", "unknown").casefold()
+    if quickstart_branch not in {"master", "develop"}:
+        quickstart_branch = "unknown"
+    run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", sample_content)
+    detected_run_time = run_match.group(1).strip() if run_match else None
+    context = ScanContext.from_content(
+        filename, sample_content, kometa_version=kometa_version,
+        run_time=detected_run_time, complete=complete_log,
+    )
+    findings.extend(finding for rule in custom_rules for finding in rule.evaluate(context))
+    normalized = [finding.as_dict() for finding in findings]
+    normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
+    metadata = {
+        "kometa_version": kometa_version,
+        "kometa_branch": kometa_branch,
+        "quickstart_run": bool(quickstart_marker),
+        "quickstart_version": quickstart_fields.get("quickstart"),
+        "quickstart_branch": quickstart_branch,
+        "run_time": str(detected_run_time) if detected_run_time else None,
+        "complete": complete_log,
+        "header_found": kometa_version is not None,
+        "line_count": line_count,
+        "size_bytes": len(content_bytes),
+        "counts": {
+            level: sum(item["severity"] == level for item in normalized)
+            for level in ("critical", "warning", "schema", "advice")
+        },
+    }
+    return ScanResult(
+        filename=filename,
+        recommendations=normalized,
+        metadata=metadata,
+        overview=_log_overview(filename, sample_content, kometa_version, detected_run_time, normalized),
+        categories=category_configuration(),
+        missing_people=extract_missing_people("\n".join(missing_lines)),
+    )
+
 def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     filename, content_bytes = prepare_scan_input(filename, content_bytes)
     if not content_bytes:
@@ -286,8 +415,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         raise ScanError("The selected file is larger than the 1 GB limit.")
 
     content = content_bytes.decode("utf-8", errors="replace")
-    lowered = content.lower()
-    if "[kometa.py:" not in lowered and "[plex_meta_manager.py:" not in lowered:
+    if not re.search(r"\[(?:kometa|plex_meta_manager)\.py:", content, re.IGNORECASE):
         raise ScanError("This does not appear to be a complete Kometa log file.")
 
     version_match = re.search(r"\bVersion:\s*([^|\r\n]+)", content)
@@ -326,7 +454,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": detected_run_time is not None,
         "header_found": kometa_version is not None,
-        "line_count": len(content.splitlines()),
+        "line_count": content.count("\n") + int(bool(content) and not content.endswith("\n")),
         "size_bytes": len(content_bytes),
         "counts": {
             level: sum(item["severity"] == level for item in normalized)
@@ -339,10 +467,21 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         metadata=metadata,
         overview=_log_overview(filename, content, kometa_version, detected_run_time, normalized),
         categories=category_configuration(),
+        missing_people=extract_missing_people(content),
     )
 
 
-def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, bytes, ScanResult]]:
+def _scan_large_path(filename: str, path: Path) -> ScanResult:
+    with path.open("rb") as source:
+        with mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as content:
+            return _scan_large_log(filename, content)
+
+
+def scan_content_size(content: bytes | Path) -> int:
+    return content.stat().st_size if isinstance(content, Path) else len(content)
+
+
+def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, bytes | Path, ScanResult]]:
     """Return one scan input and result for every valid Kometa log in a ZIP."""
     def collect(name: str, content: bytes, depth: int) -> list[tuple[str, bytes, ScanResult]]:
         if Path(name).suffix.lower() == ".zip":
@@ -359,7 +498,19 @@ def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, by
                     results = []
                     for entry in entries:
                         with archive.open(entry) as member:
-                            results.extend(collect(entry.filename, member.read(), depth + 1))
+                            if entry.file_size >= STREAM_SCAN_THRESHOLD and Path(entry.filename).suffix.lower() in ALLOWED_SUFFIXES:
+                                temporary = tempfile.NamedTemporaryFile(prefix="logscan-", suffix=".log", delete=False)
+                                temporary_path = Path(temporary.name)
+                                try:
+                                    with temporary:
+                                        shutil.copyfileobj(member, temporary, length=1024 * 1024)
+                                    result = _scan_large_path(entry.filename, temporary_path)
+                                    results.append((entry.filename, temporary_path, result))
+                                except Exception:
+                                    temporary_path.unlink(missing_ok=True)
+                                    raise
+                            else:
+                                results.extend(collect(entry.filename, member.read(), depth + 1))
                     return results
             except zipfile.BadZipFile as exc:
                 raise ScanError("The selected ZIP file is invalid.") from exc
@@ -374,7 +525,7 @@ def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, by
             return []
 
     scans = collect(filename, content_bytes, 0)
-    total_size = sum(len(content) for _name, content, _result in scans)
+    total_size = sum(scan_content_size(content) for _name, content, _result in scans)
     if total_size > MAX_FILE_BYTES:
         raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
     if not scans:
@@ -392,6 +543,19 @@ def find_scannable_archive_logs(filename: str, content_bytes: bytes) -> list[tup
             found = []
             for entry in archive.infolist():
                 if entry.is_dir() or Path(entry.filename).suffix.lower() not in ALLOWED_SUFFIXES:
+                    continue
+                if entry.file_size >= STREAM_SCAN_THRESHOLD:
+                    marker_found = False
+                    carry = b""
+                    with archive.open(entry) as member:
+                        while chunk := member.read(1024 * 1024):
+                            lowered = (carry + chunk).lower()
+                            if b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered:
+                                marker_found = True
+                                break
+                            carry = chunk[-32:]
+                    if marker_found:
+                        found.append((entry.filename, entry.file_size))
                     continue
                 with archive.open(entry) as member:
                     content = member.read()

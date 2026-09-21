@@ -2,11 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
+import re
 from typing import Literal
 
 
 Category = Literal["critical", "error", "warning", "schema", "advice"]
+
+
+@dataclass(frozen=True)
+class LogLines:
+    """Re-iterable line view that does not copy an entire large log."""
+
+    content: str
+
+    def __iter__(self) -> Iterator[str]:
+        for match in re.finditer(r"[^\r\n]*(?:\r\n|\r|\n|$)", self.content):
+            value = match.group(0)
+            if not value:
+                break
+            yield value.rstrip("\r\n")
 
 
 @dataclass(frozen=True)
@@ -15,7 +31,7 @@ class ScanContext:
 
     filename: str
     content: str
-    lines: tuple[str, ...]
+    lines: LogLines
     kometa_version: str | None = None
     run_time: str | None = None
     complete: bool = False
@@ -30,7 +46,7 @@ class ScanContext:
         run_time: str | None = None,
         complete: bool = False,
     ) -> "ScanContext":
-        return cls(filename, content, tuple(content.splitlines()), kometa_version, run_time, complete)
+        return cls(filename, content, LogLines(content), kometa_version, run_time, complete)
 
 
 @dataclass(frozen=True)
