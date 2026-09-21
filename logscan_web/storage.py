@@ -242,7 +242,18 @@ class AnonymousAnalyticsStore:
         }
 
     def _day(self, data: dict) -> dict:
-        return data["days"].setdefault(datetime.now(UTC).date().isoformat(), self._empty_day())
+        day_key = datetime.now(UTC).date().isoformat()
+        day = data["days"].setdefault(day_key, {})
+        if not isinstance(day, dict):
+            day = {}
+            data["days"][day_key] = day
+        for key, default in self._empty_day().items():
+            if isinstance(default, dict):
+                if not isinstance(day.get(key), dict):
+                    day[key] = {}
+            elif not isinstance(day.get(key), int):
+                day[key] = default
+        return day
 
     def _read(self) -> dict:
         try:

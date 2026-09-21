@@ -1054,6 +1054,12 @@ def create_app() -> Flask:
             return jsonify(error="The requested resource was not found."), 404
         return render_template("404.html"), 404
 
+    @app.errorhandler(500)
+    def internal_server_error(error):
+        if request.path.startswith("/api/"):
+            return jsonify(error="The Logscan service encountered an internal error. Check the service logs for details."), 500
+        return error
+
     @app.errorhandler(413)
     def too_large(_error):
         if request.path in {"/api/scan", "/api/bot/scan"}:
