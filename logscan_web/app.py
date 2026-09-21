@@ -143,7 +143,7 @@ def create_app() -> Flask:
     background_scan_token = secrets.token_urlsafe(32)
     background_scan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="logscan")
 
-    def update_scan_job(job_id: str | None, phase: str, *, error: str | None = None, redirect_url: str | None = None) -> None:
+    def update_scan_job(job_id: str | None, phase: str, *, error: str | None = None, redirect_url: str | None = None, result: dict | None = None) -> None:
         if not job_id:
             return
         now = time.time()
@@ -159,6 +159,8 @@ def create_app() -> Flask:
                 job["error"] = error
             if redirect_url:
                 job["redirect_url"] = redirect_url
+            if result is not None:
+                job["result"] = result
     popular_people_payload_cache: dict[tuple, list[dict]] = {}
     popular_people_payload_lock = threading.Lock()
 
@@ -826,7 +828,8 @@ def create_app() -> Flask:
         is_bot = bot_request_is_authorized()
         is_background_scan = hmac.compare_digest(request.headers.get("X-Background-Scan", ""), background_scan_token)
         supplied_job_id = request.headers.get("X-Scan-Job-ID", "")
-        job_id = supplied_job_id if (not is_bot or is_background_scan) and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", supplied_job_id) else None
+        accepts_job_id = request.path == "/api/scan" or is_bot or is_background_scan
+        job_id = supplied_job_id if accepts_job_id and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", supplied_job_id) else None
         update_scan_job(job_id, "uploading")
         if request.path == "/api/bot/scan" and not is_bot:
             analytics.record_rejection("unauthorized_bot", "discord")
@@ -837,6 +840,9 @@ def create_app() -> Flask:
             return jsonify(error="Choose a log file to scan."), 400
         upload = uploads[0]
         upload_filename = upload.filename
+        source_url = request.form.get("source_url") if is_bot else None
+        uploaded_by = request.form.get("uploaded_by") if is_bot else None
+        uploaded_by_id = request.form.get("uploaded_by_id") if is_bot else None
         try:
             if len(uploads) == 1:
                 content = upload.read()
@@ -847,20 +853,31 @@ def create_app() -> Flask:
                         archive.writestr(item.filename, item.read())
                 content = bundled_uploads.getvalue()
                 upload_filename = "website-log-batch.zip"
-            if job_id and not is_bot and not is_background_scan:
+            if job_id and not is_background_scan:
                 origin = request.url_root
+                scan_endpoint = request.path
+                background_headers = {
+                    "X-Scan-Job-ID": job_id,
+                    "X-Background-Scan": background_scan_token,
+                }
+                if is_bot:
+                    background_headers["Authorization"] = f"Bearer {app.config['LOGSCAN_API_KEY']}"
+                background_form = {"log": (BytesIO(content), upload_filename)}
+                if source_url:
+                    background_form["source_url"] = source_url
+                if uploaded_by:
+                    background_form["uploaded_by"] = uploaded_by
+                if uploaded_by_id is not None:
+                    background_form["uploaded_by_id"] = uploaded_by_id
                 update_scan_job(job_id, "queued")
 
                 def run_background_scan():
                     try:
                         response = app.test_client().post(
-                            "/api/scan",
-                            data={"log": (BytesIO(content), upload_filename)},
+                            scan_endpoint,
+                            data=background_form,
                             content_type="multipart/form-data",
-                            headers={
-                                "X-Scan-Job-ID": job_id,
-                                "X-Background-Scan": background_scan_token,
-                            },
+                            headers=background_headers,
                             base_url=origin,
                         )
                         if response.status_code >= 400:
@@ -889,9 +906,6 @@ def create_app() -> Flask:
             update_scan_job(job_id, "failed", error=str(exc))
             return jsonify(error=str(exc)), 400
         update_scan_job(job_id, "saving")
-        source_url = request.form.get("source_url") if is_bot else None
-        uploaded_by = request.form.get("uploaded_by") if is_bot else None
-        uploaded_by_id = request.form.get("uploaded_by_id") if is_bot else None
         expires_at = int((datetime.now(UTC) + timedelta(seconds=RETENTION_SECONDS)).timestamp())
         payloads = []
         unscanned_files = []
@@ -979,10 +993,11 @@ def create_app() -> Flask:
                 "batch_admin_url": url_for("batch_admin_page", batch_id=batch_id, token=admin_token, _external=True),
                 "unscanned_files": unscanned_files,
             }
-            update_scan_job(job_id, "complete", redirect_url=response["batch_admin_url"])
+            update_scan_job(job_id, "complete", redirect_url=response["batch_admin_url"], result=response if is_bot else None)
             return jsonify(response)
         if request.path == "/api/bot/scan":
             response = {"scans": payloads}
+            update_scan_job(job_id, "complete", result=response)
             return jsonify(response)
         private_result_url = "{}#delete={}".format(payloads[0]["result_url"], payloads[0]["delete_token"])
         update_scan_job(job_id, "complete", redirect_url=private_result_url)

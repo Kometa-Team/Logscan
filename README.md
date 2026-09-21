@@ -168,7 +168,7 @@ People Images repository.
 
 ## Reverse proxy notes
 
-The application accepts uploads and extracted archive contents up to 1 GiB. Large archive members are streamed to temporary disk storage while scanning. Browser uploads return `202 Accepted` after intake and continue as background jobs, so long scans are not tied to the proxy read timeout. The authenticated bot endpoint remains synchronous. Your reverse proxy must accept the compressed upload plus multipart overhead.
+The application accepts uploads and extracted archive contents up to 1 GiB. Large archive members are streamed to temporary disk storage while scanning. Browser and authenticated Discord uploads return `202 Accepted` after intake and continue as background jobs, so long scans and queue waits are not tied to the proxy read timeout. Your reverse proxy must accept the compressed upload plus multipart overhead.
 
 For Nginx, include this in the applicable `server` or `location` block:
 
