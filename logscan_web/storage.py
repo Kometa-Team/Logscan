@@ -144,6 +144,35 @@ class AnonymousAnalyticsStore:
             self._increment(day["rejection_sources"], source)
             self._write(data)
 
+    def import_legacy_baseline(self, stats: dict) -> None:
+        """Preserve counters collected before detailed analytics were introduced."""
+        with self.lock:
+            data = self._read()
+            if data.get("legacy_usage_imported"):
+                return
+            totals = self._totals(data)
+            try:
+                started = datetime.fromisoformat(str(stats.get("started_at", "")))
+                day_key = started.date().isoformat()
+                if started.isoformat() < data["started_at"]:
+                    data["started_at"] = started.isoformat()
+            except (TypeError, ValueError):
+                day_key = datetime.now(UTC).date().isoformat()
+            day = data["days"].setdefault(day_key, self._empty_day())
+            fields = {
+                "successful_logs": "logs_submitted",
+                "lines_processed": "lines_processed",
+                "people_submitted": "people_submitted",
+                "people_addressed": "people_addressed",
+            }
+            for analytics_key, legacy_key in fields.items():
+                baseline = max(0, int(stats.get(legacy_key, 0)))
+                difference = max(0, baseline - totals[analytics_key])
+                day[analytics_key] = day.get(analytics_key, 0) + difference
+                if analytics_key == "successful_logs" and difference:
+                    self._increment(day.setdefault("sources", {}), "legacy", difference)
+            data["legacy_usage_imported"] = True
+            self._write(data)
     def record_success(
         self, *, logs: int, lines: int, bytes_processed: int, source: str,
         batch: bool, versions: list[str], kometa_branches: list[str], launchers: list[str],
@@ -206,6 +235,10 @@ class AnonymousAnalyticsStore:
     def snapshot(self) -> dict:
         with self.lock:
             data = self._read()
+        totals = self._totals(data)
+        return {"started_at": data["started_at"], "totals": totals, "days": data["days"]}
+
+    def _totals(self, data: dict) -> dict:
         totals = self._empty_day()
         for day in data["days"].values():
             for key in (
@@ -223,8 +256,7 @@ class AnonymousAnalyticsStore:
         count = totals.pop("address_duration_count")
         seconds = totals.pop("address_seconds_total")
         totals["average_address_seconds"] = round(seconds / count) if count else None
-        return {"started_at": data["started_at"], "totals": totals, "days": data["days"]}
-
+        return totals
     @staticmethod
     def _increment(values: dict, key: str, amount: int = 1) -> None:
         safe_key = str(key or "unknown")[:80]
@@ -266,6 +298,7 @@ class AnonymousAnalyticsStore:
             "started_at": data.get("started_at") if isinstance(data.get("started_at"), str) else datetime.now(UTC).isoformat(),
             "days": data.get("days") if isinstance(data.get("days"), dict) else {},
             "addressed_keys": data.get("addressed_keys") if isinstance(data.get("addressed_keys"), list) else [],
+            "legacy_usage_imported": data.get("legacy_usage_imported") is True,
         }
 
     def _write(self, data: dict) -> None:

@@ -125,6 +125,7 @@ def create_app() -> Flask:
     usage_stats = UsageStatsStore(app.config["SCAN_STORE"])
     analytics = AnonymousAnalyticsStore(app.config["SCAN_STORE"])
     usage_stats.ensure_people_baseline(len(people_store.list()))
+    analytics.import_legacy_baseline(usage_stats.snapshot())
     popular_people_exclusions = PopularPeopleExclusionStore(app.config["SCAN_STORE"])
     popular_people_checks = PopularPeopleCheckStore(app.config["SCAN_STORE"])
     popular_people_flags = PopularPeopleFlagStore(app.config["SCAN_STORE"])
@@ -520,7 +521,6 @@ def create_app() -> Flask:
             }
             for record in people_store.list():
                 if record.get("name", "").casefold() in primary_images:
-                    usage_stats.mark_addressed([record.get("key")])
                     analytics.record_addressed([record])
                     continue
                 person_id = record.get("tmdb_id")
@@ -682,7 +682,15 @@ def create_app() -> Flask:
 
     @app.context_processor
     def service_usage():
-        stats = usage_stats.snapshot()
+        analytics_snapshot = analytics.snapshot()
+        totals = analytics_snapshot["totals"]
+        stats = {
+            "logs_submitted": totals["successful_logs"],
+            "lines_processed": totals["lines_processed"],
+            "people_submitted": totals["people_submitted"],
+            "people_addressed": totals["people_addressed"],
+            "started_at": analytics_snapshot["started_at"],
+        }
         try:
             started = datetime.fromisoformat(stats["started_at"])
             stats["tracking_since"] = started.strftime("%B %d, %Y").replace(" 0", " ")
@@ -853,7 +861,6 @@ def create_app() -> Flask:
         submitted_people = [person for payload in payloads for person in payload["missing_people"]]
         submitted_count = sum(bool(person.get("is_new")) for person in submitted_people)
         processed_lines = sum(payload["metadata"].get("line_count", 0) for payload in payloads)
-        usage_stats.record_submission(logs=len(payloads), lines=processed_lines, people=submitted_count)
         analytics.record_success(
             logs=len(payloads),
             lines=processed_lines,

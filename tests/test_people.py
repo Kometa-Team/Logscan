@@ -102,6 +102,29 @@ class RuntimeMetadataTests(unittest.TestCase):
 
 
 class AnonymousAnalyticsTests(unittest.TestCase):
+    def test_legacy_baseline_preserves_larger_totals_only_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            analytics = AnonymousAnalyticsStore(directory)
+            analytics.record_success(
+                logs=50, lines=2282999, bytes_processed=100, source="web", batch=False,
+                versions=[], kometa_branches=[], launchers=[], quickstart_versions=[],
+                quickstart_branches=[], recommendations=[], people=0,
+            )
+            legacy = {
+                "logs_submitted": 54,
+                "lines_processed": 3393973,
+                "people_submitted": 15,
+                "people_addressed": 0,
+                "started_at": "2026-09-20T12:00:00+00:00",
+            }
+            analytics.import_legacy_baseline(legacy)
+            analytics.import_legacy_baseline(legacy)
+            snapshot = analytics.snapshot()
+
+        self.assertEqual(snapshot["totals"]["successful_logs"], 54)
+        self.assertEqual(snapshot["totals"]["lines_processed"], 3393973)
+        self.assertEqual(snapshot["totals"]["people_submitted"], 15)
+        self.assertEqual(snapshot["totals"]["sources"]["legacy"], 4)
     def test_existing_daily_buckets_migrate_when_new_dimensions_are_added(self):
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, "usage_analytics.json").write_text(json.dumps({
