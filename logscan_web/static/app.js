@@ -797,7 +797,13 @@ async function refreshScanStatus(jobId, recover = false) {
   const response = await fetch(`/api/scan-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
   if (!response.ok) return;
   const job = await response.json();
-  status.textContent = `${scanPhaseLabels[job.phase] || "Scanning"} · ${elapsedLabel(job.elapsed_seconds || 0)}`;
+  const aheadLabel = job.ahead_count === 0
+    ? "no scans ahead"
+    : `${job.ahead_count} scan${job.ahead_count === 1 ? "" : "s"} ahead`;
+  const phaseLabel = job.phase === "queued" && job.queue_position
+    ? `Waiting for scanner · Queue position ${job.queue_position} (${aheadLabel})`
+    : scanPhaseLabels[job.phase] || "Scanning";
+  status.textContent = `${phaseLabel} · ${elapsedLabel(job.elapsed_seconds || 0)}`;
   if (job.phase === "failed") {
     status.textContent = job.error || "The scan could not be completed.";
     status.classList.add("error");

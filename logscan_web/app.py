@@ -804,6 +804,19 @@ def create_app() -> Flask:
             if job is None:
                 abort(404)
             payload = dict(job)
+            if payload["phase"] == "queued":
+                waiting = sorted(
+                    (candidate_id, candidate)
+                    for candidate_id, candidate in scan_jobs.items()
+                    if candidate.get("phase") in {"uploading", "queued", "scanning", "saving"}
+                )
+                waiting.sort(key=lambda item: item[1].get("started_at", 0))
+                position = next(
+                    (index for index, (candidate_id, _candidate) in enumerate(waiting, start=1) if candidate_id == job_id),
+                    1,
+                )
+                payload["queue_position"] = position
+                payload["ahead_count"] = max(0, position - 1)
         payload["elapsed_seconds"] = max(0, round(time.time() - payload["started_at"]))
         return jsonify(payload)
 

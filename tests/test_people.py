@@ -3,6 +3,7 @@ from io import BytesIO
 import zipfile
 import os
 import tempfile
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -115,6 +116,50 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(payload["phase"], "complete")
         self.assertGreaterEqual(payload["elapsed_seconds"], 0)
         self.assertIn("#delete=", payload["redirect_url"])
+
+    def test_queued_web_scan_reports_position_and_ahead_count(self):
+        started = threading.Event()
+        release = threading.Event()
+        original_scan_archive_logs = scan_archive_logs
+        first_call = True
+
+        def controlled_scan(*args, **kwargs):
+            nonlocal first_call
+            if first_call:
+                first_call = False
+                started.set()
+                release.wait(timeout=5)
+            return original_scan_archive_logs(*args, **kwargs)
+
+        first_job = "queue-position-first-123456789"
+        second_job = "queue-position-second-12345678"
+        with patch("logscan_web.app.scan_archive_logs", side_effect=controlled_scan):
+            first = app.test_client().post(
+                "/api/scan",
+                data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "first.log")},
+                content_type="multipart/form-data",
+                headers={"X-Scan-Job-ID": first_job},
+            )
+            self.assertEqual(first.status_code, 202)
+            self.assertTrue(started.wait(timeout=2))
+            second = app.test_client().post(
+                "/api/scan",
+                data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "second.log")},
+                content_type="multipart/form-data",
+                headers={"X-Scan-Job-ID": second_job},
+            )
+            self.assertEqual(second.status_code, 202)
+            queued = app.test_client().get(f"/api/scan-jobs/{second_job}").get_json()
+            self.assertEqual(queued["phase"], "queued")
+            self.assertEqual(queued["queue_position"], 2)
+            self.assertEqual(queued["ahead_count"], 1)
+            release.set()
+
+            deadline = time.monotonic() + 5
+            while app.test_client().get(f"/api/scan-jobs/{second_job}").get_json()["phase"] != "complete":
+                if time.monotonic() >= deadline:
+                    self.fail("Queued scan did not complete")
+                time.sleep(0.01)
 
     def test_disk_backed_http_upload_persists_before_removing_temporary_file(self):
         content = b"[kometa.py:1] [WARNING] | timed out.\n"
