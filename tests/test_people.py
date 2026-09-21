@@ -155,6 +155,88 @@ class StreamingScanTests(unittest.TestCase):
         finally:
             app.config["LOGSCAN_API_KEY"] = previous_key
 
+    def test_bot_validation_waits_behind_active_scan(self):
+        started = threading.Event()
+        release = threading.Event()
+        original_scan_archive_logs = scan_archive_logs
+
+        def blocked_scan(*args, **kwargs):
+            started.set()
+            release.wait(timeout=5)
+            return original_scan_archive_logs(*args, **kwargs)
+
+        scan_job = "active-scan-before-validation-1234"
+        validation_job = "queued-validation-after-scan-12"
+        previous_key = app.config["LOGSCAN_API_KEY"]
+        app.config["LOGSCAN_API_KEY"] = "test-secret"
+        try:
+            with patch("logscan_web.app.scan_archive_logs", side_effect=blocked_scan):
+                scan_response = app.test_client().post(
+                    "/api/scan",
+                    data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "active.log")},
+                    content_type="multipart/form-data",
+                    headers={"X-Scan-Job-ID": scan_job},
+                )
+                self.assertEqual(scan_response.status_code, 202)
+                self.assertTrue(started.wait(timeout=2))
+                validation_response = app.test_client().post(
+                    "/api/bot/validate",
+                    data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "waiting.log")},
+                    content_type="multipart/form-data",
+                    headers={
+                        "Authorization": "Bearer test-secret",
+                        "X-Scan-Job-ID": validation_job,
+                    },
+                )
+                self.assertEqual(validation_response.status_code, 202)
+                queued = app.test_client().get(f"/api/scan-jobs/{validation_job}").get_json()
+                self.assertEqual(queued["phase"], "queued")
+                self.assertEqual(queued["queue_position"], 2)
+                self.assertEqual(queued["ahead_count"], 1)
+                release.set()
+
+                deadline = time.monotonic() + 5
+                while app.test_client().get(f"/api/scan-jobs/{validation_job}").get_json()["phase"] != "complete":
+                    if time.monotonic() >= deadline:
+                        self.fail("Queued validation did not complete")
+                    time.sleep(0.01)
+        finally:
+            release.set()
+            app.config["LOGSCAN_API_KEY"] = previous_key
+
+    def test_bot_validation_runs_through_background_queue(self):
+        job_id = "discord-validation-123456789012"
+        previous_key = app.config["LOGSCAN_API_KEY"]
+        app.config["LOGSCAN_API_KEY"] = "test-secret"
+        try:
+            response = app.test_client().post(
+                "/api/bot/validate",
+                data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "validate.log")},
+                content_type="multipart/form-data",
+                headers={
+                    "Authorization": "Bearer test-secret",
+                    "X-Scan-Job-ID": job_id,
+                },
+            )
+            self.assertEqual(response.status_code, 202)
+
+            deadline = time.monotonic() + 5
+            seen_phases = set()
+            while True:
+                payload = app.test_client().get(f"/api/scan-jobs/{job_id}").get_json()
+                seen_phases.add(payload["phase"])
+                if payload["phase"] in {"complete", "failed"}:
+                    break
+                if time.monotonic() >= deadline:
+                    self.fail(f"Discord validation did not finish: {payload}")
+                time.sleep(0.01)
+            self.assertEqual(payload["phase"], "complete")
+            self.assertEqual(payload["result"]["files"][0]["filename"], "validate.log")
+            self.assertGreater(payload["result"]["files"][0]["content_size"], 0)
+            self.assertTrue(seen_phases & {"queued", "validating"})
+        finally:
+            app.config["LOGSCAN_API_KEY"] = previous_key
+
     def test_queued_web_scan_reports_position_and_ahead_count(self):
         started = threading.Event()
         release = threading.Event()
