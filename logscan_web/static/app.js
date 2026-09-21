@@ -632,7 +632,7 @@ function showGroup(group, recommendations) {
   matches.forEach((item, index) => {
     const details = document.createElement("details");
     details.className = `recommendation ${item.severity}`;
-    details.open = true;
+    details.open = false;
     const summary = document.createElement("summary");
     const dot = document.createElement("span");
     dot.className = "severity-dot";
