@@ -31,7 +31,14 @@ class RuleRegistry:
         return rule
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        return [finding for rule in self._rules for finding in rule.evaluate(context)]
+        from .base import TextRule, evaluate_text_rules
+
+        text_rules = [rule for rule in self._rules if isinstance(rule, TextRule)]
+        custom_rules = [rule for rule in self._rules if not isinstance(rule, TextRule)]
+        return [
+            *evaluate_text_rules(text_rules, context),
+            *(finding for rule in custom_rules for finding in rule.evaluate(context)),
+        ]
 
     @property
     def rules(self) -> tuple[RecommendationRule, ...]:
