@@ -352,6 +352,22 @@ class StreamingScanTests(unittest.TestCase):
 
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_legacy_other_award_keeps_discord_guidance_and_url(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[config.py:2] [WARNING] | other_award: oscars |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "legacy_other_award")
+
+        self.assertIn("As of 1.20", finding["description"])
+        self.assertIn("own individual files", finding["description"])
+        self.assertIn(
+            "https://kometa.wiki/en/latest/kometa/faqs/?h=other_award#pmm-120-release-changes",
+            finding["solution"],
+        )
+
     def test_runtime_platform_is_reduced_to_a_safe_family(self):
         self.assertEqual(normalized_platform("Linux-6.1.34-Unraid-x86_64"), "Linux")
         self.assertEqual(normalized_platform("Linux-5.15.0-microsoft-standard-WSL2"), "WSL")
