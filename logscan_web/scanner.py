@@ -286,6 +286,41 @@ def extract_plex_configurations(content: str) -> list[dict[str, object]]:
     return sections
 
 
+def plex_analytics(sections: list[dict[str, object]]) -> dict[str, list[str]]:
+    """Return bounded Plex categories that are safe to persist as aggregates."""
+    values = {
+        "versions": [], "platforms": [], "update_channels": [],
+        "library_types": [], "agents": [], "scanners": [],
+    }
+    for section in sections:
+        lines = [str(line) for line in section.get("lines", [])]
+        for line in lines:
+            version = re.search(r"\bversion\s+(\d+\.\d+\.\d+\.\d+(?:-[A-Za-z0-9]+)?)\b", line, re.I)
+            if version:
+                values["versions"].append(version.group(1))
+            platform = re.search(r"\bRunning on\s+(Windows|Linux|macOS|Darwin|FreeBSD)\b", line, re.I)
+            if platform:
+                family = platform.group(1).casefold()
+                values["platforms"].append("macOS" if family in {"macos", "darwin"} else family.title())
+            channel = re.search(r"\bon\s+(Public|Beta)\s+update channel\b", line, re.I)
+            if channel:
+                values["update_channels"].append(channel.group(1).title())
+            library_type = re.fullmatch(r"Type:\s*(Movie|Show|Music)", line, re.I)
+            if library_type:
+                values["library_types"].append(library_type.group(1).title())
+            agent = re.fullmatch(r"Agent:\s*([A-Za-z0-9._-]{1,80})", line)
+            if agent:
+                values["agents"].append(agent.group(1))
+            scanner = re.fullmatch(
+                r"Scanner:\s*(Plex Movie|Plex TV Series|Plex Music|Plex Video Files|Plex Photo Scanner)",
+                line,
+                re.I,
+            )
+            if scanner:
+                values["scanners"].append(scanner.group(1).title())
+    return values
+
+
 def _log_overview(
     filename: str,
     content: str,
@@ -299,6 +334,7 @@ def _log_overview(
         r"Start Time:\s*(?P<start>.*?)\s+Finished:\s*(?P<end>.*?)\s+Run Time:\s*(?P<runtime>[^|\r\n]+)",
         content,
     )
+    plex_configurations = extract_plex_configurations(content)
     return {
         "log_name": filename,
         "recommendation_count": len(recommendations),
@@ -315,7 +351,8 @@ def _log_overview(
         ),
         "yaml_validation": yaml_status,
         "yaml_issue_count": len(yaml_findings),
-        "plex_configurations": extract_plex_configurations(content),
+        "plex_configurations": plex_configurations,
+        "plex_analytics": plex_analytics(plex_configurations),
     }
 
 

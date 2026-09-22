@@ -77,6 +77,12 @@ fetch("/api/analytics").then((response) => {
   renderBars("#analytics-launchers", totals.launchers);
   renderBars("#analytics-quickstart-versions", totals.quickstart_versions);
   renderBars("#analytics-quickstart-branches", totals.quickstart_branches);
+  renderBars("#analytics-plex-versions", totals.plex_versions);
+  renderBars("#analytics-plex-platforms", totals.plex_platforms);
+  renderBars("#analytics-plex-channels", totals.plex_update_channels);
+  renderBars("#analytics-plex-library-types", totals.plex_library_types);
+  renderBars("#analytics-plex-agents", totals.plex_agents);
+  renderBars("#analytics-plex-scanners", totals.plex_scanners);
   renderBars("#analytics-severity", totals.recommendations_by_severity);
   renderBars("#analytics-rejections", totals.rejections);
   renderBars("#analytics-recommendations", totals.recommendations_by_id);

@@ -373,6 +373,10 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Connected to library TestMovies", sections[0]["lines"])
         self.assertIn("Agent: tv.plex.agents.movie", sections[0]["lines"])
         self.assertEqual(result.overview["plex_configurations"], sections)
+        self.assertEqual(result.overview["plex_analytics"]["versions"], ["1.31.2.6810-a607d384f"])
+        self.assertEqual(result.overview["plex_analytics"]["platforms"], ["Linux"])
+        self.assertEqual(result.overview["plex_analytics"]["library_types"], ["Movie"])
+        self.assertEqual(result.overview["plex_analytics"]["agents"], ["tv.plex.agents.movie"])
 
     def test_kometa_and_quickstart_channels_are_extracted_from_safe_markers(self):
         content = "\n".join([
@@ -438,6 +442,11 @@ class AnonymousAnalyticsTests(unittest.TestCase):
                 versions=["2.1.0", "unknown"], kometa_branches=["master", "nightly"],
                 launchers=["direct", "quickstart"], quickstart_versions=["0.10.4-build302"],
                 quickstart_branches=["develop"], recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
+                plex={
+                    "versions": ["1.31.2.6810-a607d384f"], "platforms": ["Linux"],
+                    "update_channels": ["Public"], "library_types": ["Movie"],
+                    "agents": ["tv.plex.agents.movie"], "scanners": ["Plex Movie"],
+                },
             )
             analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
             analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
@@ -449,7 +458,14 @@ class AnonymousAnalyticsTests(unittest.TestCase):
         self.assertEqual(snapshot["totals"]["kometa_branches"], {"master": 1, "nightly": 1})
         self.assertEqual(snapshot["totals"]["launchers"], {"direct": 1, "quickstart": 1})
         self.assertEqual(snapshot["totals"]["quickstart_branches"], {"develop": 1})
+        self.assertEqual(snapshot["totals"]["plex_versions"], {"1.31.2.6810-a607d384f": 1})
+        self.assertEqual(snapshot["totals"]["plex_platforms"], {"Linux": 1})
+        self.assertEqual(snapshot["totals"]["plex_library_types"], {"Movie": 1})
+        self.assertEqual(snapshot["totals"]["plex_agents"], {"tv.plex.agents.movie": 1})
         self.assertNotIn("tmdb-1", raw)
+        self.assertNotIn("NZWHS01", raw)
+        self.assertNotIn("TestMovies", raw)
+        self.assertNotIn("config/assets", raw)
 
 
 class UsageStatsTests(unittest.TestCase):

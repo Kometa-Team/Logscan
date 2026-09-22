@@ -1000,6 +1000,13 @@ def create_app() -> Flask:
                 safe_branch(payload["metadata"].get("quickstart_branch"), {"master", "develop"})
                 for payload in payloads if payload["metadata"].get("quickstart_run")
             ],
+            plex={
+                key: [
+                    value for payload in payloads
+                    for value in payload["overview"].get("plex_analytics", {}).get(key, [])
+                ]
+                for key in ("versions", "platforms", "update_channels", "library_types", "agents", "scanners")
+            },
             recommendations=[item for payload in payloads for item in payload["recommendations"]],
             people=submitted_count,
         )
