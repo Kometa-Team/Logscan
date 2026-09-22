@@ -74,9 +74,17 @@ fetch("/api/analytics").then((response) => {
   renderBars("#analytics-sources", totals.sources);
   renderBars("#analytics-versions", totals.kometa_versions);
   renderBars("#analytics-kometa-branches", totals.kometa_branches);
+  renderBars("#analytics-kometa-platforms", totals.kometa_platforms);
   renderBars("#analytics-launchers", totals.launchers);
   renderBars("#analytics-quickstart-versions", totals.quickstart_versions);
   renderBars("#analytics-quickstart-branches", totals.quickstart_branches);
+  renderBars("#analytics-quickstart-platforms", totals.quickstart_platforms);
+  renderBars("#analytics-plex-versions", totals.plex_versions);
+  renderBars("#analytics-plex-platforms", totals.plex_platforms);
+  renderBars("#analytics-plex-channels", totals.plex_update_channels);
+  renderBars("#analytics-plex-library-types", totals.plex_library_types);
+  renderBars("#analytics-plex-agents", totals.plex_agents);
+  renderBars("#analytics-plex-scanners", totals.plex_scanners);
   renderBars("#analytics-severity", totals.recommendations_by_severity);
   renderBars("#analytics-rejections", totals.rejections);
   renderBars("#analytics-recommendations", totals.recommendations_by_id);

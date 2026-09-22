@@ -252,6 +252,91 @@ def _date_first(value: str | None) -> str | None:
     return f"{match.group(2)} {match.group(1)}" if match else value
 
 
+def normalized_platform(value: str | None) -> str:
+    """Reduce a detailed runtime platform string to a non-identifying family."""
+    lowered = (value or "").casefold()
+    if "wsl" in lowered or "microsoft-standard" in lowered:
+        return "WSL"
+    if "windows" in lowered:
+        return "Windows"
+    if "linux" in lowered:
+        return "Linux"
+    if "darwin" in lowered or "macos" in lowered or "mac os" in lowered:
+        return "macOS"
+    if "freebsd" in lowered:
+        return "FreeBSD"
+    return "Unknown"
+
+
+def _log_message(line: str) -> str:
+    """Return the readable message from a Kometa log line."""
+    match = re.match(
+        r"^(?:\[[^\]]+\]\s+)*\[[^\]]+\.py:\d+\]\s+\[[A-Z]+\]\s*\|\s?(.*?)\s*\|?\s*$",
+        line,
+    )
+    return match.group(1).strip() if match else line.strip().strip("|").strip()
+
+
+def extract_plex_configurations(content: str) -> list[dict[str, object]]:
+    """Extract the informational Plex configuration blocks shown by Kometa."""
+    sections: list[dict[str, object]] = []
+    current: list[str] | None = None
+    for raw_line in content.splitlines():
+        message = _log_message(raw_line)
+        if "Plex Configuration" in message:
+            if current:
+                sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+            current = []
+            continue
+        if current is None:
+            continue
+        if re.search(r"\bScanning\b", message) or "Library Connection Failed" in message:
+            if current:
+                sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+            current = None
+            continue
+        if message and not re.fullmatch(r"[-=]+", message):
+            current.append(message)
+    if current:
+        sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+    return sections
+
+
+def plex_analytics(sections: list[dict[str, object]]) -> dict[str, list[str]]:
+    """Return bounded Plex categories that are safe to persist as aggregates."""
+    values = {
+        "versions": [], "platforms": [], "update_channels": [],
+        "library_types": [], "agents": [], "scanners": [],
+    }
+    for section in sections:
+        lines = [str(line) for line in section.get("lines", [])]
+        for line in lines:
+            version = re.search(r"\bversion\s+(\d+\.\d+\.\d+\.\d+(?:-[A-Za-z0-9]+)?)\b", line, re.I)
+            if version:
+                values["versions"].append(version.group(1))
+            platform = re.search(r"\bRunning on\s+(Windows|Linux|macOS|Darwin|FreeBSD)\b", line, re.I)
+            if platform:
+                family = platform.group(1).casefold()
+                values["platforms"].append("macOS" if family in {"macos", "darwin"} else family.title())
+            channel = re.search(r"\bon\s+(Public|Beta)\s+update channel\b", line, re.I)
+            if channel:
+                values["update_channels"].append(channel.group(1).title())
+            library_type = re.fullmatch(r"Type:\s*(Movie|Show|Music)", line, re.I)
+            if library_type:
+                values["library_types"].append(library_type.group(1).title())
+            agent = re.fullmatch(r"Agent:\s*([A-Za-z0-9._-]{1,80})", line)
+            if agent:
+                values["agents"].append(agent.group(1))
+            scanner = re.fullmatch(
+                r"Scanner:\s*(Plex Movie|Plex TV Series|Plex Music|Plex Video Files|Plex Photo Scanner)",
+                line,
+                re.I,
+            )
+            if scanner:
+                values["scanners"].append(scanner.group(1).title())
+    return values
+
+
 def _log_overview(
     filename: str,
     content: str,
@@ -265,6 +350,7 @@ def _log_overview(
         r"Start Time:\s*(?P<start>.*?)\s+Finished:\s*(?P<end>.*?)\s+Run Time:\s*(?P<runtime>[^|\r\n]+)",
         content,
     )
+    plex_configurations = extract_plex_configurations(content)
     return {
         "log_name": filename,
         "recommendation_count": len(recommendations),
@@ -281,6 +367,8 @@ def _log_overview(
         ),
         "yaml_validation": yaml_status,
         "yaml_issue_count": len(yaml_findings),
+        "plex_configurations": plex_configurations,
+        "plex_analytics": plex_analytics(plex_configurations),
     }
 
 
@@ -296,7 +384,11 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         b"[quickstart]", b"finished:", b"run time:", b"start time:", b"started:",
         b"platform:", b"memory:", b"available memory:", b"run command:",
         b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
-        b"scheduled maintenance", b"connected to server", b"run_order:",
+        b"plex configuration", b"using asset directory", b"scheduled maintenance",
+        b"connected to server", b"running on", b"plexpass:", b"connected to library",
+        b"type:", b"agent:", b"scanner:", b"ratings source:",
+        b"library connection successful", b"library connection failed",
+        b"scanning metadata", b"run_order:",
         b"- operations", b"mass_user_rating_update", b"mass_episode_user_ratings_update",
     )
     missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found")
@@ -382,12 +474,14 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     findings.extend(finding for rule in custom_rules for finding in rule.evaluate(context))
     normalized = [finding.as_dict() for finding in findings]
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
+    runtime_platform = _first_value(sample_content, "Platform")
     metadata = {
         "kometa_version": kometa_version,
         "kometa_branch": kometa_branch,
         "quickstart_run": bool(quickstart_marker),
         "quickstart_version": quickstart_fields.get("quickstart"),
         "quickstart_branch": quickstart_branch,
+        "runtime_platform": normalized_platform(runtime_platform),
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": complete_log,
         "header_found": kometa_version is not None,
@@ -445,12 +539,14 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     normalized = [finding.as_dict() for finding in registry.evaluate(context)]
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
 
+    runtime_platform = _first_value(content, "Platform")
     metadata = {
         "kometa_version": kometa_version,
         "kometa_branch": kometa_branch,
         "quickstart_run": bool(quickstart_marker),
         "quickstart_version": quickstart_fields.get("quickstart"),
         "quickstart_branch": quickstart_branch,
+        "runtime_platform": normalized_platform(runtime_platform),
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": detected_run_time is not None,
         "header_found": kometa_version is not None,

@@ -25,7 +25,14 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
 }), encoding="utf-8")
 
 from logscan_web.app import add_missing_people_recommendations, app
-from logscan_web.scanner import MAX_FILE_BYTES, extract_missing_people, scan_archive_logs, scan_log
+from logscan_web.scanner import (
+    MAX_FILE_BYTES,
+    extract_missing_people,
+    extract_plex_configurations,
+    normalized_platform,
+    scan_archive_logs,
+    scan_log,
+)
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -318,8 +325,67 @@ class StreamingScanTests(unittest.TestCase):
         finally:
             disk_content.unlink(missing_ok=True)
 
+    def test_disk_backed_scan_preserves_plex_configuration_sections(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
+            "[config.py:2] [INFO] | Plex Configuration |",
+            "[config.py:3] [INFO] | Connected to server NZWHS01 version 1.31.2.6810-a607d384f |",
+            "[config.py:4] [INFO] | Connected to library TestMovies |",
+            "[config.py:5] [INFO] | Library Connection Successful |",
+            "[builder.py:6] [INFO] | Scanning Metadata and Images |",
+            "[config.py:7] [INFO] | Run Order: operations |",
+        ]).encode()
+        archive_bytes = BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("meta.log", content)
+
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+            scans = scan_archive_logs("meta.zip", archive_bytes.getvalue())
+        _filename, disk_content, result = scans[0]
+        try:
+            sections = result.overview["plex_configurations"]
+            self.assertEqual(len(sections), 1)
+            self.assertIn("Connected to library TestMovies", sections[0]["lines"])
+            self.assertNotIn("Run Order: operations", sections[0]["lines"])
+        finally:
+            disk_content.unlink(missing_ok=True)
+
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_runtime_platform_is_reduced_to_a_safe_family(self):
+        self.assertEqual(normalized_platform("Linux-6.1.34-Unraid-x86_64"), "Linux")
+        self.assertEqual(normalized_platform("Linux-5.15.0-microsoft-standard-WSL2"), "WSL")
+        self.assertEqual(normalized_platform("Windows-11-10.0.26100"), "Windows")
+        self.assertEqual(normalized_platform("Darwin-24.6.0-arm64"), "macOS")
+        self.assertEqual(normalized_platform("private custom host value"), "Unknown")
+
+    def test_plex_configuration_sections_are_exposed_in_log_overview(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[config.py:2] [INFO] | Plex Configuration |",
+            "[config.py:3] [INFO] | Using Asset Directory: config/assets/Movies/ |",
+            "[config.py:4] [INFO] | Connected to server NZWHS01 version 1.31.2.6810-a607d384f |",
+            "[config.py:5] [INFO] | Running on Linux version 6.1.34-Unraid |",
+            "[config.py:6] [INFO] | Connected to library TestMovies |",
+            "[config.py:7] [INFO] | Type: Movie |",
+            "[config.py:8] [INFO] | Agent: tv.plex.agents.movie |",
+            "[config.py:9] [INFO] | Library Connection Successful |",
+            "[builder.py:10] [INFO] | Scanning Metadata and Images |",
+        ])
+
+        sections = extract_plex_configurations(content)
+        result = scan_log("meta.log", content.encode())
+
+        self.assertEqual(len(sections), 1)
+        self.assertEqual(sections[0]["title"], "Plex Configuration - Section 1")
+        self.assertIn("Connected to library TestMovies", sections[0]["lines"])
+        self.assertIn("Agent: tv.plex.agents.movie", sections[0]["lines"])
+        self.assertEqual(result.overview["plex_configurations"], sections)
+        self.assertEqual(result.overview["plex_analytics"]["versions"], ["1.31.2.6810-a607d384f"])
+        self.assertEqual(result.overview["plex_analytics"]["platforms"], ["Linux"])
+        self.assertEqual(result.overview["plex_analytics"]["library_types"], ["Movie"])
+        self.assertEqual(result.overview["plex_analytics"]["agents"], ["tv.plex.agents.movie"])
+
     def test_kometa_and_quickstart_channels_are_extracted_from_safe_markers(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Python 3.12.1) (Branch: nightly) |",
@@ -384,6 +450,12 @@ class AnonymousAnalyticsTests(unittest.TestCase):
                 versions=["2.1.0", "unknown"], kometa_branches=["master", "nightly"],
                 launchers=["direct", "quickstart"], quickstart_versions=["0.10.4-build302"],
                 quickstart_branches=["develop"], recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
+                kometa_platforms=["Linux", "Windows"], quickstart_platforms=["Linux"],
+                plex={
+                    "versions": ["1.31.2.6810-a607d384f"], "platforms": ["Linux"],
+                    "update_channels": ["Public"], "library_types": ["Movie"],
+                    "agents": ["tv.plex.agents.movie"], "scanners": ["Plex Movie"],
+                },
             )
             analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
             analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
@@ -395,7 +467,16 @@ class AnonymousAnalyticsTests(unittest.TestCase):
         self.assertEqual(snapshot["totals"]["kometa_branches"], {"master": 1, "nightly": 1})
         self.assertEqual(snapshot["totals"]["launchers"], {"direct": 1, "quickstart": 1})
         self.assertEqual(snapshot["totals"]["quickstart_branches"], {"develop": 1})
+        self.assertEqual(snapshot["totals"]["kometa_platforms"], {"Linux": 1, "Windows": 1})
+        self.assertEqual(snapshot["totals"]["quickstart_platforms"], {"Linux": 1})
+        self.assertEqual(snapshot["totals"]["plex_versions"], {"1.31.2.6810-a607d384f": 1})
+        self.assertEqual(snapshot["totals"]["plex_platforms"], {"Linux": 1})
+        self.assertEqual(snapshot["totals"]["plex_library_types"], {"Movie": 1})
+        self.assertEqual(snapshot["totals"]["plex_agents"], {"tv.plex.agents.movie": 1})
         self.assertNotIn("tmdb-1", raw)
+        self.assertNotIn("NZWHS01", raw)
+        self.assertNotIn("TestMovies", raw)
+        self.assertNotIn("config/assets", raw)
 
 
 class UsageStatsTests(unittest.TestCase):
