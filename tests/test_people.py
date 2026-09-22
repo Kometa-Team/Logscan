@@ -30,9 +30,11 @@ from logscan_web.scanner import (
     extract_missing_people,
     extract_plex_configurations,
     normalized_platform,
+    apply_documentation_branch,
     scan_archive_logs,
     scan_log,
 )
+from logscan_web.recommendations import DISCORD_GUIDANCE, DOCUMENTATION_URLS, RULES
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -352,6 +354,100 @@ class StreamingScanTests(unittest.TestCase):
 
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_wiki_links_follow_master_and_develop_without_nightly_urls(self):
+        recommendation = {
+            "solution": "See https://kometa.wiki/en/latest/config/anidb",
+            "message": "Help: https://www.kometa.wiki/en/latest/config/anidb",
+        }
+
+        apply_documentation_branch([recommendation], "develop")
+        self.assertIn("https://www.kometa.wiki/en/develop/config/anidb", recommendation["solution"])
+        self.assertNotIn("/en/latest/", recommendation["message"])
+        apply_documentation_branch([recommendation], "nightly")
+        self.assertIn("https://www.kometa.wiki/en/develop/config/anidb", recommendation["solution"])
+        self.assertNotIn("/en/nightly/", recommendation["solution"])
+
+    def test_scanned_develop_log_uses_develop_wiki(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: develop) |",
+            "[config.py:2] [ERROR] | AniDB Error: Login failed |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "anidb_auth")
+
+        self.assertIn("https://www.kometa.wiki/en/develop/config/anidb", finding["solution"])
+        self.assertNotIn("/en/nightly/", finding["message"])
+
+    def test_every_verified_discord_documentation_url_is_kept(self):
+        by_id = {rule.id: rule for rule in RULES.values()}
+
+        self.assertGreaterEqual(len(DOCUMENTATION_URLS), 40)
+        self.assertEqual(set(DOCUMENTATION_URLS) - set(by_id), set())
+        for rule_id, url in DOCUMENTATION_URLS.items():
+            with self.subTest(rule_id=rule_id):
+                self.assertIn(url, by_id[rule_id].solution)
+
+    def test_every_rich_discord_guidance_override_is_applied(self):
+        by_id = {rule.id: rule for rule in RULES.values()}
+
+        self.assertGreaterEqual(len(DISCORD_GUIDANCE), 45)
+        for rule_id, (description, solution) in DISCORD_GUIDANCE.items():
+            with self.subTest(rule_id=rule_id):
+                self.assertEqual(by_id[rule_id].description, description)
+                self.assertTrue(by_id[rule_id].solution.startswith(solution))
+
+    def test_legacy_other_award_keeps_discord_guidance_and_url(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[config.py:2] [WARNING] | other_award: oscars |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "legacy_other_award")
+
+        self.assertIn("As of 1.20", finding["description"])
+        self.assertIn("own individual files", finding["description"])
+        self.assertIn(
+            "https://www.kometa.wiki/en/latest/kometa/faqs/?h=other_award#pmm-120-release-changes",
+            finding["solution"],
+        )
+
+    def test_pre_kometa_yaml_keeps_replacement_url_and_evidence(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[config.py:2] [INFO] |     - pmm: imdb |",
+            "[config.py:3] [INFO] |     - pmm: oscars |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "legacy_pmm")
+
+        self.assertEqual(finding["title"], "Pre-Kometa YAML detected")
+        self.assertIn("`- pmm:`", finding["solution"])
+        self.assertIn("`- default:`", finding["solution"])
+        self.assertIn("https://www.kometa.wiki/en/latest/config/overview/?h=configuration", finding["solution"])
+        self.assertEqual(finding["evidence_lines"], [2, 3])
+
+    def test_anidb_recommendations_keep_discord_guidance_and_url(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[config.py:2] [ERROR] | AniDB Error: Login failed |",
+            "[config.py:3] [ERROR] | No Anime Found for AniDB ID: 69 |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        findings = {item["id"]: item for item in result.recommendations}
+
+        auth = findings["anidb_auth"]
+        self.assertIn("settings in config.yml", auth["description"])
+        self.assertIn("https://www.kometa.wiki/en/latest/config/anidb", auth["solution"])
+        self.assertEqual(auth["evidence_lines"], [2])
+        connection = findings["anidb_connection"]
+        self.assertIn("AniDB ID 69", connection["description"])
+        self.assertIn("https://www.kometa.wiki/en/latest/config/anidb", connection["solution"])
+        self.assertEqual(connection["evidence_lines"], [3])
+
     def test_runtime_platform_is_reduced_to_a_safe_family(self):
         self.assertEqual(normalized_platform("Linux-6.1.34-Unraid-x86_64"), "Linux")
         self.assertEqual(normalized_platform("Linux-5.15.0-microsoft-standard-WSL2"), "WSL")
