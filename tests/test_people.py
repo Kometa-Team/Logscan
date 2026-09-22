@@ -30,11 +30,12 @@ from logscan_web.scanner import (
     extract_missing_people,
     extract_plex_configurations,
     normalized_platform,
+    normalized_installation,
     apply_documentation_branch,
     scan_archive_logs,
     scan_log,
 )
-from logscan_web.recommendations import DISCORD_GUIDANCE, DOCUMENTATION_URLS, RULES
+from logscan_web.recommendations import DISCORD_GUIDANCE, DOCUMENTATION_URLS, RULES, schema_branch_for_log
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -354,6 +355,21 @@ class StreamingScanTests(unittest.TestCase):
 
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_severity_dots_use_the_semantic_color_scale(self):
+        css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
+        expected = {
+            "critical": "#f43f5e",
+            "error": "#fb923c",
+            "warning": "#fbbf24",
+            "schema": "#a78bfa",
+            "advice": "#60a5fa",
+        }
+
+        for severity, color in expected.items():
+            with self.subTest(severity=severity):
+                self.assertIn(f"--{severity}: {color};", css)
+                self.assertIn(f".{severity} .severity-dot {{ color: var(--{severity});", css)
+
     def test_wsl_runtime_finding_includes_actionable_configuration(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
@@ -416,6 +432,12 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("https://www.kometa.wiki/en/develop/config/anidb", finding["solution"])
         self.assertNotIn("/en/nightly/", finding["message"])
 
+    def test_schema_branch_matches_release_channel(self):
+        self.assertEqual(schema_branch_for_log("Version: 2.2.0 (Branch: master)"), "master")
+        self.assertEqual(schema_branch_for_log("Version: 2.3.0 (Branch: develop)"), "develop")
+        self.assertEqual(schema_branch_for_log("Version: 2.1.0 (Branch: nightly)"), "develop")
+    def test_traceback_is_critical(self):
+        self.assertEqual(next(rule for rule in RULES.values() if rule.id == "traceback").category, "critical")
     def test_every_verified_discord_documentation_url_is_kept(self):
         by_id = {rule.id: rule for rule in RULES.values()}
 
@@ -492,6 +514,11 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(normalized_platform("Darwin-24.6.0-arm64"), "macOS")
         self.assertEqual(normalized_platform("private custom host value"), "Unknown")
 
+    def test_installation_method_requires_an_explicit_header_marker(self):
+        self.assertEqual(normalized_installation("1.19.0 (Docker)"), "Docker")
+        self.assertEqual(normalized_installation("2.3.1 (Linuxserver)"), "Docker (LinuxServer)")
+        self.assertEqual(normalized_installation("2.5.0 (Python 3.13.2)"), "Native Python")
+        self.assertEqual(normalized_installation("2.5.0"), "Unknown")
     def test_plex_configuration_sections_are_exposed_in_log_overview(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
@@ -584,6 +611,7 @@ class AnonymousAnalyticsTests(unittest.TestCase):
                 launchers=["direct", "quickstart"], quickstart_versions=["0.10.4-build302"],
                 quickstart_branches=["develop"], recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
                 kometa_platforms=["Linux", "Windows"], quickstart_platforms=["Linux"],
+                installation_methods=["Docker", "Native Python"],
                 plex={
                     "versions": ["1.31.2.6810-a607d384f"], "platforms": ["Linux"],
                     "update_channels": ["Public"], "library_types": ["Movie"],
@@ -602,6 +630,7 @@ class AnonymousAnalyticsTests(unittest.TestCase):
         self.assertEqual(snapshot["totals"]["quickstart_branches"], {"develop": 1})
         self.assertEqual(snapshot["totals"]["kometa_platforms"], {"Linux": 1, "Windows": 1})
         self.assertEqual(snapshot["totals"]["quickstart_platforms"], {"Linux": 1})
+        self.assertEqual(snapshot["totals"]["installation_methods"], {"Docker": 1, "Native Python": 1})
         self.assertEqual(snapshot["totals"]["plex_versions"], {"1.31.2.6810-a607d384f": 1})
         self.assertEqual(snapshot["totals"]["plex_platforms"], {"Linux": 1})
         self.assertEqual(snapshot["totals"]["plex_library_types"], {"Movie": 1})

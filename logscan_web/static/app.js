@@ -52,7 +52,7 @@ const defaultGroups = [
   { key: "critical", label: "Critical issues", description: "Items most likely to prevent a successful or secure run." },
   { key: "error", label: "Errors", description: "Problems that may cause incomplete or unintended results." },
   { key: "warning", label: "Warnings", description: "Potential problems worth reviewing before your next run." },
-  { key: "schema", label: "Schema issues", description: "Deprecated or invalid configuration syntax that should be updated." },
+  { key: "schema", label: "Schema validation", description: "Live config.yml schema results plus deprecated or invalid configuration syntax." },
   { key: "advice", label: "Advice", description: "Configuration and performance improvements." },
 ];
 
@@ -96,12 +96,16 @@ function uploadFailureSummary(failures) {
   return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())} ${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`;
 }
 
+function setSectionSelectSeverity(select, key) {
+  if (select) select.dataset.severity = key;
+}
+
 function showOverview(group, overview) {
   document.querySelectorAll(".nav-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.group === group.key);
   });
   const sectionSelect = document.querySelector("#section-select");
-  if (sectionSelect) sectionSelect.value = group.key;
+  if (sectionSelect) { sectionSelect.value = group.key; setSectionSelectSeverity(sectionSelect, group.key); }
   sectionContent.replaceChildren();
   const header = document.createElement("div");
   header.className = "section-header";
@@ -111,7 +115,13 @@ function showOverview(group, overview) {
     ["Log name", overview.log_name],
     ...(overview.uploaded_by ? [["Log Info", { uploader: overview.uploaded_by, id: overview.uploaded_by_id, messageUrl: overview.message_url }]] : []),
     ["Number of recommendations", overview.recommendation_count],
-    ["Kometa version", overview.kometa_version],
+    ["Version recorded in log", overview.kometa_version],
+    ["Update target recorded in log", overview.newest_version_at_run],
+    ["Current comparison branch", overview.current_comparison_branch],
+    ["Current branch version", overview.current_branch_version],
+    ["Current master version", overview.current_master_version],
+    ["Current develop version", overview.current_develop_version],
+    ["Current versions checked", overview.current_versions_checked],
     ["Platform", overview.platform],
     ["Total memory", overview.total_memory],
     ["Available memory", overview.available_memory],
@@ -327,11 +337,12 @@ function recommendationBody(message, evidenceLines = []) {
 async function loadLogLines() {
   if (!currentFile && !currentScanId) throw new Error("Select and scan a log before opening the viewer.");
   if (!currentLogLines) {
-    const response = currentFile
-      ? null
-      : await fetch(`/api/scans/${encodeURIComponent(currentScanId)}/log`);
-    if (response && !response.ok) throw new Error("The stored log could not be loaded.");
-    const text = currentFile ? await currentFile.text() : await response.text();
+    const response = currentScanId
+      ? await fetch(`/api/scans/${encodeURIComponent(currentScanId)}/log`)
+      : null;
+    if (response && response.status === 404) throw new Error("This stored log has expired or was deleted, so its source lines are no longer available.");
+    if (response && !response.ok) throw new Error(`The stored log could not be loaded (HTTP ${response.status}).`);
+    const text = response ? await response.text() : await currentFile.text();
     currentLogLines = text.split(/\r?\n/);
     currentLogSections = findLogSections(currentLogLines);
     populateSectionJump();
@@ -627,7 +638,7 @@ function showGroup(group, recommendations) {
     button.classList.toggle("active", button.dataset.group === group.key);
   });
   const sectionSelect = document.querySelector("#section-select");
-  if (sectionSelect) sectionSelect.value = group.key;
+  if (sectionSelect) { sectionSelect.value = group.key; setSectionSelectSeverity(sectionSelect, group.key); }
   sectionContent.replaceChildren();
   const header = document.createElement("div");
   header.className = "section-header";
@@ -731,7 +742,77 @@ function renderBatchResults(scans, admin = false) {
   batchResults.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderResults(data) {
+async function loadCurrentKometaVersions(data) {
+  try {
+    const response = await fetch("/api/kometa-versions");
+    if (!response.ok) throw new Error();
+    const versions = await response.json();
+    const loggedBranch = data.metadata?.kometa_branch;
+    const comparisonBranch = ["develop", "nightly"].includes(loggedBranch) ? "develop" : "master";
+    Object.assign(data.overview, {
+      current_comparison_branch: comparisonBranch,
+      current_branch_version: versions[comparisonBranch] || "Unavailable",
+      current_master_version: versions.master || "Unavailable",
+      current_develop_version: versions.develop || "Unavailable",
+      current_versions_checked: versions.checked_at ? new Date(versions.checked_at).toLocaleString() : "Unavailable",
+    });
+  } catch (_error) {
+    Object.assign(data.overview, {
+      current_comparison_branch: "Unavailable",
+      current_branch_version: "Unavailable",
+      current_master_version: "Unavailable",
+      current_develop_version: "Unavailable",
+      current_versions_checked: "Unavailable",
+    });
+  }
+  if (document.querySelector(".nav-button.active")?.dataset.group === "overview") {
+    showOverview(defaultGroups[0], data.overview);
+  }
+}
+async function loadSchemaValidation(data) {
+  if (!data.id || data.schema_validation_loaded) return;
+  const updated = { ...data, metadata: { ...data.metadata, counts: { ...data.metadata.counts } } };
+  updated.schema_validation_loaded = true;
+  updated.recommendations = data.recommendations.filter((item) => !`${item.id}`.startsWith("live_schema_"));
+  try {
+    const response = await fetch(`/api/scans/${encodeURIComponent(data.id)}/validate-config`, { method: "POST" });
+    const validation = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(validation.error || "Schema validation could not run.");
+    if (validation.failures.length) {
+      validation.failures.forEach((failure, index) => updated.recommendations.push({
+        id: `live_schema_${index}`,
+        severity: "schema",
+        title: `JSON Schema issue: ${failure.path || "(root)"}`,
+        message: `${failure.message}\n\nConfig path: ${failure.path || "(root)"}\nSource log line: ${failure.line}\nValidated against: Kometa ${validation.branch} schema`,
+        evidence_lines: [failure.line],
+      }));
+    } else {
+      updated.recommendations.push({
+        id: "live_schema_passed",
+        severity: "schema",
+        title: "Config passed JSON Schema validation",
+        message: `The extracted config.yml passed the Kometa ${validation.branch} schema.`,
+        evidence_lines: [],
+      });
+    }
+  } catch (error) {
+    updated.recommendations.push({
+      id: "live_schema_unavailable",
+      severity: "schema",
+      title: "JSON Schema validation unavailable",
+      message: error.message,
+      evidence_lines: [],
+    });
+  }
+  updated.metadata.counts.schema = updated.recommendations.filter((item) => item.severity === "schema").length;
+  renderResults(updated, false);
+}
+function renderResults(data, runSchemaValidation = true) {
+  if (data.id && data.id !== currentScanId) currentLogLines = null;
+  if (data.id) {
+    currentScanId = data.id;
+    currentFile = null;
+  }
   deleteToken = new URLSearchParams(location.hash.slice(1)).get("delete");
   updateRetentionCountdown(data);
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
@@ -760,6 +841,7 @@ function renderResults(data) {
     if (group.key !== "overview" && recommendationCount === 0) return;
     const option = document.createElement("option");
     option.value = group.key;
+    option.dataset.severity = group.key;
     option.textContent = group.key === "overview" ? group.label : `${group.label} (${recommendationCount})`;
     sectionSelect.append(option);
     const button = document.createElement("button");
@@ -790,6 +872,8 @@ function renderResults(data) {
   currentScanId = data.id || currentScanId;
   document.querySelector("#delete-scan").hidden = !deleteToken;
   results.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (runSchemaValidation) loadSchemaValidation(data);
+  loadCurrentKometaVersions(data);
 }
 
 input.addEventListener("change", () => selectedFiles());

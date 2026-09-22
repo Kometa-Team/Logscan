@@ -19,7 +19,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_file, ur
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
-from .recommendations import validate_redacted_config
+from .recommendations import schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 
@@ -39,6 +39,10 @@ KOMETA_IMAGE_CACHE_SECONDS = 60 * 60
 POPULAR_PEOPLE_CACHE_SECONDS = 24 * 60 * 60
 POPULAR_PEOPLE_LIMIT = 250
 POPULAR_PEOPLE_CHECK_SECONDS = 30 * 24 * 60 * 60
+KOMETA_VERSION_CACHE_SECONDS = 60 * 60
+KOMETA_VERSION_URL = "https://raw.githubusercontent.com/Kometa-Team/Kometa/{branch}/VERSION"
+_kometa_version_cache = {"checked_at": None, "expires_at": 0.0, "versions": {}}
+_kometa_version_lock = threading.Lock()
 TMDB_FIND_CACHE_SECONDS = 7 * 24 * 60 * 60
 TMDB_FIND_MAX_WORKERS = 8
 
@@ -1001,6 +1005,7 @@ def create_app() -> Flask:
                 for payload in payloads if payload["metadata"].get("quickstart_run")
             ],
             kometa_platforms=[payload["metadata"].get("runtime_platform", "Unknown") for payload in payloads],
+            installation_methods=[payload["metadata"].get("installation_method", "Unknown") for payload in payloads],
             quickstart_platforms=[
                 payload["metadata"].get("runtime_platform", "Unknown")
                 for payload in payloads if payload["metadata"].get("quickstart_run")
@@ -1034,6 +1039,28 @@ def create_app() -> Flask:
         update_scan_job(job_id, "complete", redirect_url=private_result_url)
         return jsonify({"scans": payloads}) if len(payloads) > 1 else jsonify(payloads[0])
 
+    @app.get("/api/kometa-versions")
+    def current_kometa_versions():
+        now = time.time()
+        with _kometa_version_lock:
+            if _kometa_version_cache["expires_at"] <= now:
+                versions = {}
+                for branch in ("master", "develop"):
+                    try:
+                        version_url = KOMETA_VERSION_URL.format(branch=branch)
+                        with urlopen(Request(version_url, headers={"User-Agent": "Kometa-Logscan/1.0"}), timeout=10) as response:
+                            versions[branch] = response.read().decode("utf-8").strip()
+                    except (HTTPError, URLError, TimeoutError, UnicodeDecodeError):
+                        versions[branch] = None
+                _kometa_version_cache.update({
+                    "checked_at": datetime.now(UTC).isoformat(),
+                    "expires_at": now + KOMETA_VERSION_CACHE_SECONDS,
+                    "versions": versions,
+                })
+            return jsonify(
+                checked_at=_kometa_version_cache["checked_at"],
+                **_kometa_version_cache["versions"],
+            )
     @app.get("/api/analytics")
     def usage_analytics():
         return jsonify(analytics.snapshot())
@@ -1158,7 +1185,7 @@ def create_app() -> Flask:
         path = store.log_path(scan_id)
         if path is None:
             abort(404)
-        return send_file(path, mimetype="text/plain; charset=utf-8", conditional=True)
+        return send_file(path.resolve(), mimetype="text/plain; charset=utf-8", conditional=True)
 
     @app.post("/api/scans/<scan_id>/validate-config")
     def validate_stored_config(scan_id):
@@ -1166,13 +1193,14 @@ def create_app() -> Flask:
         if path is None:
             abort(404)
         try:
-            failures = validate_redacted_config(path.read_text(encoding="utf-8", errors="replace"))
+            log_content = path.read_text(encoding="utf-8", errors="replace")
+            failures = validate_redacted_config(log_content)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         except RuntimeError as exc:
             app.logger.warning("Config validation failed: %s", exc)
             return jsonify(error=str(exc)), 502
-        return jsonify(failures=failures)
+        return jsonify(branch=schema_branch_for_log(log_content), failures=failures)
 
     @app.delete("/api/scans/<scan_id>")
     def delete_scan(scan_id):

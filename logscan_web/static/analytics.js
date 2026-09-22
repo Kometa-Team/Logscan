@@ -75,6 +75,7 @@ fetch("/api/analytics").then((response) => {
   renderBars("#analytics-versions", totals.kometa_versions);
   renderBars("#analytics-kometa-branches", totals.kometa_branches);
   renderBars("#analytics-kometa-platforms", totals.kometa_platforms);
+  renderBars("#analytics-installation-methods", totals.installation_methods);
   renderBars("#analytics-launchers", totals.launchers);
   renderBars("#analytics-quickstart-versions", totals.quickstart_versions);
   renderBars("#analytics-quickstart-branches", totals.quickstart_branches);

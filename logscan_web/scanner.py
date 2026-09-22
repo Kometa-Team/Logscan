@@ -268,6 +268,17 @@ def normalized_platform(value: str | None) -> str:
     return "Unknown"
 
 
+def normalized_installation(version: str | None) -> str:
+    """Return an anonymous install family only when the log states it explicitly."""
+    lowered = (version or "").casefold()
+    if "linuxserver" in lowered:
+        return "Docker (LinuxServer)"
+    if "docker" in lowered:
+        return "Docker"
+    if re.search(r"\(python(?:\s|\d)", lowered):
+        return "Native Python"
+    return "Unknown"
+
 def apply_documentation_branch(recommendations: list[dict], branch: str) -> None:
     """Point Kometa Wiki links at the scanned release channel's documentation."""
     documentation_branch = "develop" if branch in {"develop", "nightly"} else "latest"
@@ -367,6 +378,7 @@ def _log_overview(
         "log_name": filename,
         "recommendation_count": len(recommendations),
         "kometa_version": kometa_version,
+        "newest_version_at_run": _first_value(content, "Newest Version"),
         "platform": _first_value(content, "Platform"),
         "total_memory": _first_value(content, "Memory"),
         "available_memory": _first_value(content, "Available Memory"),
@@ -490,11 +502,13 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     runtime_platform = _first_value(sample_content, "Platform")
     metadata = {
         "kometa_version": kometa_version,
+        "newest_version_at_run": _first_value(sample_content, "Newest Version"),
         "kometa_branch": kometa_branch,
         "quickstart_run": bool(quickstart_marker),
         "quickstart_version": quickstart_fields.get("quickstart"),
         "quickstart_branch": quickstart_branch,
         "runtime_platform": normalized_platform(runtime_platform),
+        "installation_method": normalized_installation(kometa_version),
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": complete_log,
         "header_found": kometa_version is not None,
@@ -556,11 +570,13 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     runtime_platform = _first_value(content, "Platform")
     metadata = {
         "kometa_version": kometa_version,
+        "newest_version_at_run": _first_value(content, "Newest Version"),
         "kometa_branch": kometa_branch,
         "quickstart_run": bool(quickstart_marker),
         "quickstart_version": quickstart_fields.get("quickstart"),
         "quickstart_branch": quickstart_branch,
         "runtime_platform": normalized_platform(runtime_platform),
+        "installation_method": normalized_installation(kometa_version),
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": detected_run_time is not None,
         "header_found": kometa_version is not None,

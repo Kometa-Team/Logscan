@@ -9,7 +9,7 @@ CATEGORIES = (
     {"key": "critical", "label": "Critical Issues", "description": "Items most likely to prevent a successful run or cause major issues with a run", "priority": 20},
     {"key": "error", "label": "Errors", "description": "Errors that occur during a run that do not prevent the run finishing, but may cause undesired results.", "priority": 30},
     {"key": "warning", "label": "Warnings", "description": "Potential problems worth reviewing before your next run.", "priority": 40},
-    {"key": "schema", "label": "Schema issues", "description": "Deprecated or invalid configuration syntax that should be updated.", "priority": 50},
+    {"key": "schema", "label": "Schema validation", "description": "Live config.yml schema results plus deprecated or invalid configuration syntax.", "priority": 50},
     {"key": "advice", "label": "Advice", "description": "Configuration and performance improvements.", "priority": 60},
 )
 
