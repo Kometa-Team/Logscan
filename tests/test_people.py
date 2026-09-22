@@ -384,6 +384,25 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("https://kometa.wiki/en/latest/config/overview/?h=configuration", finding["solution"])
         self.assertEqual(finding["evidence_lines"], [2, 3])
 
+    def test_anidb_recommendations_keep_discord_guidance_and_url(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[config.py:2] [ERROR] | AniDB Error: Login failed |",
+            "[config.py:3] [ERROR] | No Anime Found for AniDB ID: 69 |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        findings = {item["id"]: item for item in result.recommendations}
+
+        auth = findings["anidb_auth"]
+        self.assertIn("settings in config.yml", auth["description"])
+        self.assertIn("https://kometa.wiki/en/latest/config/anidb", auth["solution"])
+        self.assertEqual(auth["evidence_lines"], [2])
+        connection = findings["anidb_connection"]
+        self.assertIn("AniDB ID 69", connection["description"])
+        self.assertIn("https://kometa.wiki/en/latest/config/anidb", connection["solution"])
+        self.assertEqual(connection["evidence_lines"], [3])
+
     def test_runtime_platform_is_reduced_to_a_safe_family(self):
         self.assertEqual(normalized_platform("Linux-6.1.34-Unraid-x86_64"), "Linux")
         self.assertEqual(normalized_platform("Linux-5.15.0-microsoft-standard-WSL2"), "WSL")
