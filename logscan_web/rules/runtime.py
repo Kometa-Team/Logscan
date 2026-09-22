@@ -32,6 +32,12 @@ def _clock_minutes(value: str) -> int:
     return (hours * 60) + minutes
 
 
+def _display_time(value: str) -> str:
+    """Display a parsed 24-hour time without an unnecessary leading zero."""
+    hours, minutes = (int(part) for part in value.split(":"))
+    return f"{hours}:{minutes:02d}"
+
+
 def _duration_minutes(value: str | None) -> float | None:
     if not value:
         return None
@@ -169,15 +175,26 @@ class RuntimeAnalysisRule:
                     schedule_id = None
                 if schedule_id:
                     rule = _definition(schedule_id)
+                    recommended_start = _display_time(maintenance.group(2))
+                    maintenance_window = f"{maintenance.group(1)}-{maintenance.group(2)}"
                     add(
                         schedule_id,
                         details=(
                             f"**{rule.title}**\n"
                             f"Run time: **{context.run_time}**\n"
                             f"Kometa scheduled start: **{schedule.group(1)}**\n"
-                            f"Plex maintenance window: **{maintenance.group(1)}-{maintenance.group(2)}**\n\n"
-                            f"{rule.description}\n\nProposed solution: {rule.solution} "
-                            "See https://support.plex.tv/articles/202197488-scheduled-server-maintenance/"
+                            f"Plex maintenance window: **{maintenance_window}**\n"
+                            f"Recommended Kometa start: **{recommended_start}**, immediately after "
+                            "the detected Plex maintenance window ends.\n\n"
+                            f"{rule.description}\n\n"
+                            f"Proposed solution: Set Kometa to run at **{recommended_start}**. "
+                            "In Plex Web App, review or change the maintenance window under "
+                            "**Settings > Server > Scheduled Tasks**, then save the changes. "
+                            "Plex server defaults are **2:00 AM-5:00 AM** in the Plex server's local time; "
+                            "set those start and end values to restore the default window. "
+                            f"{rule.solution} See "
+                            "https://support.plex.tv/articles/201553286-scheduled-tasks/ and "
+                            "https://support.plex.tv/articles/202197488-scheduled-server-maintenance/"
                         ),
                     )
         if not context.complete:

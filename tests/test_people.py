@@ -407,6 +407,24 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("02:00-05:00", schedule)
         self.assertIn("support.plex.tv/articles/202197488", schedule)
 
+    def test_schedule_conflict_prescribes_maintenance_end_and_plex_settings(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[kometa.py:2] [INFO] | --time (KOMETA_TIME): 02:45 |",
+            "[config.py:3] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+            "[kometa.py:4] [INFO] | Finished: now Run Time: 20:03:44 |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "schedule_conflict")
+        message = finding["message"]
+
+        self.assertIn("Recommended Kometa start: **5:00**", message)
+        self.assertIn("Set Kometa to run at **5:00**", message)
+        self.assertIn("Settings > Server > Scheduled Tasks", message)
+        self.assertIn("Plex server defaults are **2:00 AM-5:00 AM**", message)
+        self.assertIn("Plex server's local time", message)
+        self.assertIn("support.plex.tv/articles/201553286-scheduled-tasks", message)
     def test_wiki_links_follow_master_and_develop_without_nightly_urls(self):
         recommendation = {
             "solution": "See https://kometa.wiki/en/latest/config/anidb",
