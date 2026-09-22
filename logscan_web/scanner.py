@@ -268,6 +268,18 @@ def normalized_platform(value: str | None) -> str:
     return "Unknown"
 
 
+def apply_documentation_branch(recommendations: list[dict], branch: str) -> None:
+    """Point Kometa Wiki links at the scanned release channel's documentation."""
+    documentation_branch = "develop" if branch == "develop" else "latest"
+    target = f"https://www.kometa.wiki/en/{documentation_branch}/"
+    pattern = re.compile(r"https://(?:www\.)?kometa\.wiki/en/(?:latest|develop)/", re.I)
+    for recommendation in recommendations:
+        for field in ("solution", "message"):
+            value = recommendation.get(field)
+            if isinstance(value, str):
+                recommendation[field] = pattern.sub(target, value)
+
+
 def _log_message(line: str) -> str:
     """Return the readable message from a Kometa log line."""
     match = re.match(
@@ -473,6 +485,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     )
     findings.extend(finding for rule in custom_rules for finding in rule.evaluate(context))
     normalized = [finding.as_dict() for finding in findings]
+    apply_documentation_branch(normalized, kometa_branch)
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
     runtime_platform = _first_value(sample_content, "Platform")
     metadata = {
@@ -537,6 +550,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     for rule in migrated_rules():
         registry.register(rule)
     normalized = [finding.as_dict() for finding in registry.evaluate(context)]
+    apply_documentation_branch(normalized, kometa_branch)
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
 
     runtime_platform = _first_value(content, "Platform")

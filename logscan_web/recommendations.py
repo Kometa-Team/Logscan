@@ -239,6 +239,10 @@ DOCUMENTATION_URLS = {
     "service_config": "https://kometa.wiki/en/latest/kometa/logs/?h=%5Berror%5D#error",
     "trakt_connection": "https://kometa.wiki/en/latest/config/trakt/#trakt-attributes",
 }
+DOCUMENTATION_URLS = {
+    rule_id: url.replace("https://kometa.wiki/", "https://www.kometa.wiki/")
+    for rule_id, url in DOCUMENTATION_URLS.items()
+}
 
 # Actionable prose retained from the Discord cog. Discord-only bot commands are
 # intentionally omitted because they are not useful in a standalone web result.
@@ -304,6 +308,9 @@ def _with_documentation(spec: dict) -> RecommendationRule:
     guidance = DISCORD_GUIDANCE.get(values["id"])
     if guidance:
         values["description"], values["solution"] = guidance
+    values["solution"] = values["solution"].replace(
+        "https://kometa.wiki/", "https://www.kometa.wiki/"
+    )
     url = DOCUMENTATION_URLS.get(values["id"])
     if url and url not in values["solution"]:
         values["solution"] = f'{values["solution"]} See {url}'
