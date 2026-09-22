@@ -252,6 +252,22 @@ def _date_first(value: str | None) -> str | None:
     return f"{match.group(2)} {match.group(1)}" if match else value
 
 
+def normalized_platform(value: str | None) -> str:
+    """Reduce a detailed runtime platform string to a non-identifying family."""
+    lowered = (value or "").casefold()
+    if "wsl" in lowered or "microsoft-standard" in lowered:
+        return "WSL"
+    if "windows" in lowered:
+        return "Windows"
+    if "linux" in lowered:
+        return "Linux"
+    if "darwin" in lowered or "macos" in lowered or "mac os" in lowered:
+        return "macOS"
+    if "freebsd" in lowered:
+        return "FreeBSD"
+    return "Unknown"
+
+
 def _log_message(line: str) -> str:
     """Return the readable message from a Kometa log line."""
     match = re.match(
@@ -458,12 +474,14 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     findings.extend(finding for rule in custom_rules for finding in rule.evaluate(context))
     normalized = [finding.as_dict() for finding in findings]
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
+    runtime_platform = _first_value(sample_content, "Platform")
     metadata = {
         "kometa_version": kometa_version,
         "kometa_branch": kometa_branch,
         "quickstart_run": bool(quickstart_marker),
         "quickstart_version": quickstart_fields.get("quickstart"),
         "quickstart_branch": quickstart_branch,
+        "runtime_platform": normalized_platform(runtime_platform),
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": complete_log,
         "header_found": kometa_version is not None,
@@ -521,12 +539,14 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     normalized = [finding.as_dict() for finding in registry.evaluate(context)]
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
 
+    runtime_platform = _first_value(content, "Platform")
     metadata = {
         "kometa_version": kometa_version,
         "kometa_branch": kometa_branch,
         "quickstart_run": bool(quickstart_marker),
         "quickstart_version": quickstart_fields.get("quickstart"),
         "quickstart_branch": quickstart_branch,
+        "runtime_platform": normalized_platform(runtime_platform),
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": detected_run_time is not None,
         "header_found": kometa_version is not None,

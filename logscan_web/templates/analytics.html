@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260921-3') }}">
-  <script src="{{ url_for('static', filename='analytics.js', v='20260921-1') }}" defer></script>
+  <script src="{{ url_for('static', filename='analytics.js', v='20260921-2') }}" defer></script>
 </head>
 <body>
   <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links" aria-label="Utilities"><a href="/">Log Scanner</a><a href="{{ url_for('people_page') }}">People</a><span class="utility-label">Analytics</span></nav></header>
@@ -19,9 +19,11 @@
       <div><h2>Upload sources</h2><div id="analytics-sources" class="metric-bars"></div></div>
       <div><h2>Kometa versions</h2><div id="analytics-versions" class="metric-bars"></div></div>
       <div><h2>Kometa branches</h2><div id="analytics-kometa-branches" class="metric-bars"></div></div>
+      <div><h2>Kometa platforms</h2><div id="analytics-kometa-platforms" class="metric-bars"></div></div>
       <div><h2>Run launcher</h2><div id="analytics-launchers" class="metric-bars"></div></div>
       <div><h2>Quickstart versions</h2><div id="analytics-quickstart-versions" class="metric-bars"></div></div>
       <div><h2>Quickstart branches</h2><div id="analytics-quickstart-branches" class="metric-bars"></div></div>
+      <div><h2>Quickstart platforms</h2><div id="analytics-quickstart-platforms" class="metric-bars"></div></div>
       <div><h2>Plex versions</h2><div id="analytics-plex-versions" class="metric-bars"></div></div>
       <div><h2>Plex platforms</h2><div id="analytics-plex-platforms" class="metric-bars"></div></div>
       <div><h2>Plex update channels</h2><div id="analytics-plex-channels" class="metric-bars"></div></div>

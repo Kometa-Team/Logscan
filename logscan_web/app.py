@@ -1000,6 +1000,11 @@ def create_app() -> Flask:
                 safe_branch(payload["metadata"].get("quickstart_branch"), {"master", "develop"})
                 for payload in payloads if payload["metadata"].get("quickstart_run")
             ],
+            kometa_platforms=[payload["metadata"].get("runtime_platform", "Unknown") for payload in payloads],
+            quickstart_platforms=[
+                payload["metadata"].get("runtime_platform", "Unknown")
+                for payload in payloads if payload["metadata"].get("quickstart_run")
+            ],
             plex={
                 key: [
                     value for payload in payloads

@@ -29,6 +29,7 @@ from logscan_web.scanner import (
     MAX_FILE_BYTES,
     extract_missing_people,
     extract_plex_configurations,
+    normalized_platform,
     scan_archive_logs,
     scan_log,
 )
@@ -351,6 +352,13 @@ class StreamingScanTests(unittest.TestCase):
 
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_runtime_platform_is_reduced_to_a_safe_family(self):
+        self.assertEqual(normalized_platform("Linux-6.1.34-Unraid-x86_64"), "Linux")
+        self.assertEqual(normalized_platform("Linux-5.15.0-microsoft-standard-WSL2"), "WSL")
+        self.assertEqual(normalized_platform("Windows-11-10.0.26100"), "Windows")
+        self.assertEqual(normalized_platform("Darwin-24.6.0-arm64"), "macOS")
+        self.assertEqual(normalized_platform("private custom host value"), "Unknown")
+
     def test_plex_configuration_sections_are_exposed_in_log_overview(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
@@ -442,6 +450,7 @@ class AnonymousAnalyticsTests(unittest.TestCase):
                 versions=["2.1.0", "unknown"], kometa_branches=["master", "nightly"],
                 launchers=["direct", "quickstart"], quickstart_versions=["0.10.4-build302"],
                 quickstart_branches=["develop"], recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
+                kometa_platforms=["Linux", "Windows"], quickstart_platforms=["Linux"],
                 plex={
                     "versions": ["1.31.2.6810-a607d384f"], "platforms": ["Linux"],
                     "update_channels": ["Public"], "library_types": ["Movie"],
@@ -458,6 +467,8 @@ class AnonymousAnalyticsTests(unittest.TestCase):
         self.assertEqual(snapshot["totals"]["kometa_branches"], {"master": 1, "nightly": 1})
         self.assertEqual(snapshot["totals"]["launchers"], {"direct": 1, "quickstart": 1})
         self.assertEqual(snapshot["totals"]["quickstart_branches"], {"develop": 1})
+        self.assertEqual(snapshot["totals"]["kometa_platforms"], {"Linux": 1, "Windows": 1})
+        self.assertEqual(snapshot["totals"]["quickstart_platforms"], {"Linux": 1})
         self.assertEqual(snapshot["totals"]["plex_versions"], {"1.31.2.6810-a607d384f": 1})
         self.assertEqual(snapshot["totals"]["plex_platforms"], {"Linux": 1})
         self.assertEqual(snapshot["totals"]["plex_library_types"], {"Movie": 1})
