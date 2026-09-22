@@ -270,7 +270,7 @@ def normalized_platform(value: str | None) -> str:
 
 def apply_documentation_branch(recommendations: list[dict], branch: str) -> None:
     """Point Kometa Wiki links at the scanned release channel's documentation."""
-    documentation_branch = "develop" if branch == "develop" else "latest"
+    documentation_branch = "develop" if branch in {"develop", "nightly"} else "latest"
     target = f"https://www.kometa.wiki/en/{documentation_branch}/"
     pattern = re.compile(r"https://(?:www\.)?kometa\.wiki/en/(?:latest|develop)/", re.I)
     for recommendation in recommendations:

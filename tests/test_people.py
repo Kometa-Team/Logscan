@@ -364,7 +364,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("https://www.kometa.wiki/en/develop/config/anidb", recommendation["solution"])
         self.assertNotIn("/en/latest/", recommendation["message"])
         apply_documentation_branch([recommendation], "nightly")
-        self.assertIn("https://www.kometa.wiki/en/latest/config/anidb", recommendation["solution"])
+        self.assertIn("https://www.kometa.wiki/en/develop/config/anidb", recommendation["solution"])
         self.assertNotIn("/en/nightly/", recommendation["solution"])
 
     def test_scanned_develop_log_uses_develop_wiki(self):
