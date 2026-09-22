@@ -33,7 +33,7 @@ from logscan_web.scanner import (
     scan_archive_logs,
     scan_log,
 )
-from logscan_web.recommendations import DOCUMENTATION_URLS, RULES
+from logscan_web.recommendations import DISCORD_GUIDANCE, DOCUMENTATION_URLS, RULES
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -361,6 +361,15 @@ class RuntimeMetadataTests(unittest.TestCase):
         for rule_id, url in DOCUMENTATION_URLS.items():
             with self.subTest(rule_id=rule_id):
                 self.assertIn(url, by_id[rule_id].solution)
+
+    def test_every_rich_discord_guidance_override_is_applied(self):
+        by_id = {rule.id: rule for rule in RULES.values()}
+
+        self.assertGreaterEqual(len(DISCORD_GUIDANCE), 45)
+        for rule_id, (description, solution) in DISCORD_GUIDANCE.items():
+            with self.subTest(rule_id=rule_id):
+                self.assertEqual(by_id[rule_id].description, description)
+                self.assertTrue(by_id[rule_id].solution.startswith(solution))
 
     def test_legacy_other_award_keeps_discord_guidance_and_url(self):
         content = "\n".join([

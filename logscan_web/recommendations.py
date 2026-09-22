@@ -240,9 +240,70 @@ DOCUMENTATION_URLS = {
     "trakt_connection": "https://kometa.wiki/en/latest/config/trakt/#trakt-attributes",
 }
 
+# Actionable prose retained from the Discord cog. Discord-only bot commands are
+# intentionally omitted because they are not useful in a standalone web result.
+DISCORD_GUIDANCE = {
+    "api_key_missing": ("A required third-party API key is blank, so features using that service cannot run.", "Add a valid API key for the named service in config.yml."),
+    "plex_version": ("Plex 1.32.7.x has a known refresh-endpoint compatibility problem with Kometa.", "Upgrade or downgrade Plex to a release outside the 1.32.7.x range."),
+    "cache_disabled": ("Kometa has `cache: false`; this increases repeat processing and external API traffic.", "Set `cache: true` unless you are deliberately troubleshooting without cached data."),
+    "checkfiles": ("The diagnostic `checkFiles=1` mode was detected in this run.", "Use this mode only when requested for a support investigation."),
+    "kometa_critical": ("Critical messages strongly indicate that all or part of the Kometa run stopped early, so requested changes may not have been applied.", "Review each referenced critical line and resolve its underlying failure before rerunning Kometa."),
+    "kometa_error": ("Error messages indicate that Kometa likely did not complete every requested action, although some individual errors may be non-fatal.", "Review each referenced error in context and correct the affected configuration or service."),
+    "kometa_warning": ("Warnings are often informational and may not require immediate action, but each referenced line should be reviewed in context.", "Confirm whether each warning is expected before changing the configuration."),
+    "id_conversion": ("Kometa could not cross-reference an item between metadata providers because the source record lacks the requested external ID.", "Check the referenced provider records and add or correct the missing cross-reference at the source when possible."),
+    "image_unreadable": ("Kometa encountered an image it could not decode, commonly while processing overlays; the file may be corrupt or unsupported.", "Open the referenced image in an editor and replace or repair it before rerunning Kometa."),
+    "legacy_delete_unmanaged": ("`delete_unmanaged_collections` is now a library operation and is in the wrong part of the configuration.", "Move the setting into the appropriate library operations configuration."),
+    "flixpatrol_parse": ("Kometa could not process returned FlixPatrol data; this may be a service response problem or an obsolete Kometa integration.", "Update Kometa and verify FlixPatrol availability; if failures continue, contact FlixPatrol support."),
+    "flixpatrol_subscription": ("FlixPatrol placed this data behind a paywall and Kometa no longer supports the old `- pmm: flixpatrol` source, even with a paid account.", "Remove the obsolete FlixPatrol source and replace it with a supported builder."),
+    "legacy_git": ("This config.yml references pre-1.18 metadata files with the old `- git: PMM` syntax.", "Update the file reference to the current Kometa configuration syntax."),
+    "image_size": ("Artwork being uploaded or applied exceeds Plex's 10 MB limit and may also produce HTTP 500 errors.", "Reduce the referenced image below 10 MB before rerunning Kometa."),
+    "incomplete_log": ("The uploaded file appears incomplete, so important context needed for accurate troubleshooting may be missing.", "Upload the complete Kometa log from the beginning through the finished run summary."),
+    "internal_server": ("A remote service returned an internal-server error; the failure may be temporary and outside Kometa's control.", "Identify the affected service from the referenced lines, retry later, and check that service's status if it continues."),
+    "linuxserver": ("The log identifies the LinuxServer image rather than the official Kometa container image.", "Review the LinuxServer-specific limitations and migrate to the official Kometa image when supportability matters."),
+    "mal_connection": ("Kometa could not connect to MyAnimeList, so features that depend on MAL data cannot complete.", "Correct the MyAnimeList credentials and verify network access to the service."),
+    "mass_update": ("A `mass_*_update` operation was requested without configuring the corresponding service, so the operation cannot work.", "Review each referenced line and configure the service required by that mass-update operation."),
+    "mdblist_attribute": ("The configured MDBList functionality is not supported for season-level collections.", "Move the builder to a supported collection level or choose a compatible builder."),
+    "mdblist_api_key": ("MDBList rejected the configured API key, so all metadata operations depending on MDBList will fail.", "Replace the MDBList API key and verify the MDBList configuration."),
+    "mdblist_limit": ("The MDBList daily API limit was reached; dependent metadata updates will fail until the limit resets.", "Wait for the reset and keep Kometa caching enabled so a later run can continue with fewer repeated requests."),
+    "metadata_attribute": ("Legacy `metadata_path` or `overlay_path` file layouts can trigger the required metadata-attribute error under the current schema.", "Classify each referenced file under `collection_files`, `metadata_files`, `overlay_files`, or `playlist_files` according to its top-level YAML content."),
+    "metadata_load": ("Kometa could not load a metadata file referenced by config.yml, usually because its path is wrong or its YAML is invalid.", "Inspect the referenced log lines, correct the path or YAML, and retry."),
+    "overlay_load": ("Kometa could not load an overlay file referenced by config.yml, usually because its path is wrong or its YAML is invalid.", "Inspect the referenced log lines, correct the path or YAML, and retry."),
+    "playlist_load": ("Kometa could not load a playlist file referenced by config.yml, usually because its path is wrong or its YAML is invalid.", "Inspect the referenced log lines, correct the path or YAML, and retry."),
+    "legacy_missing": ("`missing_path` and `save_missing` are no longer used in current library configuration.", "Remove those settings and use `report_path` instead."),
+    "plexapi_update": ("An installed Python module is older than the version required by Kometa.", "Update the installation requirements using the update procedure for your installation method."),
+    "kometa_update": ("The log reports that a newer Kometa release was available when this run started.", "Review the release notes and update Kometa using the procedure for your installation method."),
+    "plex_no_items": ("A Plex search or filter returned no matching items; searches and filters are case-sensitive.", "Check the requested value and its capitalization, such as `1080p` versus `1080P`, and confirm that an empty result was not expected."),
+    "omdb_api_key": ("OMDb rejected the configured API key, so operations depending on OMDb will fail.", "Replace the OMDb API key and verify the OMDb configuration."),
+    "omdb_limit": ("The OMDb daily API limit was reached; dependent metadata updates will fail until the limit resets.", "Wait for the reset and keep Kometa caching enabled so later runs avoid unnecessary repeated requests."),
+    "overlay_font": ("An overlay references a font file that Kometa cannot find, preventing overlays that require it from being rendered.", "Correct the font path and confirm that the file is accessible inside the Kometa runtime."),
+    "overlay_reset": ("`reapply_overlays` or `reset_overlays` is enabled; unnecessary use can create additional Plex posters and artwork bloat.", "Disable these options unless you have a specific rebuild reason; use ImageMaid guidance when cleaning accumulated artwork."),
+    "overlay_existing": ("Kometa found artwork already carrying a Kometa overlay EXIF tag; this often happens when inherited or asset-pipeline art is already overlaid.", "Select clean source artwork in Plex or replace the corresponding asset with an image that has no overlay before reapplying."),
+    "overlay_image": ("An overlay image file could not be found, so Kometa cannot apply that overlay.", "Correct the image path and filename, including letter case such as `4K.png` versus `4k.png`, and verify container access."),
+    "legacy_overlay_level": ("The removed `overlay_level` setting is still present in the configuration.", "Replace `overlay_level` with `builder_level`."),
+    "playlist_library": ("A playlist references a Plex library that does not exist; the default playlist expects `Movies` and `TV Shows` unless overridden.", "Correct the library name or use template variables to map the playlist to the actual Plex libraries."),
+    "plex_regex": ("A Plex regular-expression search matched no items; this is often expected and can be ignored when an empty result is valid.", "If matches were expected, verify the expression, target field, and capitalization."),
+    "plex_library": ("The configured Plex library name does not exist, so Kometa cannot update it.", "Check spelling and case, and enable `show_options: true` to review the library names Plex exposes."),
+    "plex_url": ("The configured Plex URL is invalid, causing every feature that depends on that connection to fail.", "Correct the scheme, host, port, and container networking, then verify the Plex token and connection."),
+    "rating_rounding": ("The detected Plex release can round values written by `mass_user_rating_update` or `mass_episode_user_ratings_update`.", "Downgrade Plex to 1.40.0.7998 or upgrade to 1.40.3.8555 or later before applying those operations."),
+    "yaml": ("Kometa encountered a YAML parser error; YAML is sensitive to indentation, spacing, quoting, and structure.", "Use the referenced `ruamel.yaml` lines to locate the problem and validate the affected YAML in a suitable editor."),
+    "run_order": ("The configured run order does not place operations before metadata and overlays, which is the recommended order for almost every workflow.", "Place `- operations` first in the `run_order` section of config.yml unless the workflow intentionally requires another order."),
+    "plex_security": ("A Plex Media Server release in a known vulnerable range was detected and remote access may be restricted for protection.", "Upgrade Plex Media Server to a secure release immediately."),
+    "traceback": ("The Kometa run contains an unhandled traceback and likely ended early or skipped tasks such as overlay processing.", "Review the traceback and the lines immediately before it, correct the underlying failure, and rerun Kometa."),
+    "tautulli_key": ("Tautulli rejected the configured API key, so features depending on Tautulli will fail.", "Replace the Tautulli API key and verify the service configuration."),
+    "tautulli_url": ("The configured Tautulli URL is invalid, so Kometa cannot use services that depend on it.", "Correct the Tautulli URL and verify that it is reachable from the Kometa runtime."),
+    "tmdb_key": ("TMDb rejected the configured API key, so features depending on TMDb will fail.", "Replace the TMDb API key and verify the TMDb configuration."),
+    "timeout": ("A connection to Plex or another service timed out; this is commonly a network or provider response problem rather than something Kometa can repair.", "Verify network access and increase the relevant `timeout` in config.yml when the service legitimately needs longer to respond."),
+    "tmdb_connection": ("The host running Kometa could not connect to TMDb, commonly because outbound or container networking blocks the request.", "Verify DNS, firewall, proxy, and container network access to TMDb."),
+    "service_config": ("A builder depends on a service that has not been configured, so related functionality cannot run.", "Review each referenced line and add the required service configuration."),
+    "trakt_connection": ("Kometa could not connect to Trakt, so features relying on Trakt data cannot complete.", "Correct Trakt authorization and verify network access to the service."),
+}
+
 
 def _with_documentation(spec: dict) -> RecommendationRule:
     values = dict(spec)
+    guidance = DISCORD_GUIDANCE.get(values["id"])
+    if guidance:
+        values["description"], values["solution"] = guidance
     url = DOCUMENTATION_URLS.get(values["id"])
     if url and url not in values["solution"]:
         values["solution"] = f'{values["solution"]} See {url}'
