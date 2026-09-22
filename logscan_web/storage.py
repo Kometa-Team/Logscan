@@ -182,6 +182,7 @@ class AnonymousAnalyticsStore:
         quickstart_versions: list[str], quickstart_branches: list[str],
         recommendations: list[dict], people: int, plex: dict[str, list[str]] | None = None,
         kometa_platforms: list[str] | None = None, quickstart_platforms: list[str] | None = None,
+        installation_methods: list[str] | None = None,
     ) -> None:
         with self.lock:
             data = self._read()
@@ -206,6 +207,8 @@ class AnonymousAnalyticsStore:
                 self._increment(day["kometa_platforms"], platform)
             for platform in quickstart_platforms or []:
                 self._increment(day["quickstart_platforms"], platform)
+            for method in installation_methods or []:
+                self._increment(day["installation_methods"], method)
             plex = plex or {}
             for source_key, analytics_key in (
                 ("versions", "plex_versions"), ("platforms", "plex_platforms"),
@@ -266,6 +269,7 @@ class AnonymousAnalyticsStore:
             for key in (
                 "sources", "rejections", "rejection_sources", "kometa_versions", "kometa_branches",
                 "launchers", "quickstart_versions", "quickstart_branches", "kometa_platforms", "quickstart_platforms",
+                "installation_methods",
                 "plex_versions", "plex_platforms", "plex_update_channels", "plex_library_types",
                 "plex_agents", "plex_scanners", "recommendations_by_id", "recommendations_by_severity",
             ):
@@ -288,7 +292,8 @@ class AnonymousAnalyticsStore:
             "address_duration_count": 0, "batches": 0, "sources": {}, "rejections": {},
             "rejection_sources": {}, "kometa_versions": {}, "kometa_branches": {},
             "launchers": {}, "quickstart_versions": {}, "quickstart_branches": {},
-            "kometa_platforms": {}, "quickstart_platforms": {}, "recommendations_by_id": {},
+            "kometa_platforms": {}, "quickstart_platforms": {}, "installation_methods": {},
+            "recommendations_by_id": {},
             "plex_versions": {}, "plex_platforms": {}, "plex_update_channels": {},
             "plex_library_types": {}, "plex_agents": {}, "plex_scanners": {},
             "recommendations_by_severity": {},

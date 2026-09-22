@@ -10,8 +10,16 @@ import yaml
 from jsonschema import Draft7Validator
 
 
-KOMETA_CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/nightly/json-schema/config-schema.json"
+KOMETA_CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/{branch}/json-schema/config-schema.json"
 
+
+def schema_branch_for_log(log_content: str) -> str:
+    """Match schema validation to the logged Kometa release channel."""
+    versions = re.findall(r"(?:Newest )?Version:\s*([^\r\n|]+)", log_content, flags=re.IGNORECASE)
+    version_text = " ".join(versions).lower()
+    if "develop" in version_text or "nightly" in version_text:
+        return "develop"
+    return "master"
 @dataclass(frozen=True)
 class RecommendationRule:
     id: str
@@ -86,14 +94,15 @@ def validate_redacted_config(log_content: str) -> list[dict[str, str | int]]:
         line = log_lines[mark.line] if mark and mark.line < len(log_lines) else log_lines[0]
         return [{"line": line, "message": f"Invalid YAML: {getattr(exc, 'problem', str(exc))}", "path": ""}]
     try:
+        schema_branch = schema_branch_for_log(log_content)
         schema_request = Request(
-            KOMETA_CONFIG_SCHEMA_URL,
+            KOMETA_CONFIG_SCHEMA_URL.format(branch=schema_branch),
             headers={"Accept": "application/json", "Cache-Control": "no-cache", "User-Agent": "Kometa-Logscan/1.0"},
         )
         with urlopen(schema_request, timeout=15) as response:
             schema = json.loads(response.read().decode("utf-8"))
     except (HTTPError, URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("The latest Kometa configuration schema could not be fetched.") from exc
+        raise RuntimeError(f"The Kometa {schema_branch} configuration schema could not be fetched.") from exc
 
     failures = []
     for error in sorted(Draft7Validator(schema).iter_errors(config), key=lambda item: list(item.absolute_path)):
@@ -159,7 +168,7 @@ RULE_SPECS = (
     {'id': 'yaml', 'category': 'schema', 'title': 'YAML parsing failed', 'description': 'Kometa encountered a YAML parsing error.', 'solution': 'Correct YAML indentation, quoting, spacing, or structure.', 'captures': ('ruamel.yaml.',)},
     {'id': 'run_order', 'category': 'schema', 'title': 'Recommended run order is not configured', 'description': "The configured run order does not follow Kometa's recommended processing sequence.", 'solution': 'Place operations before metadata and overlays unless your workflow requires otherwise.', 'detector': 'RUN_ORDER'},
     {'id': 'plex_security', 'category': 'critical', 'title': 'Vulnerable Plex Media Server version detected', 'description': 'A Plex Media Server version in a known vulnerable range was detected.', 'solution': 'Upgrade Plex Media Server to a secure release immediately.', 'detector': 'PMS_VULNERABLE'},
-    {'id': 'traceback', 'category': 'error', 'title': 'Unhandled Kometa exception detected', 'description': 'Kometa raised an unhandled exception.', 'solution': 'Review the exception and its preceding context, then retry.', 'captures': ('Traceback (most recent call last):',)},
+    {'id': 'traceback', 'category': 'critical', 'title': 'Unhandled Kometa exception detected', 'description': 'Kometa raised an unhandled exception.', 'solution': 'Review the exception and its preceding context, then retry.', 'captures': ('Traceback (most recent call last):',)},
     {'id': 'tautulli_key', 'category': 'error', 'title': 'Tautulli API key is invalid', 'description': 'Tautulli rejected the configured API key.', 'solution': 'Replace the Tautulli API key.', 'captures': ('Tautulli Error: Invalid apikey',)},
     {'id': 'tautulli_url', 'category': 'error', 'title': 'Tautulli URL is invalid', 'description': 'The configured Tautulli URL is invalid.', 'solution': 'Verify the Tautulli URL and networking.', 'captures': ('Tautulli Error: Invalid URL',)},
     {'id': 'tmdb_key', 'category': 'critical', 'title': 'TMDb API key is invalid', 'description': 'TMDb rejected the configured API key.', 'solution': 'Replace the TMDb API key.', 'captures': ('TMDb Error: Invalid API key',)},
