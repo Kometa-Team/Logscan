@@ -438,6 +438,49 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(schema_branch_for_log("Version: 2.1.0 (Branch: nightly)"), "develop")
     def test_traceback_is_critical(self):
         self.assertEqual(next(rule for rule in RULES.values() if rule.id == "traceback").category, "critical")
+    def test_internal_server_error_is_critical(self):
+        self.assertEqual(next(rule for rule in RULES.values() if rule.id == "internal_server").category, "critical")
+
+    def test_recommendation_severities_match_discord_symbols(self):
+        expected = {
+            "checkfiles": "warning",
+            "legacy_other_award": "warning",
+            "id_conversion": "advice",
+            "legacy_delete_unmanaged": "warning",
+            "flixpatrol_parse": "error",
+            "flixpatrol_subscription": "error",
+            "legacy_git": "advice",
+            "legacy_pmm": "advice",
+            "image_size": "error",
+            "incomplete_log": "error",
+            "internal_server": "critical",
+            "linuxserver": "warning",
+            "mal_connection": "error",
+            "mdblist_attribute": "error",
+            "mdblist_api_key": "error",
+            "mdblist_limit": "error",
+            "metadata_attribute": "error",
+            "legacy_missing": "warning",
+            "plex_no_items": "warning",
+            "omdb_api_key": "error",
+            "omdb_limit": "error",
+            "legacy_overlay_level": "warning",
+            "plex_regex": "warning",
+            "plex_library": "error",
+            "plex_url": "error",
+            "yaml": "critical",
+            "run_order": "warning",
+            "tmdb_key": "error",
+            "tmdb_connection": "error",
+            "service_config": "error",
+            "trakt_connection": "error",
+            "schedule_over_24_hours": "error",
+            "schedule_overlap": "error",
+            "schedule_conflict": "error",
+            "schedule_maintenance_buffer": "error",
+        }
+        by_id = {rule.id: rule.category for rule in RULES.values()}
+        self.assertEqual({rule_id: by_id[rule_id] for rule_id in expected}, expected)
     def test_every_verified_discord_documentation_url_is_kept(self):
         by_id = {rule.id: rule for rule in RULES.values()}
 
@@ -456,6 +499,26 @@ class RuntimeMetadataTests(unittest.TestCase):
                 self.assertEqual(by_id[rule_id].description, description)
                 self.assertTrue(by_id[rule_id].solution.startswith(solution))
 
+    def test_linuxserver_keeps_operational_discord_guidance(self):
+        rule = next(rule for rule in RULES.values() if rule.id == "linuxserver")
+
+        self.assertIn("`linuxserver/kometa`", rule.description)
+        self.assertIn("different internal locations", rule.description)
+        self.assertIn("3:00 AM", rule.description)
+        self.assertIn("Plex scheduled maintenance", rule.description)
+        self.assertIn("`kometateam/kometa`", rule.solution)
+        self.assertIn("Docker and unRAID", rule.solution)
+        self.assertIn("https://www.kometa.wiki/en/latest/kometa/install/images", rule.solution)
+        self.assertNotIn("nightly", f"{rule.description} {rule.solution}".lower())
+    def test_overlay_reset_uses_rich_reapply_guidance(self):
+        rule = next(rule for rule in RULES.values() if rule.id == "overlay_reset")
+
+        self.assertEqual(rule.title, "Reapply or reset overlays detected")
+        self.assertIn("`reapply_overlays` should not be enabled", rule.description)
+        self.assertIn("additional posters in Plex", rule.description)
+        self.assertIn("particular repair or rebuild cases", rule.description)
+        self.assertIn("ImageMaid", rule.solution)
+        self.assertNotIn("reapplication", f"{rule.title} {rule.description} {rule.solution}".lower())
     def test_legacy_other_award_keeps_discord_guidance_and_url(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
