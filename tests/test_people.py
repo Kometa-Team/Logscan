@@ -33,6 +33,7 @@ from logscan_web.scanner import (
     scan_archive_logs,
     scan_log,
 )
+from logscan_web.recommendations import DOCUMENTATION_URLS, RULES
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -352,6 +353,15 @@ class StreamingScanTests(unittest.TestCase):
 
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_every_verified_discord_documentation_url_is_kept(self):
+        by_id = {rule.id: rule for rule in RULES.values()}
+
+        self.assertGreaterEqual(len(DOCUMENTATION_URLS), 40)
+        self.assertEqual(set(DOCUMENTATION_URLS) - set(by_id), set())
+        for rule_id, url in DOCUMENTATION_URLS.items():
+            with self.subTest(rule_id=rule_id):
+                self.assertIn(url, by_id[rule_id].solution)
+
     def test_legacy_other_award_keeps_discord_guidance_and_url(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",

@@ -181,7 +181,75 @@ RULE_SPECS = (
     {'id': 'schedule_maintenance_buffer', 'category': 'warning', 'title': 'Kometa may still be running when Plex maintenance begins', 'description': 'The recorded run duration may extend into Plex maintenance.', 'solution': 'Increase the gap between the Kometa schedule and maintenance.', 'detector': 'SCHEDULE_ANALYSIS'},
 )
 
-RULES = {spec["title"]: RecommendationRule(**spec) for spec in RULE_SPECS}
+# Verified against the active Discord cog. Keeping these separate from prose makes
+# documentation parity testable and prevents copy edits from dropping useful links.
+DOCUMENTATION_URLS = {
+    "anidb_connection": "https://kometa.wiki/en/latest/config/anidb",
+    "anidb_auth": "https://kometa.wiki/en/latest/config/anidb",
+    "api_key_missing": "https://kometa.wiki/en/latest/config/trakt/?q=api",
+    "plex_version": "https://forums.plex.tv/t/refresh-endpoint-put-post-requests-started-throwing-404s-in-version-1-32-7-7484/853588",
+    "cache_disabled": "https://kometa.wiki/en/latest/config/settings#cache",
+    "legacy_other_award": "https://kometa.wiki/en/latest/kometa/faqs/?h=other_award#pmm-120-release-changes",
+    "kometa_critical": "https://kometa.wiki/en/latest/kometa/logs/?h=%5Bcritical%5D#critical",
+    "kometa_error": "https://kometa.wiki/en/latest/kometa/logs/?h=%5Berror%5D#error",
+    "kometa_warning": "https://kometa.wiki/en/latest/kometa/logs/?h=%5Bwarning%5D#warning",
+    "id_conversion": "https://kometa.wiki/en/latest/kometa/logs/#warning",
+    "image_unreadable": "https://kometa.wiki/en/latest/kometa/logs/#error",
+    "legacy_delete_unmanaged": "https://kometa.wiki/en/latest/config/operations/#delete-collections",
+    "flixpatrol_parse": "https://kometa.wiki/en/latest/kometa/faqs/?h=flixpatrol#flixpatrol",
+    "flixpatrol_subscription": "https://flixpatrol.com/about/premium/",
+    "legacy_git": "https://kometa.wiki/en/latest/config/overview/?h=configuration",
+    "legacy_pmm": "https://kometa.wiki/en/latest/config/overview/?h=configuration",
+    "incomplete_log": "https://kometa.wiki/en/latest/kometa/logs/#providing-log-files-on-discord",
+    "internal_server": "https://kometa.wiki/en/latest/kometa/faqs/?h=errors+issues#errors-issues",
+    "linuxserver": "https://kometa.wiki/en/latest/kometa/install/images/?h=linuxserver#linuxserver",
+    "mal_connection": "https://kometa.wiki/en/latest/config/myanimelist",
+    "mass_update": "https://kometa.wiki/en/latest/config/operations",
+    "mdblist_attribute": "https://kometa.wiki/en/latest/files/builders/mdblist/?h=mdblist+builders",
+    "mdblist_api_key": "https://kometa.wiki/en/latest/config/mdblist/?h=mdblist+attributes#mdblist-attributes",
+    "mdblist_limit": "https://kometa.wiki/en/latest/config/mdblist/?h=mdblist+attributes#mdblist-attributes",
+    "metadata_attribute": "https://kometa.wiki/en/latest/config/files/#example",
+    "metadata_load": "https://kometa.wiki/en/latest/config/overview/?h=configuration",
+    "overlay_load": "https://kometa.wiki/en/latest/config/overview/?h=configuration",
+    "playlist_load": "https://kometa.wiki/en/latest/config/overview/?h=configuration",
+    "legacy_missing": "https://kometa.wiki/en/latest/config/libraries/?h=report_path#attributes",
+    "plexapi_update": "https://kometa.wiki/en/latest/kometa/logs/#checking-kometa-version",
+    "kometa_update": "https://kometa.wiki/en/latest/kometa/logs/#checking-kometa-version",
+    "plex_no_items": "https://kometa.wiki/en/latest/kometa/logs/?h=%5Berror%5D#error",
+    "omdb_api_key": "https://kometa.wiki/en/latest/config/omdb/#omdb-attributes",
+    "omdb_limit": "https://kometa.wiki/en/latest/config/omdb/?h=omdb#omdb-attributes",
+    "overlay_font": "https://kometa.wiki/en/latest/showcase/overlays/?h=font#example-2",
+    "overlay_reset": "https://kometa.wiki/en/latest/kometa/scripts/imagemaid",
+    "overlay_existing": "https://kometa.wiki/en/latest/defaults/overlays",
+    "overlay_image": "https://kometa.wiki/en/latest/defaults/overlays",
+    "legacy_overlay_level": "https://kometa.wiki/en/latest/files/settings/?h=builder_level",
+    "playlist_library": "https://kometa.wiki/en/latest/defaults/playlist/?h=playlist",
+    "plex_regex": "https://kometa.wiki/en/latest/kometa/logs/?h=%5Berror%5D#error",
+    "plex_library": "https://kometa.wiki/en/latest/config/settings/?h=show_options#show-options",
+    "plex_url": "https://kometa.wiki/en/latest/kometa/install/wt/wt-01-basic-config/#getting-a-plex-url-and-token",
+    "rating_rounding": "https://forums.plex.tv/t/plex-rounding-down-user-ratings-when-set-via-api/875806/8",
+    "yaml": "https://kometa.wiki/en/latest/kometa/yaml/",
+    "run_order": "https://kometa.wiki/en/latest/config/settings/?h=run_order#run-order",
+    "plex_security": "https://forums.plex.tv/t/plex-media-server-security-update/928341",
+    "tautulli_key": "https://kometa.wiki/en/latest/config/tautulli",
+    "tautulli_url": "https://kometa.wiki/en/latest/config/tautulli#tautulli-attributes",
+    "tmdb_key": "https://kometa.wiki/en/latest/kometa/install/wt/wt-01-basic-config/#getting-a-tmdb-api-key",
+    "timeout": "https://kometa.wiki/en/latest/kometa/install/overview/",
+    "tmdb_connection": "https://kometa.wiki/en/latest/kometa/install/wt/wt-01-basic-config/",
+    "service_config": "https://kometa.wiki/en/latest/kometa/logs/?h=%5Berror%5D#error",
+    "trakt_connection": "https://kometa.wiki/en/latest/config/trakt/#trakt-attributes",
+}
+
+
+def _with_documentation(spec: dict) -> RecommendationRule:
+    values = dict(spec)
+    url = DOCUMENTATION_URLS.get(values["id"])
+    if url and url not in values["solution"]:
+        values["solution"] = f'{values["solution"]} See {url}'
+    return RecommendationRule(**values)
+
+
+RULES = {spec["title"]: _with_documentation(spec) for spec in RULE_SPECS}
 
 def legacy_title(message: str) -> str:
     first_line = message.splitlines()[0] if message else ""
