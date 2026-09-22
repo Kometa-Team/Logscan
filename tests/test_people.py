@@ -354,6 +354,21 @@ class StreamingScanTests(unittest.TestCase):
 
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_severity_dots_use_the_semantic_color_scale(self):
+        css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
+        expected = {
+            "critical": "#f43f5e",
+            "error": "#fb923c",
+            "warning": "#fbbf24",
+            "schema": "#a78bfa",
+            "advice": "#60a5fa",
+        }
+
+        for severity, color in expected.items():
+            with self.subTest(severity=severity):
+                self.assertIn(f"--{severity}: {color};", css)
+                self.assertIn(f".{severity} .severity-dot {{ color: var(--{severity});", css)
+
     def test_wsl_runtime_finding_includes_actionable_configuration(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",

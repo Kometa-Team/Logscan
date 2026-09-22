@@ -9,8 +9,10 @@
   --muted: #9ca6c5;
   --accent: #7277f8;
   --accent-bright: #9497ff;
-  --critical: #fb7185;
+  --critical: #f43f5e;
+  --error: #fb923c;
   --warning: #fbbf24;
+  --schema: #a78bfa;
   --advice: #60a5fa;
 }
 
@@ -328,10 +330,10 @@ h2 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.5rem); letter-spacing: -.04em;
 .recommendation summary::-webkit-details-marker { display: none; }
 .severity-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; box-shadow: 0 0 12px currentColor; }
 .critical .severity-dot { color: var(--critical); background: var(--critical); }
-.error .severity-dot { color: #f6c85f; background: #f6c85f; }
-.warning .severity-dot { color: #8992aa; background: #8992aa; }
+.error .severity-dot { color: var(--error); background: var(--error); }
+.warning .severity-dot { color: var(--warning); background: var(--warning); }
   .advice .severity-dot { color: var(--advice); background: var(--advice); }
-  .schema .severity-dot { color: #aa8cff; background: #aa8cff; }
+  .schema .severity-dot { color: var(--schema); background: var(--schema); }
 .chevron { margin-left: auto; color: var(--muted); transition: transform .2s ease; }
 details[open] .chevron { transform: rotate(90deg); }
   .recommendation-body { padding: 0 20px 20px 40px; color: #c2c9df; font-size: .88rem; line-height: 1.7; overflow-wrap: anywhere; }
