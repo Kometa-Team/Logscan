@@ -354,6 +354,43 @@ class StreamingScanTests(unittest.TestCase):
 
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_wsl_runtime_finding_includes_actionable_configuration(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[kometa.py:2] [INFO] | Platform: Linux-5.15.0-microsoft-standard-WSL2 |",
+            "[kometa.py:3] [INFO] | Memory: 6 GB |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "wsl_memory")
+
+        self.assertIn("%UserProfile%\\.wslconfig", finding["message"])
+        self.assertIn("`memory=8GB`", finding["message"])
+        self.assertIn("`wsl --shutdown`", finding["message"])
+        self.assertIn("https://learn.microsoft.com/windows/wsl/wsl-config", finding["message"])
+        self.assertNotIn("wsl --set-memory", finding["message"])
+
+    def test_runtime_findings_include_detected_values_and_maintenance_context(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+            "[kometa.py:2] [INFO] | Memory: 3.50 GB |",
+            "[config.py:3] [INFO] | overlay_files: |",
+            "[config.py:4] [INFO] | Plex DB cache setting: 4096 MB |",
+            "[kometa.py:5] [INFO] | --time (KOMETA_TIME): 01:00 |",
+            "[config.py:6] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+            "[kometa.py:7] [INFO] | Finished: now Run Time: 1 days, 01:00:00 |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        findings = {item["id"]: item for item in result.recommendations}
+
+        self.assertIn("3.50 GB", findings["memory_overlay_insufficient"]["message"])
+        self.assertIn("4.00 GB", findings["db_cache_exceeds_memory"]["message"])
+        schedule = findings["schedule_over_24_hours"]["message"]
+        self.assertIn("01:00", schedule)
+        self.assertIn("02:00-05:00", schedule)
+        self.assertIn("support.plex.tv/articles/202197488", schedule)
+
     def test_wiki_links_follow_master_and_develop_without_nightly_urls(self):
         recommendation = {
             "solution": "See https://kometa.wiki/en/latest/config/anidb",
