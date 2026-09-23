@@ -425,6 +425,19 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Plex server defaults are **2:00 AM-5:00 AM**", message)
         self.assertIn("Plex server's local time", message)
         self.assertIn("support.plex.tv/articles/201553286-scheduled-tasks", message)
+    def test_rating_rounding_uses_its_own_plex_version_range(self):
+        def recommendations_for(version):
+            content = "\n".join([
+                "[kometa.py:1] [INFO] | Version: 1.21.0 (Docker) |",
+                f"[plex.py:2] [INFO] | Connected to server LPlex version {version} |",
+                "[config.py:3] [INFO] | mass_user_rating_update: imdb |",
+            ])
+            return {item["id"] for item in scan_log("meta.log", content.encode()).recommendations}
+
+        self.assertIn("rating_rounding", recommendations_for("1.40.2.8351-9938371be"))
+        self.assertNotIn("rating_rounding", recommendations_for("1.40.0.7998-c29d4c0c8"))
+        self.assertNotIn("rating_rounding", recommendations_for("1.40.3.8555-fef15d30c"))
+        self.assertNotIn("rating_rounding", recommendations_for("1.41.7.0"))
     def test_wiki_links_follow_master_and_develop_without_nightly_urls(self):
         recommendation = {
             "solution": "See https://kometa.wiki/en/latest/config/anidb",
