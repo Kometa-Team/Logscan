@@ -86,6 +86,8 @@ class RunOrderRule:
 class RatingRoundingRule:
     definition: object
     detector: ClassVar[str] = "RATING_ROUNDING"
+    affected_low: ClassVar[tuple[int, int, int, int]] = (1, 40, 0, 7998)
+    affected_high: ClassVar[tuple[int, int, int, int]] = (1, 40, 3, 8555)
 
     @property
     def id(self) -> str:
@@ -94,8 +96,8 @@ class RatingRoundingRule:
     def evaluate(self, context: ScanContext) -> list[Finding]:
         if not any(
             (match := PlexSecurityRule.version_pattern.search(line))
-            and PlexSecurityRule.vulnerable_low <= PlexSecurityRule._version_tuple(match.group(1))
-            <= PlexSecurityRule.vulnerable_high
+            and self.affected_low < PlexSecurityRule._version_tuple(match.group(1))
+            < self.affected_high
             for line in context.lines
         ):
             return []
