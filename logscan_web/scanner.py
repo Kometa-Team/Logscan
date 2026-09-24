@@ -377,6 +377,49 @@ def plex_analytics(sections: list[dict[str, object]]) -> dict[str, list[str]]:
     return values
 
 
+def _runtime_seconds(value: str) -> int | None:
+    """Convert a Kometa duration to seconds."""
+    match = re.fullmatch(
+        r"(?:(?P<days>\d+)\s+days?,\s*)?(?P<hours>\d+):(?P<minutes>\d{2}):(?P<seconds>\d{2})(?:\.\d+)?",
+        value.strip(),
+        re.I,
+    )
+    if not match:
+        return None
+    return (
+        int(match.group("days") or 0) * 86400
+        + int(match.group("hours")) * 3600
+        + int(match.group("minutes")) * 60
+        + int(match.group("seconds"))
+    )
+
+
+def extract_section_run_times(content: str) -> list[dict[str, object]]:
+    """Return the longest non-zero Kometa section runtimes."""
+    messages = [(_log_message(line), number) for number, line in enumerate(content.splitlines(), 1)]
+    runtimes: list[dict[str, object]] = []
+    for index, (message, line_number) in enumerate(messages):
+        finished_with_runtime = re.match(r"^Finished\s+(?!:)(.+?)\s+Run Time:\s*(.+)$", message, re.I)
+        finished = finished_with_runtime or re.match(r"^Finished\s+(?!:)(.+)$", message, re.I)
+        if not finished:
+            continue
+        name = finished.group(1).strip().rstrip("|").strip()
+        duration = finished_with_runtime.group(2) if finished_with_runtime else None
+        if not duration and index + 1 < len(messages):
+            runtime_match = re.search(r"\bRun Time:\s*([^|]+)", messages[index + 1][0], re.I)
+            duration = runtime_match.group(1).strip() if runtime_match else None
+        seconds = _runtime_seconds(duration or "")
+        if not name or not seconds:
+            continue
+        runtimes.append({
+            "name": name,
+            "duration": duration,
+            "seconds": seconds,
+            "line": line_number,
+        })
+    return sorted(runtimes, key=lambda item: int(item["seconds"]), reverse=True)
+
+
 def _log_overview(
     filename: str,
     content: str,
@@ -408,6 +451,7 @@ def _log_overview(
         ),
         "yaml_validation": yaml_status,
         "yaml_issue_count": len(yaml_findings),
+        "section_run_times": extract_section_run_times(content),
         "plex_configurations": plex_configurations,
         "plex_analytics": plex_analytics(plex_configurations),
     }
@@ -422,7 +466,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
 
     sample_terms = (
         b"[kometa.py:", b"[plex_meta_manager.py:", b"version:", b"branch:",
-        b"[quickstart]", b"finished:", b"run time:", b"start time:", b"started:",
+        b"[quickstart]", b"finished:", b"finished ", b"run time:", b"start time:", b"started:",
         b"platform:", b"memory:", b"available memory:", b"run command:",
         b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
         b"plex configuration", b"using asset directory", b"scheduled maintenance",

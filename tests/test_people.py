@@ -30,6 +30,7 @@ from logscan_web.scanner import (
     MAX_FILE_BYTES,
     extract_missing_people,
     extract_plex_configurations,
+    extract_section_run_times,
     normalized_platform,
     normalized_installation,
     apply_documentation_branch,
@@ -367,6 +368,29 @@ class StreamingScanTests(unittest.TestCase):
 
 
 class RuntimeMetadataTests(unittest.TestCase):
+    def test_section_run_times_are_sorted_and_zero_values_are_excluded(self):
+        prefix = "[kometa.py:1] [INFO] |"
+        content = "\n".join([
+            f"{prefix} Finished Collections |",
+            f"{prefix} Run Time: 0:03:00 |",
+            f"{prefix} Finished Zero Work |",
+            f"{prefix} Run Time: 0:00:00 |",
+            f"{prefix} Finished Metadata Run Time: 0:12:30 |",
+            f"{prefix} Finished Overlays |",
+            f"{prefix} Run Time: 1:02:03 |",
+        ])
+
+        runtimes = extract_section_run_times(content)
+
+        self.assertEqual(
+            [(item["name"], item["duration"], item["line"]) for item in runtimes],
+            [
+                ("Overlays", "1:02:03", 6),
+                ("Metadata", "0:12:30", 5),
+                ("Collections", "0:03:00", 1),
+            ],
+        )
+
     def test_severity_dots_use_the_semantic_color_scale(self):
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
         expected = {
@@ -629,6 +653,15 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Open config.yml at line", script)
         self.assertIn("showConfigInViewer(configLine)", script)
         self.assertIn("schemaValidationFailures = validation.failures || []", script)
+        template = Path("logscan_web/templates/index.html").read_text(encoding="utf-8")
+        self.assertIn('id="previous-highlight"', template)
+        self.assertIn("goToPreviousHighlightedLine", script)
+        self.assertIn('goToHighlightedLine("previous")', script)
+        self.assertIn('group.key === "schema"', script)
+        self.assertIn("Review issues in config", script)
+        self.assertIn("Longest section run times", script)
+        self.assertIn('["100", "Top 100"]', script)
+        self.assertIn('["all", "All"]', script)
         self.assertIn("Jump to schema issue", script)
         self.assertIn("schemaRecommendationsForConfigLine", script)
         self.assertIn('"schema-validation-line"', script)
