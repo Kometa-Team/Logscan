@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from jsonschema import Draft7Validator
 import zipfile
 import os
 import tempfile
@@ -35,7 +36,15 @@ from logscan_web.scanner import (
     scan_archive_logs,
     scan_log,
 )
-from logscan_web.recommendations import DISCORD_GUIDANCE, DOCUMENTATION_URLS, RULES, schema_branch_for_log
+from logscan_web.recommendations import (
+    DISCORD_GUIDANCE,
+    DOCUMENTATION_URLS,
+    RULES,
+    _actionable_schema_errors,
+    _schema_failure_guidance,
+    _schema_path,
+    schema_branch_for_log,
+)
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
 
@@ -462,6 +471,75 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn("https://www.kometa.wiki/en/develop/config/anidb", finding["solution"])
         self.assertNotIn("/en/nightly/", finding["message"])
+
+    def test_schema_validation_ignores_redacted_values_but_keeps_real_issues(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "token": {"type": "integer"},
+                "timeout": {"type": "integer"},
+            },
+            "additionalProperties": False,
+        }
+        config = {"token": "(redacted)", "timeout": "slow", "typo": True}
+
+        errors = _actionable_schema_errors(schema, config)
+
+        self.assertFalse(any(list(error.absolute_path) == ["token"] for error in errors))
+        self.assertEqual({error.validator for error in errors}, {"type", "additionalProperties"})
+
+        type_error = next(error for error in errors if error.validator == "type")
+        guidance = _schema_failure_guidance(type_error, _schema_path(type_error))
+        self.assertEqual(guidance["title"], "Wrong value type at timeout")
+        self.assertIn("expects integer", guidance["explanation"])
+        self.assertIn("Change the value at timeout", guidance["action"])
+        self.assertEqual(guidance["accepted"], "Expected value type: integer.")
+
+        unknown_error = next(error for error in errors if error.validator == "additionalProperties")
+        unknown_guidance = _schema_failure_guidance(unknown_error, "typo", "typo")
+        self.assertEqual(unknown_guidance["title"], "Unknown setting: typo")
+        self.assertIn("misspelled", unknown_guidance["explanation"])
+
+    def test_schema_guidance_names_list_position_and_available_options(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "TV": {
+                    "type": "object",
+                    "properties": {
+                        "overlay_path": {
+                            "type": "array",
+                            "items": {"enum": ["default", "git", "url"]},
+                        },
+                    },
+                },
+            },
+        }
+        config = {"TV": {"overlay_path": ["default", "git", "invalid"]}}
+        error = next(iter(Draft7Validator(schema).iter_errors(config)))
+        path = _schema_path(error)
+        guidance = _schema_failure_guidance(error, path)
+
+        self.assertEqual(path, "TV.overlay_path.2")
+        self.assertEqual(guidance["location"], "the third item under TV > overlay_path")
+        self.assertEqual(guidance["title"], "Unsupported value at the third item under TV > overlay_path")
+        self.assertEqual(guidance["accepted"], "Available options: 'default', 'git', 'url'.")
+
+    def test_schema_web_cards_explain_impact_and_fix(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        self.assertIn("Impact:", script)
+        self.assertIn("How to fix:", script)
+        self.assertIn("Available options:", Path("logscan_web/recommendations.py").read_text(encoding="utf-8"))
+        self.assertIn("failure.location", script)
+        self.assertIn("failure.accepted", script)
+        self.assertIn("failure.explanation", script)
+        self.assertIn("config_line: failure.config_line", script)
+        self.assertIn("Open config.yml at line", script)
+        self.assertIn("showConfigInViewer(configLine)", script)
+        self.assertIn("schemaValidationFailures = validation.failures || []", script)
+        self.assertIn("Jump to schema issue", script)
+        self.assertIn("schemaRecommendationsForConfigLine", script)
+        self.assertIn('"schema-validation-line"', script)
 
     def test_schema_branch_matches_release_channel(self):
         self.assertEqual(schema_branch_for_log("Version: 2.2.0 (Branch: master)"), "master")

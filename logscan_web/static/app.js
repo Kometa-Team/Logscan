@@ -311,7 +311,7 @@ function formatLineRanges(lineNumbers) {
   return ranges.join(", ");
 }
 
-function recommendationBody(message, evidenceLines = []) {
+function recommendationBody(message, evidenceLines = [], configLine = 0) {
   const body = document.createElement("div");
   body.className = "recommendation-body";
   const hasEmbeddedEvidence = /Line number\(s\):/i.test(message);
@@ -325,7 +325,20 @@ function recommendationBody(message, evidenceLines = []) {
     else appendInlineFormatting(row, line);
     body.append(row);
   });
-  if (!hasEmbeddedEvidence && evidenceLines.length) {
+  if (configLine) {
+    const row = document.createElement("div");
+    row.className = "recommendation-meta";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "line-link";
+    button.textContent = `Open config.yml at line ${configLine}`;
+    button.title = `View extracted configuration at line ${configLine}`;
+    button.addEventListener("click", () => showConfigInViewer(configLine).then(() => {
+      if (!logViewer.open) logViewer.showModal();
+    }).catch((error) => alert(error.message)));
+    row.append(button);
+    body.append(row);
+  } else if (!hasEmbeddedEvidence && evidenceLines.length) {
     const row = document.createElement("div");
     row.className = "recommendation-meta";
     appendRecommendationMeta(row, `Log line number(s): ${formatLineRanges(evidenceLines)}`);
@@ -387,14 +400,27 @@ function extractConfig(lines) {
   return extracted.map((line) => line.startsWith(" ") ? line.slice(1) : line).join("\n");
 }
 
-function createConfigRows(config) {
+function createConfigRows(config, targetStart = 0, targetEnd = targetStart) {
   const fragment = document.createDocumentFragment();
   config.split("\n").forEach((line, index) => {
     const row = document.createElement("div");
+    const lineNumber = index + 1;
+    const matchingItems = schemaRecommendationsForConfigLine(lineNumber);
     row.className = "log-line";
+    row.dataset.line = lineNumber;
+    if (targetStart && lineNumber >= targetStart && lineNumber <= targetEnd) row.classList.add("highlighted");
+    if (matchingItems.length) {
+      row.classList.add("recommendation-line", "schema-validation-line");
+      row.tabIndex = 0;
+      row.title = "View schema issue";
+      row.addEventListener("click", () => openRecommendationDialog(matchingItems));
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openRecommendationDialog(matchingItems); }
+      });
+    }
     const number = document.createElement("span");
     number.className = "line-number";
-    number.textContent = index + 1;
+    number.textContent = lineNumber;
     const content = document.createElement("span");
     appendYamlHighlight(content, line || " ");
     row.append(number, content);
@@ -429,6 +455,20 @@ function appendYamlHighlight(container, line) {
   }
 }
 
+function setHighlightOptions(isConfig) {
+  const options = isConfig
+    ? [["schema", "Schema issues"]]
+    : [["all", "All Warnings, Errors and Critical"], ["critical", "Critical Only"], ["error", "Error Only"], ["warning", "Warning Only"]];
+  highlightMode.replaceChildren(...options.map(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    return option;
+  }));
+  highlightMode.disabled = isConfig;
+  document.querySelector(".highlight-mode-control label").textContent = isConfig ? "Highlight mode" : "Change Highlight Mode";
+}
+
 function updateViewerMode(mode) {
   viewerMode = mode;
   const isConfig = mode === "config";
@@ -438,19 +478,30 @@ function updateViewerMode(mode) {
   toggle.setAttribute("aria-label", isConfig ? "View log" : "View config");
   toggle.title = isConfig ? "View log" : "View config";
   toggle.querySelector("i").className = isConfig ? "fa-solid fa-file-lines" : "fa-solid fa-file-code";
-  document.querySelector(".viewer-toolbar").hidden = isConfig;
+  document.querySelector(".viewer-toolbar").hidden = false;
+  setHighlightOptions(isConfig);
+  document.querySelector(".section-jump-control label").textContent = isConfig ? "Jump to schema issue" : "Jump to section";
+  if (isConfig) populateSchemaIssueJump();
+  else populateSectionJump();
 }
 
-async function showConfigInViewer() {
+async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
   const lines = await loadLogLines();
   extractedConfig = extractConfig(lines);
   updateViewerMode("config");
   logCode.replaceChildren(
     extractedConfig
-      ? createConfigRows(extractedConfig)
+      ? createConfigRows(extractedConfig, targetStart, targetEnd)
       : document.createTextNode("No redacted config block was found in this log."),
   );
   logCode.scrollTop = 0;
+  const configLineCount = extractedConfig ? extractedConfig.split("\n").length : 0;
+  viewerPosition.textContent = `${configLineCount.toLocaleString()} config line${configLineCount === 1 ? "" : "s"} | ${schemaValidationFailures.length.toLocaleString()} schema issue${schemaValidationFailures.length === 1 ? "" : "s"}`;
+  updateNextHighlightControl();
+  if (targetStart) {
+    highlightedRange = { start: targetStart, end: targetEnd };
+    requestAnimationFrame(() => logCode.querySelector(`[data-line="${targetStart}"]`)?.scrollIntoView({ block: "center" }));
+  }
 }
 
 function populateSectionJump() {
@@ -468,6 +519,26 @@ function populateSectionJump() {
   sectionJump.disabled = currentLogSections.length === 0;
 }
 
+function populateSchemaIssueJump() {
+  sectionJump.replaceChildren();
+  const failures = [...schemaValidationFailures].sort((left, right) => left.config_line - right.config_line);
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = failures.length ? "Select a schema issue" : "No schema issues found";
+  sectionJump.append(placeholder);
+  failures.forEach((failure, index) => {
+    const option = document.createElement("option");
+    option.value = failure.config_line;
+    option.textContent = `${index + 1}. ${failure.title || failure.path || "Schema issue"} - line ${failure.config_line}`;
+    sectionJump.append(option);
+  });
+  sectionJump.disabled = failures.length === 0;
+}
+
+function schemaRecommendationsForConfigLine(lineNumber) {
+  return currentRecommendations.filter((item) => item.severity === "schema" && item.config_line === lineNumber);
+}
+
 function createLogRows(first, last) {
   const fragment = document.createDocumentFragment();
   for (let lineNumber = first; lineNumber <= last; lineNumber += 1) {
@@ -475,12 +546,9 @@ function createLogRows(first, last) {
     row.className = "log-line";
     row.dataset.line = lineNumber;
     if (lineNumber >= highlightedRange.start && lineNumber <= highlightedRange.end) row.classList.add("highlighted");
-    const matchingRecommendations = recommendationsForLine(lineNumber);
-    const schemaFailures = schemaFailuresForLine(lineNumber);
-    const matchingItems = [...matchingRecommendations, ...schemaFailures];
+    const matchingItems = recommendationsForLine(lineNumber);
     if (matchingItems.length) {
-      row.classList.add("recommendation-line", ...matchingRecommendations.map((item) => `recommendation-${item.severity}`));
-      if (schemaFailures.length) row.classList.add("schema-validation-line");
+      row.classList.add("recommendation-line", ...matchingItems.map((item) => `recommendation-${item.severity}`));
       row.tabIndex = 0;
       row.title = "View details";
       row.addEventListener("click", () => openRecommendationDialog(matchingItems));
@@ -519,16 +587,12 @@ function recommendationsForLine(lineNumber) {
     && recommendationLineNumbers(item).has(lineNumber));
 }
 
-function schemaFailuresForLine(lineNumber) {
-  return schemaValidationFailures.filter((failure) => failure.line === lineNumber).map((failure) => ({
-    severity: "schema validation",
-    title: "Kometa config schema validation failed",
-    message: `Schema validation failure\n\n${failure.message}${failure.path ? `\n\nConfig path: ${failure.path}` : ""}`,
-    evidence_lines: [failure.line],
-  }));
-}
-
 function highlightedLineNumbers() {
+  if (viewerMode === "config") {
+    return [...new Set(schemaValidationFailures.map((failure) => failure.config_line))]
+      .filter((lineNumber) => Number.isInteger(lineNumber) && lineNumber >= 1)
+      .sort((left, right) => left - right);
+  }
   const lines = new Set();
   currentRecommendations.forEach((item) => {
     if ((highlightMode.value === "all" || item.severity === highlightMode.value)
@@ -536,7 +600,6 @@ function highlightedLineNumbers() {
       recommendationLineNumbers(item).forEach((lineNumber) => lines.add(lineNumber));
     }
   });
-  schemaValidationFailures.forEach((failure) => lines.add(failure.line));
   return [...lines].filter((lineNumber) => lineNumber >= 1 && lineNumber <= currentLogLines.length)
     .sort((left, right) => left - right);
 }
@@ -552,7 +615,8 @@ function goToNextHighlightedLine() {
   const lines = highlightedLineNumbers();
   if (!lines.length) return;
   const nextLine = lines.find((lineNumber) => lineNumber > highlightedRange.start) || lines[0];
-  renderLogWindow(nextLine);
+  if (viewerMode === "config") showConfigInViewer(nextLine).catch((error) => alert(error.message));
+  else renderLogWindow(nextLine);
 }
 
 function openRecommendationDialog(items) {
@@ -683,7 +747,7 @@ function showGroup(group, recommendations) {
     chevron.className = "chevron";
     chevron.textContent = "›";
     summary.append(dot, titleText, chevron);
-    const body = recommendationBody(item.message, item.evidence_lines);
+    const body = recommendationBody(item.message, item.evidence_lines, item.config_line);
     details.append(summary, body);
     list.append(details);
   });
@@ -778,13 +842,15 @@ async function loadSchemaValidation(data) {
     const response = await fetch(`/api/scans/${encodeURIComponent(data.id)}/validate-config`, { method: "POST" });
     const validation = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(validation.error || "Schema validation could not run.");
-    if (validation.failures.length) {
+    schemaValidationFailures = validation.failures || [];
+    if (schemaValidationFailures.length) {
       validation.failures.forEach((failure, index) => updated.recommendations.push({
         id: `live_schema_${index}`,
         severity: "schema",
-        title: `JSON Schema issue: ${failure.path || "(root)"}`,
-        message: `${failure.message}\n\nConfig path: ${failure.path || "(root)"}\nSource log line: ${failure.line}\nValidated against: Kometa ${validation.branch} schema`,
-        evidence_lines: [failure.line],
+        title: failure.title || `Invalid configuration: ${failure.path || "config root"}`,
+        message: `${failure.title || "Schema validation issue"}\nImpact: ${failure.urgency || "Action required"}. Kometa may reject this setting or skip the affected functionality.\n\nLocation: ${failure.location || failure.path || "config root"}\n\nIssue: ${failure.explanation || failure.message}${failure.accepted ? `\n\n${failure.accepted}` : ""}\n\nHow to fix: ${failure.action || "Correct this setting using the Kometa documentation."}\n\nSchema path: ${failure.path || "config root"}\nSource log line: ${failure.line}\nValidated against: Kometa ${validation.branch} schema`,
+        evidence_lines: [],
+        config_line: failure.config_line,
       }));
     } else {
       updated.recommendations.push({
@@ -1162,7 +1228,8 @@ nextHighlight.addEventListener("click", goToNextHighlightedLine);
 sectionJump.addEventListener("change", () => {
   if (!sectionJump.value) return;
   const targetLine = Number(sectionJump.value);
-  renderLogWindow(targetLine, targetLine);
+  if (viewerMode === "config") showConfigInViewer(targetLine).catch((error) => alert(error.message));
+  else renderLogWindow(targetLine, targetLine);
 });
 logViewer.addEventListener("click", (event) => {
   if (event.target === logViewer) logViewer.close();

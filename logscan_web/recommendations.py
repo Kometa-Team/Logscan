@@ -77,11 +77,118 @@ def _node_at_path(node, path, unexpected_property: str | None = None):
     return node
 
 
-def validate_redacted_config(log_content: str) -> list[dict[str, str | int]]:
-    """Validate a log's extracted config against the latest Kometa nightly schema.
+def _is_redaction_placeholder(value: object) -> bool:
+    return isinstance(value, str) and value.strip().lower() == "(redacted)"
 
-    The schema is deliberately downloaded for every call; it is not cached so the
-    validation always reflects the current nightly branch.
+
+def _is_redaction_artifact(error: object) -> bool:
+    if _is_redaction_placeholder(error.instance):
+        return True
+    return bool(error.context) and all(_is_redaction_artifact(child) for child in error.context)
+
+
+def _actionable_schema_errors(schema: dict, config: object) -> list:
+    errors = sorted(Draft7Validator(schema).iter_errors(config), key=lambda item: list(item.absolute_path))
+    return [error for error in errors if not _is_redaction_artifact(error)]
+
+
+def _schema_path(error: object, unexpected: str | None = None) -> str:
+    parts = [str(part) for part in error.absolute_path]
+    if unexpected:
+        parts.append(unexpected)
+    return ".".join(parts) or "config root"
+
+
+def _ordinal(number: int) -> str:
+    words = {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth"}
+    if number in words:
+        return words[number]
+    if 10 <= number % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
+def _schema_location(error: object, unexpected: str | None = None) -> str:
+    parts = list(error.absolute_path)
+    if unexpected:
+        parts.append(unexpected)
+    if not parts:
+        return "the config root"
+    if isinstance(parts[-1], int):
+        parent = " > ".join(str(part) for part in parts[:-1]) or "the config root"
+        return f"the {_ordinal(parts[-1] + 1)} item under {parent}"
+    return " > ".join(str(part) for part in parts)
+
+
+def _schema_expectations(error: object) -> str:
+    values = []
+    types = []
+
+    def add_unique(items: list, value: object) -> None:
+        if value not in items:
+            items.append(value)
+
+    def inspect_schema(schema: object) -> None:
+        if not isinstance(schema, dict):
+            return
+        for value in schema.get("enum", []):
+            add_unique(values, value)
+        if "const" in schema:
+            add_unique(values, schema["const"])
+        expected_type = schema.get("type")
+        if isinstance(expected_type, list):
+            for value in expected_type:
+                add_unique(types, value)
+        elif expected_type:
+            add_unique(types, expected_type)
+        for keyword in ("oneOf", "anyOf"):
+            for alternative in schema.get(keyword, []):
+                inspect_schema(alternative)
+
+    inspect_schema(error.schema)
+    for child in error.context:
+        inspect_schema(child.schema)
+
+    if values:
+        shown = ", ".join(repr(value) for value in values[:12])
+        remainder = max(0, len(values) - 12)
+        return f"Available options: {shown}{f', plus {remainder} more' if remainder else ''}."
+    if types:
+        return f"Expected value type: {' or '.join(str(value) for value in types)}."
+    return ""
+
+
+def _schema_failure_guidance(error: object, path: str, unexpected: str | None = None) -> dict[str, str]:
+    location = _schema_location(error, unexpected)
+    expected = error.validator_value
+    actual = {"str": "text", "dict": "mapping", "list": "list", "bool": "boolean", "int": "integer", "float": "number"}.get(type(error.instance).__name__, type(error.instance).__name__)
+    accepted = _schema_expectations(error)
+    if error.validator == "required":
+        match = re.search(r"'([^']+)' is a required property", error.message)
+        setting = match.group(1) if match else "required setting"
+        return {"title": f"Missing required setting: {setting}", "location": location, "accepted": accepted, "explanation": f"Kometa expects '{setting}' under {location}, but it is not present.", "action": f"Add '{setting}' under {location} with a valid value and indentation."}
+    if error.validator == "additionalProperties":
+        setting = unexpected or "unknown setting"
+        return {"title": f"Unknown setting: {setting}", "location": location, "accepted": accepted, "explanation": f"'{setting}' is not accepted at {location}. It may be misspelled, deprecated, or in the wrong section.", "action": f"Check the spelling and indentation of '{setting}', then rename, move, or remove it."}
+    if error.validator == "type":
+        expected_text = ", ".join(expected) if isinstance(expected, list) else str(expected)
+        return {"title": f"Wrong value type at {location}", "location": location, "accepted": accepted or f"Expected value type: {expected_text}.", "explanation": f"Kometa expects {expected_text} at {location}, but the logged value is {actual}.", "action": f"Change the value at {location} to a valid {expected_text} value."}
+    if error.validator == "enum":
+        choices = ", ".join(repr(choice) for choice in expected)
+        return {"title": f"Unsupported value at {location}", "location": location, "accepted": accepted or f"Available options: {choices}.", "explanation": f"The value at {location} is not accepted by Kometa.", "action": f"Choose one of the available options for {location}."}
+    if error.validator in {"oneOf", "anyOf"}:
+        return {"title": f"Unsupported value or structure at {location}", "location": location, "accepted": accepted, "explanation": f"The value or structure at {location} does not match a supported Kometa configuration.", "action": f"Use one of the accepted options or correct the child settings and indentation at {location}."}
+    if error.validator == "pattern":
+        return {"title": f"Invalid value format at {location}", "location": location, "accepted": accepted, "explanation": f"The value at {location} is not in the format Kometa expects.", "action": f"Correct the format at {location} using the documented example."}
+    return {"title": f"Invalid configuration at {location}", "location": location, "accepted": accepted, "explanation": error.message, "action": f"Correct the value or structure at {location} using the Kometa documentation."}
+
+def validate_redacted_config(log_content: str) -> list[dict[str, str | int]]:
+    """Validate a log's extracted config against its matching Kometa schema.
+
+    The schema is deliberately downloaded for every call so validation reflects
+    the current master or develop schema.
     """
     config_text, log_lines = extract_redacted_config(log_content)
     if not config_text.strip():
@@ -105,7 +212,7 @@ def validate_redacted_config(log_content: str) -> list[dict[str, str | int]]:
         raise RuntimeError(f"The Kometa {schema_branch} configuration schema could not be fetched.") from exc
 
     failures = []
-    for error in sorted(Draft7Validator(schema).iter_errors(config), key=lambda item: list(item.absolute_path)):
+    for error in _actionable_schema_errors(schema, config):
         unexpected = None
         if error.validator == "additionalProperties":
             match = re.search(r"'([^']+)' was unexpected", error.message)
@@ -113,8 +220,9 @@ def validate_redacted_config(log_content: str) -> list[dict[str, str | int]]:
         node = _node_at_path(config_node, error.absolute_path, unexpected)
         config_line = node.start_mark.line if node is not None else 0
         log_line = log_lines[config_line] if config_line < len(log_lines) else log_lines[0]
-        path = ".".join(str(part) for part in error.absolute_path)
-        failures.append({"line": log_line, "message": error.message, "path": path})
+        path = _schema_path(error, unexpected)
+        guidance = _schema_failure_guidance(error, path, unexpected)
+        failures.append({"line": log_line, "config_line": config_line + 1, "message": error.message, "path": path, "urgency": "Action required", **guidance})
     return failures
 
 # Each record contains its category, issue description, proposed solution, and capture text.
