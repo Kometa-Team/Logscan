@@ -423,37 +423,66 @@ function createConfigRows(config, targetStart = 0, targetEnd = targetStart) {
     number.className = "line-number";
     number.textContent = lineNumber;
     const content = document.createElement("span");
-    appendYamlHighlight(content, line || " ");
+    const issueRanges = matchingItems
+      .filter((item) => item.config_column && item.config_end_column)
+      .map((item) => ({ start: item.config_column - 1, end: item.config_end_column - 1 }));
+    appendYamlHighlight(content, line || " ", issueRanges);
     row.append(number, content);
     fragment.append(row);
   });
   return fragment;
 }
 
-function appendYamlHighlight(container, line) {
+function appendYamlSegment(container, text, className, offset, issueRanges) {
+  const boundaries = new Set([0, text.length]);
+  issueRanges.forEach((range) => {
+    const start = Math.max(0, Math.min(text.length, range.start - offset));
+    const end = Math.max(start, Math.min(text.length, range.end - offset));
+    if (end > start) {
+      boundaries.add(start);
+      boundaries.add(end);
+    }
+  });
+  const points = [...boundaries].sort((left, right) => left - right);
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    if (end <= start) continue;
+    const value = text.slice(start, end);
+    const isIssue = issueRanges.some((range) => range.start < offset + end && range.end > offset + start);
+    if (!className && !isIssue) {
+      container.append(document.createTextNode(value));
+      continue;
+    }
+    const span = document.createElement("span");
+    if (className) span.classList.add(className);
+    if (isIssue) span.classList.add("schema-issue-token");
+    span.textContent = value;
+    container.append(span);
+  }
+}
+
+function appendYamlHighlight(container, line, issueRanges = []) {
   const commentIndex = line.search(/\s#/);
   const code = commentIndex === -1 ? line : line.slice(0, commentIndex);
   const comment = commentIndex === -1 ? "" : line.slice(commentIndex);
   const keyMatch = /^(\s*)([^:#][^:]*)(:)(.*)$/.exec(code);
+  const segments = [];
   if (keyMatch) {
-    container.append(document.createTextNode(keyMatch[1]));
-    const key = document.createElement("span");
-    key.className = "yaml-key";
-    key.textContent = keyMatch[2];
-    container.append(key, document.createTextNode(keyMatch[3]));
-    const value = document.createElement("span");
-    value.className = /^(\s*)(true|false|null|~)$/i.test(keyMatch[4]) ? "yaml-literal" : "yaml-value";
-    value.textContent = keyMatch[4];
-    container.append(value);
+    segments.push([keyMatch[1], ""]);
+    segments.push([keyMatch[2], "yaml-key"]);
+    segments.push([keyMatch[3], ""]);
+    segments.push([keyMatch[4], /^(\s*)(true|false|null|~)$/i.test(keyMatch[4]) ? "yaml-literal" : "yaml-value"]);
   } else {
-    container.append(document.createTextNode(code));
+    segments.push([code, ""]);
   }
-  if (comment) {
-    const commentNode = document.createElement("span");
-    commentNode.className = "yaml-comment";
-    commentNode.textContent = comment;
-    container.append(commentNode);
-  }
+  if (comment) segments.push([comment, "yaml-comment"]);
+
+  let offset = 0;
+  segments.forEach(([value, className]) => {
+    appendYamlSegment(container, value, className, offset, issueRanges);
+    offset += value.length;
+  });
 }
 
 function setHighlightOptions(isConfig) {
@@ -863,6 +892,8 @@ async function loadSchemaValidation(data) {
         message: `${failure.title || "Schema validation issue"}\nImpact: ${failure.urgency || "Action required"}. Kometa may reject this setting or skip the affected functionality.\n\nLocation: ${failure.location || failure.path || "config root"}\n\nIssue: ${failure.explanation || failure.message}${failure.accepted ? `\n\n${failure.accepted}` : ""}\n\nHow to fix: ${failure.action || "Correct this setting using the Kometa documentation."}\n\nSchema path: ${failure.path || "config root"}\nSource log line: ${failure.line}\nValidated against: Kometa ${validation.branch} schema`,
         evidence_lines: [],
         config_line: failure.config_line,
+        config_column: failure.config_column,
+        config_end_column: failure.config_end_column,
       }));
     } else {
       updated.recommendations.push({

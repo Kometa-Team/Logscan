@@ -43,8 +43,10 @@ from logscan_web.recommendations import (
     _actionable_schema_errors,
     _schema_failure_guidance,
     _schema_path,
+    _unexpected_properties,
     has_yaml_language_server_directive,
     schema_branch_for_log,
+    validate_redacted_config,
 )
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
 
@@ -525,6 +527,75 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(guidance["location"], "the third item under TV > overlay_path")
         self.assertEqual(guidance["title"], "Unsupported value at the third item under TV > overlay_path")
         self.assertEqual(guidance["accepted"], "Available options: 'default', 'git', 'url'.")
+
+    def test_schema_validation_prefers_specific_nested_composite_errors(self):
+        schema = {
+            "type": "array",
+            "items": {
+                "anyOf": [
+                    {"type": "string"},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "default": {"const": "seasonal"},
+                            "template_variables": {
+                                "type": "object",
+                                "properties": {"sort_by": {"type": "string"}},
+                                "additionalProperties": False,
+                            },
+                        },
+                        "required": ["default"],
+                    },
+                ],
+            },
+        }
+        config = [{"default": "seasonal", "template_variables": {"sort_by": "random", "use_christmas": True}}]
+
+        errors = _actionable_schema_errors(schema, config)
+
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].validator, "additionalProperties")
+        self.assertEqual(list(errors[0].absolute_path), [0, "template_variables"])
+        self.assertEqual(_unexpected_properties(errors[0]), ["use_christmas"])
+
+    def test_schema_validation_returns_exact_invalid_key_range(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "template_variables": {
+                    "type": "object",
+                    "properties": {"sort_by": {"type": "string"}},
+                    "additionalProperties": False,
+                },
+            },
+        }
+        log = "\n".join([
+            "Redacted Config",
+            "[config.py:1] [INFO] | template_variables: |",
+            "[config.py:2] [INFO] |   sort_by: random |",
+            "[config.py:3] [INFO] |   use_christmas: true |",
+            "[config.py:4] [INFO] | end |",
+            "Initializing cache database at /config/cache",
+        ])
+
+        with patch("logscan_web.recommendations.urlopen", return_value=Response(schema)):
+            failures = validate_redacted_config(log)
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["title"], "Unknown setting: use_christmas")
+        self.assertEqual(failures[0]["config_line"], 3)
+        self.assertEqual(failures[0]["config_column"], 3)
+        self.assertEqual(failures[0]["config_end_column"], 16)
+
+    def test_config_viewer_marks_exact_schema_issue_ranges(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("config_column: failure.config_column", script)
+        self.assertIn("config_end_column: failure.config_end_column", script)
+        self.assertIn('span.classList.add("schema-issue-token")', script)
+        self.assertIn("text-decoration-style: wavy", css)
+        self.assertIn("text-decoration-color: #fb7185", css)
 
     def test_config_download_adds_matching_yaml_schema_directive(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")

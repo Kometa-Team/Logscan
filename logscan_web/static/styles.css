@@ -443,6 +443,15 @@ details[open] .chevron { transform: rotate(90deg); }
 .yaml-value { color: #c3e88d; }
 .yaml-literal { color: #82aaff; }
 .yaml-comment { color: #66708d; font-style: italic; }
+.schema-issue-token {
+  border-radius: 2px;
+  background: rgba(251,113,133,.12);
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: #fb7185;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
 .highlighted .line-number { color: #f5c84d; }
 .recommendation-dialog-content { padding: 24px; }
 .recommendation-dialog-content .recommendation-body { padding: 0; }

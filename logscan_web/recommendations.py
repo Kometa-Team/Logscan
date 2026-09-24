@@ -94,9 +94,51 @@ def _is_redaction_artifact(error: object) -> bool:
     return bool(error.context) and all(_is_redaction_artifact(child) for child in error.context)
 
 
+def _specific_schema_errors(error: object) -> list:
+    """Prefer concrete nested failures over a vague composite parent error."""
+    if error.validator not in {"anyOf", "oneOf"} or not error.context:
+        return [error]
+    leaves = []
+
+    def collect(candidate: object) -> None:
+        if candidate.validator in {"anyOf", "oneOf"} and candidate.context:
+            for child in candidate.context:
+                collect(child)
+        else:
+            leaves.append(candidate)
+
+    collect(error)
+    deeper = [candidate for candidate in leaves if len(candidate.absolute_path) > len(error.absolute_path)]
+    if not deeper:
+        return [error]
+    deepest = max(len(candidate.absolute_path) for candidate in deeper)
+    return [candidate for candidate in deeper if len(candidate.absolute_path) == deepest]
+
+
 def _actionable_schema_errors(schema: dict, config: object) -> list:
     errors = sorted(Draft7Validator(schema).iter_errors(config), key=lambda item: list(item.absolute_path))
-    return [error for error in errors if not _is_redaction_artifact(error)]
+    actionable = []
+    seen = set()
+    for error in errors:
+        for candidate in _specific_schema_errors(error):
+            identity = (candidate.validator, tuple(candidate.absolute_path), candidate.message)
+            if identity not in seen and not _is_redaction_artifact(candidate):
+                actionable.append(candidate)
+                seen.add(identity)
+    return actionable
+
+
+def _unexpected_properties(error: object) -> list[str]:
+    """Return invalid mapping keys for an additionalProperties failure."""
+    if error.validator != "additionalProperties" or not isinstance(error.instance, dict):
+        return []
+    properties = error.schema.get("properties", {}) if isinstance(error.schema, dict) else {}
+    patterns = error.schema.get("patternProperties", {}) if isinstance(error.schema, dict) else {}
+    return [
+        str(key)
+        for key in error.instance
+        if key not in properties and not any(re.search(pattern, str(key)) for pattern in patterns)
+    ]
 
 
 def _schema_path(error: object, unexpected: str | None = None) -> str:
@@ -220,16 +262,26 @@ def validate_redacted_config(log_content: str) -> list[dict[str, str | int]]:
 
     failures = []
     for error in _actionable_schema_errors(schema, config):
-        unexpected = None
-        if error.validator == "additionalProperties":
-            match = re.search(r"'([^']+)' was unexpected", error.message)
-            unexpected = match.group(1) if match else None
-        node = _node_at_path(config_node, error.absolute_path, unexpected)
-        config_line = node.start_mark.line if node is not None else 0
-        log_line = log_lines[config_line] if config_line < len(log_lines) else log_lines[0]
-        path = _schema_path(error, unexpected)
-        guidance = _schema_failure_guidance(error, path, unexpected)
-        failures.append({"line": log_line, "config_line": config_line + 1, "message": error.message, "path": path, "urgency": "Action required", **guidance})
+        unexpected_properties = _unexpected_properties(error)
+        targets = unexpected_properties or [None]
+        for unexpected in targets:
+            node = _node_at_path(config_node, error.absolute_path, unexpected)
+            config_line = node.start_mark.line if node is not None else 0
+            log_line = log_lines[config_line] if config_line < len(log_lines) else log_lines[0]
+            path = _schema_path(error, unexpected)
+            guidance = _schema_failure_guidance(error, path, unexpected)
+            failure = {
+                "line": log_line,
+                "config_line": config_line + 1,
+                "message": error.message,
+                "path": path,
+                "urgency": "Action required",
+                **guidance,
+            }
+            if node is not None and node.start_mark.line == node.end_mark.line:
+                failure["config_column"] = node.start_mark.column + 1
+                failure["config_end_column"] = max(node.start_mark.column + 2, node.end_mark.column + 1)
+            failures.append(failure)
     return failures
 
 # Each record contains its category, issue description, proposed solution, and capture text.
