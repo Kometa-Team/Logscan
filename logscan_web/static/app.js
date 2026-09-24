@@ -162,45 +162,65 @@ function showOverview(group, overview) {
   sectionContent.append(grid);
   const sectionRunTimes = overview.section_run_times || [];
   if (sectionRunTimes.length) {
-    const runtimeSection = document.createElement("section");
+    const runtimeSection = document.createElement("details");
     runtimeSection.className = "runtime-summary";
+    const runtimeSummary = document.createElement("summary");
+    const runtimeSummaryTitle = document.createElement("span");
+    runtimeSummaryTitle.textContent = "Longest section run times";
+    const runtimeSummaryCount = document.createElement("span");
+    runtimeSummaryCount.className = "runtime-summary-count";
+    runtimeSummaryCount.textContent = `${sectionRunTimes.length.toLocaleString()} section${sectionRunTimes.length === 1 ? "" : "s"}`;
+    const runtimeChevron = document.createElement("span");
+    runtimeChevron.className = "chevron";
+    runtimeChevron.textContent = "\u203a";
+    runtimeSummary.append(runtimeSummaryTitle, runtimeSummaryCount, runtimeChevron);
+    const runtimeBody = document.createElement("div");
+    runtimeBody.className = "runtime-summary-body";
     const runtimeHeader = document.createElement("div");
     runtimeHeader.className = "runtime-summary-header";
-    const runtimeTitle = document.createElement("h4");
-    runtimeTitle.textContent = "Longest section run times";
+    const runtimeLabel = document.createElement("label");
+    runtimeLabel.htmlFor = "runtime-limit";
+    runtimeLabel.textContent = "Show";
     const runtimeLimit = document.createElement("select");
+    runtimeLimit.id = "runtime-limit";
     runtimeLimit.setAttribute("aria-label", "Number of section run times to show");
-    [["10", "Top 10"], ["25", "Top 25"], ["100", "Top 100"], ["all", "All"]].forEach(([value, label]) => {
+    [["10", "Top 10"], ["25", "Top 25"], ["100", "Top 100"], ["all", `All (${sectionRunTimes.length.toLocaleString()})`]].forEach(([value, label]) => {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
       runtimeLimit.append(option);
     });
-    runtimeHeader.append(runtimeTitle, runtimeLimit);
+    runtimeHeader.append(runtimeLabel, runtimeLimit);
     const runtimeNote = document.createElement("p");
-    runtimeNote.textContent = "Sorted by duration. Sections with a run time of zero are excluded.";
+    runtimeNote.setAttribute("aria-live", "polite");
     const runtimeList = document.createElement("ol");
     runtimeList.className = "runtime-list";
     const renderRunTimes = () => {
       const limit = runtimeLimit.value === "all" ? sectionRunTimes.length : Number(runtimeLimit.value);
       runtimeList.replaceChildren();
-      sectionRunTimes.slice(0, limit).forEach((runtime) => {
+      sectionRunTimes.slice(0, limit).forEach((runtime, index) => {
         const row = document.createElement("li");
+        const rank = document.createElement("span");
+        rank.className = "runtime-rank";
+        rank.textContent = `${index + 1} of ${sectionRunTimes.length}`;
         const link = document.createElement("button");
         link.type = "button";
         link.className = "runtime-line-link";
         link.textContent = runtime.name;
         link.title = `View ${runtime.name} in the log`;
-        link.addEventListener("click", () => openLogViewer(Number(runtime.line) || 1));
+        link.addEventListener("click", () => openRuntimeLine(runtime));
         const duration = document.createElement("span");
+        duration.className = "runtime-duration";
         duration.textContent = runtime.duration;
-        row.append(link, duration);
+        row.append(rank, link, duration);
         runtimeList.append(row);
       });
+      runtimeNote.textContent = `Showing ${Math.min(limit, sectionRunTimes.length).toLocaleString()} of ${sectionRunTimes.length.toLocaleString()} sections, sorted by duration. Zero-second sections are excluded.`;
     };
     runtimeLimit.addEventListener("change", renderRunTimes);
     renderRunTimes();
-    runtimeSection.append(runtimeHeader, runtimeNote, runtimeList);
+    runtimeBody.append(runtimeHeader, runtimeNote, runtimeList);
+    runtimeSection.append(runtimeSummary, runtimeBody);
     sectionContent.append(runtimeSection);
   }
   const plexConfigurations = overview.plex_configurations || [];
@@ -778,6 +798,38 @@ async function openLogViewer(targetStart = 1, targetEnd = targetStart) {
     if (!logViewer.open) logViewer.showModal();
     updateViewerMode("log");
     renderLogWindow(targetStart, targetEnd);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function openRuntimeLine(runtime) {
+  try {
+    const lines = await loadLogLines();
+    const recordedIndex = Math.max(0, Math.min(lines.length - 1, Number(runtime.line || 1) - 1));
+    const name = `${runtime.name || ""}`.trim().toLocaleLowerCase();
+    const duration = `${runtime.duration || ""}`.trim().toLocaleLowerCase();
+    const candidates = [];
+    lines.forEach((line, index) => {
+      const current = line.toLocaleLowerCase();
+      if (!current.includes("finished") || !current.includes(name)) return;
+      const block = `${line}\n${lines[index + 1] || ""}`.toLocaleLowerCase();
+      if (!duration || block.includes(duration)) candidates.push(index);
+    });
+    if (!candidates.length) {
+      lines.forEach((line, index) => {
+        const current = line.toLocaleLowerCase();
+        if (current.includes("finished") && current.includes(name)) candidates.push(index);
+      });
+    }
+    const targetIndex = candidates.length
+      ? candidates.reduce((closest, candidate) => (
+        Math.abs(candidate - recordedIndex) < Math.abs(closest - recordedIndex) ? candidate : closest
+      ), candidates[0])
+      : recordedIndex;
+    if (!logViewer.open) logViewer.showModal();
+    updateViewerMode("log");
+    renderLogWindow(targetIndex + 1);
   } catch (error) {
     alert(error.message);
   }

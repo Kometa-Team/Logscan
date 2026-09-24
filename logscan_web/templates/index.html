@@ -10,10 +10,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260924-4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260924-5') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
-  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260924-6') }}" defer></script>
+  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260924-7') }}" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -128,7 +128,7 @@
             </select>
             <div class="highlight-navigation">
               <button class="secondary-button compact" id="previous-highlight" type="button">Previous</button>
-              <button class="primary-button compact" id="next-highlight" type="button">Next</button>
+              <button class="secondary-button compact" id="next-highlight" type="button">Next</button>
             </div>
           </div>
           <div class="section-jump-control">
