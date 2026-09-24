@@ -300,6 +300,23 @@ def _log_message(line: str) -> str:
     return match.group(1).strip() if match else line.strip().strip("|").strip()
 
 
+def _plex_configuration_section(lines: list[str], number: int) -> dict[str, object]:
+    """Build a Plex configuration section with a useful library label."""
+    name = next(
+        (match.group(1).strip() for line in lines if (match := re.fullmatch(r"Connected to library\s+(.+)", line, re.I))),
+        None,
+    )
+    library_type = next(
+        (match.group(1).title() for line in lines if (match := re.fullmatch(r"Type:\s*(Movie|Show|Music)", line, re.I))),
+        None,
+    )
+    if library_type and name:
+        label = f"{library_type}: {name}"
+    else:
+        label = library_type or name or f"Section {number}"
+    return {"title": f"Plex Configuration - {label}", "lines": lines}
+
+
 def extract_plex_configurations(content: str) -> list[dict[str, object]]:
     """Extract the informational Plex configuration blocks shown by Kometa."""
     sections: list[dict[str, object]] = []
@@ -308,20 +325,20 @@ def extract_plex_configurations(content: str) -> list[dict[str, object]]:
         message = _log_message(raw_line)
         if "Plex Configuration" in message:
             if current:
-                sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+                sections.append(_plex_configuration_section(current, len(sections) + 1))
             current = []
             continue
         if current is None:
             continue
         if re.search(r"\bScanning\b", message) or "Library Connection Failed" in message:
             if current:
-                sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+                sections.append(_plex_configuration_section(current, len(sections) + 1))
             current = None
             continue
         if message and not re.fullmatch(r"[-=]+", message):
             current.append(message)
     if current:
-        sections.append({"title": f"Plex Configuration - Section {len(sections) + 1}", "lines": current})
+        sections.append(_plex_configuration_section(current, len(sections) + 1))
     return sections
 
 
