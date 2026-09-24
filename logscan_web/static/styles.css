@@ -316,6 +316,16 @@ h2 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.5rem); letter-spacing: -.04em;
   .overview-grid dt { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
   .overview-grid dd { margin: 7px 0 0; color: #eef0ff; overflow-wrap: anywhere; }
 .overview-subheading { margin: 24px 0 12px; font-size: 1rem; }
+.runtime-summary { margin-top: 24px; }
+.runtime-summary-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.runtime-summary-header h4 { margin: 0; font-size: 1rem; }
+.runtime-summary-header select { min-width: 110px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: white; font: inherit; }
+.runtime-summary > p { margin: 6px 0 12px; color: var(--muted); font-size: .78rem; }
+.runtime-list { margin: 0; padding: 0; display: grid; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); list-style: none; }
+.runtime-list li { min-width: 0; padding: 11px 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); }
+.runtime-list li:last-child { border-bottom: 0; }
+.runtime-line-link { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--accent-bright); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.runtime-list span { color: white; font-family: "JetBrains Mono", monospace; font-size: .78rem; white-space: nowrap; }
 .plex-configuration-list { display: grid; gap: 10px; }
 .plex-configuration { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .plex-configuration summary { list-style: none; padding: 15px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-weight: 600; }
@@ -358,6 +368,10 @@ details[open] .chevron { transform: rotate(90deg); }
 .line-reference-overflow[open] summary { margin-bottom: 8px; }
 .line-reference-overflow > div { max-height: 180px; overflow-y: auto; padding: 8px; border-left: 2px solid var(--border); color: #939dbb; line-height: 1.9; }
 .empty-state { padding: 48px 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); text-align: center; color: var(--muted); }
+.schema-review { padding: 24px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.schema-review strong { font-size: 1.05rem; }
+.schema-review p { margin: 0; color: var(--muted); font-size: .85rem; }
+.schema-review .primary-button { grid-column: 2; grid-row: 1 / span 2; justify-content: center; }
 #form-status.error { color: #fda4af !important; }
 .loading .upload-icon { animation: pulse 1.3s ease-in-out infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 9px rgba(114,119,248,.1); } }
@@ -509,4 +523,6 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .section-jump-control, .highlight-mode-control { align-items: stretch; flex-direction: column; }
   .highlight-navigation { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-left: 0; }
   .highlight-navigation .compact { justify-content: center; width: 100%; }
+  .schema-review { grid-template-columns: 1fr; }
+  .schema-review .primary-button { grid-column: 1; grid-row: auto; margin-top: 8px; width: 100%; }
 }

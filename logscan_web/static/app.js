@@ -160,6 +160,49 @@ function showOverview(group, overview) {
     grid.append(item);
   });
   sectionContent.append(grid);
+  const sectionRunTimes = overview.section_run_times || [];
+  if (sectionRunTimes.length) {
+    const runtimeSection = document.createElement("section");
+    runtimeSection.className = "runtime-summary";
+    const runtimeHeader = document.createElement("div");
+    runtimeHeader.className = "runtime-summary-header";
+    const runtimeTitle = document.createElement("h4");
+    runtimeTitle.textContent = "Longest section run times";
+    const runtimeLimit = document.createElement("select");
+    runtimeLimit.setAttribute("aria-label", "Number of section run times to show");
+    [["10", "Top 10"], ["25", "Top 25"], ["100", "Top 100"], ["all", "All"]].forEach(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      runtimeLimit.append(option);
+    });
+    runtimeHeader.append(runtimeTitle, runtimeLimit);
+    const runtimeNote = document.createElement("p");
+    runtimeNote.textContent = "Sorted by duration. Sections with a run time of zero are excluded.";
+    const runtimeList = document.createElement("ol");
+    runtimeList.className = "runtime-list";
+    const renderRunTimes = () => {
+      const limit = runtimeLimit.value === "all" ? sectionRunTimes.length : Number(runtimeLimit.value);
+      runtimeList.replaceChildren();
+      sectionRunTimes.slice(0, limit).forEach((runtime) => {
+        const row = document.createElement("li");
+        const link = document.createElement("button");
+        link.type = "button";
+        link.className = "runtime-line-link";
+        link.textContent = runtime.name;
+        link.title = `View ${runtime.name} in the log`;
+        link.addEventListener("click", () => openLogViewer(Number(runtime.line) || 1));
+        const duration = document.createElement("span");
+        duration.textContent = runtime.duration;
+        row.append(link, duration);
+        runtimeList.append(row);
+      });
+    };
+    runtimeLimit.addEventListener("change", renderRunTimes);
+    renderRunTimes();
+    runtimeSection.append(runtimeHeader, runtimeNote, runtimeList);
+    sectionContent.append(runtimeSection);
+  }
   const plexConfigurations = overview.plex_configurations || [];
   if (plexConfigurations.length) {
     const plexHeading = document.createElement("h4");
@@ -773,6 +816,30 @@ function showGroup(group, recommendations) {
     empty.className = "empty-state";
     empty.textContent = `No ${group.label.toLowerCase()} were found.`;
     sectionContent.append(empty);
+    return;
+  }
+  if (group.key === "schema") {
+    const firstIssue = [...matches]
+      .filter((item) => Number(item.config_line) > 0)
+      .sort((left, right) => Number(left.config_line) - Number(right.config_line))[0];
+    const review = document.createElement("div");
+    review.className = "schema-review";
+    const count = document.createElement("strong");
+    count.textContent = `${matches.length.toLocaleString()} schema issue${matches.length === 1 ? "" : "s"} found`;
+    const guidance = document.createElement("p");
+    guidance.textContent = "Review each issue in context inside the extracted config.yml file.";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "primary-button compact";
+    button.textContent = firstIssue ? "Review issues in config" : "Open extracted config";
+    button.addEventListener("click", () => {
+      const targetLine = Number(firstIssue?.config_line) || 0;
+      showConfigInViewer(targetLine).then(() => {
+        if (!logViewer.open) logViewer.showModal();
+      }).catch((error) => alert(error.message));
+    });
+    review.append(count, guidance, button);
+    sectionContent.append(review);
     return;
   }
   const list = document.createElement("div");
