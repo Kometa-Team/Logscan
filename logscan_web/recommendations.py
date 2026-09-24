@@ -17,7 +17,9 @@ def schema_branch_for_log(log_content: str) -> str:
     """Match schema validation to the logged Kometa release channel."""
     versions = re.findall(r"(?:Newest )?Version:\s*([^\r\n|]+)", log_content, flags=re.IGNORECASE)
     version_text = " ".join(versions).lower()
-    if "develop" in version_text or "nightly" in version_text:
+    if "nightly" in version_text:
+        return "nightly"
+    if "develop" in version_text:
         return "develop"
     return "master"
 @dataclass(frozen=True)
@@ -56,6 +58,11 @@ def extract_redacted_config(log_content: str) -> tuple[str, list[int]]:
     return "\n".join(line[1:] if line.startswith(" ") else line for line, _number in extracted), [
         line_number for _line, line_number in extracted
     ]
+
+
+def has_yaml_language_server_directive(log_content: str) -> bool:
+    config_text, _log_lines = extract_redacted_config(log_content)
+    return bool(re.search(r"^\s*#\s*yaml-language-server:\s*\$schema=", config_text, flags=re.IGNORECASE | re.MULTILINE))
 
 
 def _node_at_path(node, path, unexpected_property: str | None = None):

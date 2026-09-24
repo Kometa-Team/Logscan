@@ -43,6 +43,7 @@ from logscan_web.recommendations import (
     _actionable_schema_errors,
     _schema_failure_guidance,
     _schema_path,
+    has_yaml_language_server_directive,
     schema_branch_for_log,
 )
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, UsageStatsStore
@@ -525,6 +526,26 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(guidance["title"], "Unsupported value at the third item under TV > overlay_path")
         self.assertEqual(guidance["accepted"], "Available options: 'default', 'git', 'url'.")
 
+    def test_config_download_adds_matching_yaml_schema_directive(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        self.assertIn("function configForDownload()", script)
+        self.assertIn("yaml-language-server:", script)
+        self.assertIn("refs/heads/${currentSchemaBranch}/json-schema/config-schema.json", script)
+        self.assertIn('["master", "develop", "nightly"].includes(metadata.kometa_branch) ? metadata.kometa_branch : "master"', script)
+        self.assertIn("new Blob([configForDownload()]", script)
+
+    def test_config_download_uses_yaml_extension(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        self.assertIn('downloadFilename(kind = "log")', script)
+        self.assertIn('kind === "config" ? ".yml" : ".log"', script)
+        self.assertIn('downloadFilename("config")', script)
+
+    def test_mobile_viewer_disables_per_line_text_autosizing(self):
+        css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
+        self.assertIn("-webkit-text-size-adjust: none", css)
+        self.assertIn(".log-code .log-line, .log-code .log-line span", css)
+        self.assertIn("font-size: inherit", css)
+
     def test_schema_web_cards_explain_impact_and_fix(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
         self.assertIn("Impact:", script)
@@ -541,10 +562,29 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("schemaRecommendationsForConfigLine", script)
         self.assertIn('"schema-validation-line"', script)
 
+    def test_yaml_schema_directive_detection_uses_extracted_config(self):
+        prefix = "[config.py:1] [INFO] |"
+        without_directive = "\n".join([
+            "Redacted Config",
+            f"{prefix} libraries:",
+            f"{prefix}   Movies:",
+            f"{prefix} end",
+            "Initializing cache database at /config/cache",
+        ])
+        with_directive = "\n".join([
+            "Redacted Config",
+            f"{prefix} # yaml-language-server: $schema=https://example.test/schema.json",
+            f"{prefix} libraries:",
+            f"{prefix} end",
+            "Initializing cache database at /config/cache",
+        ])
+        self.assertFalse(has_yaml_language_server_directive(without_directive))
+        self.assertTrue(has_yaml_language_server_directive(with_directive))
+
     def test_schema_branch_matches_release_channel(self):
         self.assertEqual(schema_branch_for_log("Version: 2.2.0 (Branch: master)"), "master")
         self.assertEqual(schema_branch_for_log("Version: 2.3.0 (Branch: develop)"), "develop")
-        self.assertEqual(schema_branch_for_log("Version: 2.1.0 (Branch: nightly)"), "develop")
+        self.assertEqual(schema_branch_for_log("Version: 2.1.0 (Branch: nightly)"), "nightly")
     def test_traceback_is_critical(self):
         self.assertEqual(next(rule for rule in RULES.values() if rule.id == "traceback").category, "critical")
     def test_internal_server_error_is_critical(self):
