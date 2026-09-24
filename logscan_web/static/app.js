@@ -27,6 +27,7 @@ const sectionContent = document.querySelector("#section-content");
 const logViewer = document.querySelector("#log-viewer");
 const logCode = document.querySelector("#log-code");
 const highlightMode = document.querySelector("#highlight-mode");
+const previousHighlight = document.querySelector("#previous-highlight");
 const nextHighlight = document.querySelector("#next-highlight");
 const sectionJump = document.querySelector("#section-jump");
 const viewerPosition = document.querySelector("#viewer-position");
@@ -527,7 +528,7 @@ async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
   logCode.scrollTop = 0;
   const configLineCount = extractedConfig ? extractedConfig.split("\n").length : 0;
   viewerPosition.textContent = `${configLineCount.toLocaleString()} config line${configLineCount === 1 ? "" : "s"} | ${schemaValidationFailures.length.toLocaleString()} schema issue${schemaValidationFailures.length === 1 ? "" : "s"}`;
-  updateNextHighlightControl();
+  updateHighlightNavigationControls();
   if (targetStart) {
     highlightedRange = { start: targetStart, end: targetEnd };
     requestAnimationFrame(() => logCode.querySelector(`[data-line="${targetStart}"]`)?.scrollIntoView({ block: "center" }));
@@ -634,19 +635,31 @@ function highlightedLineNumbers() {
     .sort((left, right) => left - right);
 }
 
-function updateNextHighlightControl() {
+function updateHighlightNavigationControls() {
   const hasHighlights = currentLogLines && highlightedLineNumbers().length > 0;
+  previousHighlight.disabled = !hasHighlights;
   nextHighlight.disabled = !hasHighlights;
+  previousHighlight.title = hasHighlights ? "Go to the previous highlighted line" : "No lines match this highlight mode";
   nextHighlight.title = hasHighlights ? "Go to the next highlighted line" : "No lines match this highlight mode";
 }
 
-function goToNextHighlightedLine() {
+function goToHighlightedLine(direction) {
   if (!currentLogLines) return;
   const lines = highlightedLineNumbers();
   if (!lines.length) return;
-  const nextLine = lines.find((lineNumber) => lineNumber > highlightedRange.start) || lines[0];
-  if (viewerMode === "config") showConfigInViewer(nextLine).catch((error) => alert(error.message));
-  else renderLogWindow(nextLine);
+  const targetLine = direction === "previous"
+    ? [...lines].reverse().find((lineNumber) => lineNumber < highlightedRange.start) || lines.at(-1)
+    : lines.find((lineNumber) => lineNumber > highlightedRange.start) || lines[0];
+  if (viewerMode === "config") showConfigInViewer(targetLine).catch((error) => alert(error.message));
+  else renderLogWindow(targetLine);
+}
+
+function goToPreviousHighlightedLine() {
+  goToHighlightedLine("previous");
+}
+
+function goToNextHighlightedLine() {
+  goToHighlightedLine("next");
 }
 
 function openRecommendationDialog(items) {
@@ -686,7 +699,7 @@ function renderLogWindow(targetStart, targetEnd = targetStart) {
   const fragment = createLogRows(viewerFirstLine, viewerLastLine);
   logCode.replaceChildren(fragment);
   updateViewerPosition();
-  updateNextHighlightControl();
+  updateHighlightNavigationControls();
   requestAnimationFrame(() => {
     logCode.querySelector(`[data-line="${startTarget}"]`)?.scrollIntoView({ block: "center" });
   });
@@ -1276,6 +1289,7 @@ document.querySelector("#close-viewer").addEventListener("click", () => logViewe
 highlightMode.addEventListener("change", () => {
   if (currentLogLines && viewerMode === "log") renderLogWindow(highlightedRange.start);
 });
+previousHighlight.addEventListener("click", goToPreviousHighlightedLine);
 nextHighlight.addEventListener("click", goToNextHighlightedLine);
 sectionJump.addEventListener("change", () => {
   if (!sectionJump.value) return;

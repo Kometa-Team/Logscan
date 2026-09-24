@@ -405,7 +405,7 @@ details[open] .chevron { transform: rotate(90deg); }
 .viewer-toolbar select { height: 38px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; outline: none; background: #090c18; color: white; }
 .viewer-toolbar select { width: min(300px, 30vw); font-size: .8rem; }
 #highlight-mode { width: min(240px, 26vw); }
-.highlight-mode-control #next-highlight { margin-left: 3px; }
+.highlight-navigation { display: grid; grid-template-columns: repeat(2, max-content); gap: 9px; margin-left: 3px; }
 .viewer-toolbar select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(114,119,248,.12); }
 .viewer-toolbar select:disabled { cursor: not-allowed; opacity: .55; }
 .primary-button.compact { min-width: auto; width: auto; height: 38px; padding: 0 15px; display: inline-flex; }
@@ -507,4 +507,6 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .download-dialog-actions { grid-template-columns: 1fr; }
   .viewer-toolbar select { width: 100%; }
   .section-jump-control, .highlight-mode-control { align-items: stretch; flex-direction: column; }
+  .highlight-navigation { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-left: 0; }
+  .highlight-navigation .compact { justify-content: center; width: 100%; }
 }
