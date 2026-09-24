@@ -749,7 +749,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         result = scan_log("meta.log", content.encode())
 
         self.assertEqual(len(sections), 1)
-        self.assertEqual(sections[0]["title"], "Plex Configuration - Section 1")
+        self.assertEqual(sections[0]["title"], "Plex Configuration - Movie: TestMovies")
         self.assertIn("Connected to library TestMovies", sections[0]["lines"])
         self.assertIn("Agent: tv.plex.agents.movie", sections[0]["lines"])
         self.assertEqual(result.overview["plex_configurations"], sections)
@@ -757,6 +757,24 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(result.overview["plex_analytics"]["platforms"], ["Linux"])
         self.assertEqual(result.overview["plex_analytics"]["library_types"], ["Movie"])
         self.assertEqual(result.overview["plex_analytics"]["agents"], ["tv.plex.agents.movie"])
+
+    def test_plex_configuration_title_falls_back_for_partial_sections(self):
+        content = "\n".join([
+            "[config.py:1] [INFO] | Plex Configuration |",
+            "[config.py:2] [INFO] | Connected to library Documentaries |",
+            "[config.py:3] [INFO] | Plex Configuration |",
+            "[config.py:4] [INFO] | Type: Show |",
+            "[config.py:5] [INFO] | Plex Configuration |",
+            "[config.py:6] [INFO] | Connected to server Plex version 1.2.3.4-abcd |",
+        ])
+
+        sections = extract_plex_configurations(content)
+
+        self.assertEqual([section["title"] for section in sections], [
+            "Plex Configuration - Documentaries",
+            "Plex Configuration - Show",
+            "Plex Configuration - Section 3",
+        ])
 
     def test_kometa_and_quickstart_channels_are_extracted_from_safe_markers(self):
         content = "\n".join([
