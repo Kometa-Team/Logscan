@@ -43,6 +43,7 @@ let extractedConfig = "";
 let viewerMode = "log";
 let currentRecommendations = [];
 let schemaValidationFailures = [];
+let currentSchemaBranch = "master";
 let currentOverview = {};
 let batchScans = [];
 const VIEWER_CHUNK_SIZE = 1000;
@@ -842,7 +843,18 @@ async function loadSchemaValidation(data) {
     const response = await fetch(`/api/scans/${encodeURIComponent(data.id)}/validate-config`, { method: "POST" });
     const validation = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(validation.error || "Schema validation could not run.");
+    currentSchemaBranch = ["master", "develop", "nightly"].includes(validation.branch) ? validation.branch : "master";
     schemaValidationFailures = validation.failures || [];
+    if (validation.schema_directive_missing) {
+      const schemaUrl = `https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/${currentSchemaBranch}/json-schema/config-schema.json`;
+      updated.recommendations.push({
+        id: "live_schema_directive_advice",
+        severity: "advice",
+        title: "Enable config.yml validation in VS Code",
+        message: `Enable config.yml validation in VS Code\nYour config.yml does not include a YAML language-server schema directive, so supported editors cannot provide Kometa-aware validation and available-value suggestions while you edit.\n\nProposed solution: Add this as the first line of your original config.yml:\n\n\`# yaml-language-server: $schema=${schemaUrl}\`\n\nThe downloaded config from Logscan includes this line automatically.`,
+        evidence_lines: [],
+      });
+    }
     if (schemaValidationFailures.length) {
       validation.failures.forEach((failure, index) => updated.recommendations.push({
         id: `live_schema_${index}`,
@@ -871,6 +883,7 @@ async function loadSchemaValidation(data) {
     });
   }
   updated.metadata.counts.schema = updated.recommendations.filter((item) => item.severity === "schema").length;
+  updated.metadata.counts.advice = updated.recommendations.filter((item) => item.severity === "advice").length;
   renderResults(updated, false);
 }
 function renderResults(data, runSchemaValidation = true) {
@@ -883,6 +896,7 @@ function renderResults(data, runSchemaValidation = true) {
   updateRetentionCountdown(data);
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
   currentRecommendations = recommendations;
+  currentSchemaBranch = ["master", "develop", "nightly"].includes(metadata.kometa_branch) ? metadata.kometa_branch : "master";
   currentOverview = overview;
   if (data.expires_at) {
     overview.auto_delete = formatOverviewTimestamp(data.expires_at);
@@ -1140,10 +1154,16 @@ deleteBatch.addEventListener("click", async () => {
   }
   location.assign("/");
 });
+function configForDownload() {
+  if (/^\s*#\s*yaml-language-server:\s*\$schema=/im.test(extractedConfig)) return extractedConfig;
+  const schemaUrl = `https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/${currentSchemaBranch}/json-schema/config-schema.json`;
+  return `# yaml-language-server: $schema=${schemaUrl}\n${extractedConfig}`;
+}
+
 function downloadConfig() {
   if (!extractedConfig) return false;
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([extractedConfig], { type: "text/yaml;charset=utf-8" }));
+  link.href = URL.createObjectURL(new Blob([configForDownload()], { type: "text/yaml;charset=utf-8" }));
   link.download = downloadFilename("config");
   link.click();
   URL.revokeObjectURL(link.href);
@@ -1153,14 +1173,15 @@ function filenamePart(value) {
   return String(value || "").trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "");
 }
 
-function downloadFilename() {
+function downloadFilename(kind = "log") {
   const originalName = currentFile?.name || document.querySelector("#results-title").textContent;
   const name = filenamePart(originalName.replace(/\.[^.]+$/, ""));
   const uploader = filenamePart(currentOverview.uploaded_by);
   const now = new Date();
   const part = (value) => String(value).padStart(2, "0");
   const timestamp = `${now.getFullYear()}${part(now.getMonth() + 1)}${part(now.getDate())}-${part(now.getHours())}${part(now.getMinutes())}${part(now.getSeconds())}`;
-  return [name || "log", ...(uploader ? [uploader] : []), timestamp].join("-") + ".log";
+  const extension = kind === "config" ? ".yml" : ".log";
+  return [name || "log", ...(uploader ? [uploader] : []), timestamp].join("-") + extension;
 }
 
 async function downloadLog() {

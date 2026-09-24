@@ -19,7 +19,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_file, ur
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
-from .recommendations import schema_branch_for_log, validate_redacted_config
+from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 
@@ -1200,7 +1200,11 @@ def create_app() -> Flask:
         except RuntimeError as exc:
             app.logger.warning("Config validation failed: %s", exc)
             return jsonify(error=str(exc)), 502
-        return jsonify(branch=schema_branch_for_log(log_content), failures=failures)
+        return jsonify(
+            branch=schema_branch_for_log(log_content),
+            failures=failures,
+            schema_directive_missing=not has_yaml_language_server_directive(log_content),
+        )
 
     @app.delete("/api/scans/<scan_id>")
     def delete_scan(scan_id):

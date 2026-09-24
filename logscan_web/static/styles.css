@@ -409,7 +409,23 @@ details[open] .chevron { transform: rotate(90deg); }
 .viewer-toolbar select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(114,119,248,.12); }
 .viewer-toolbar select:disabled { cursor: not-allowed; opacity: .55; }
 .primary-button.compact { min-width: auto; width: auto; height: 38px; padding: 0 15px; display: inline-flex; }
-.log-code { overflow: auto; padding: 12px 0 24px; background: #080b16; font: 500 .76rem/1.65 "JetBrains Mono", monospace; tab-size: 4; }
+.log-code {
+  overflow: auto;
+  padding: 12px 0 24px;
+  background: #080b16;
+  font: 500 .76rem/1.65 "JetBrains Mono", monospace;
+  tab-size: 4;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+}
+.log-code .log-line, .log-code .log-line span {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+}
 .log-line { min-width: max-content; display: grid; grid-template-columns: 76px auto; padding-right: 24px; border-left: 2px solid transparent; color: #aeb7d2; white-space: pre; }
 .log-line:hover { background: rgba(255,255,255,.025); }
 .log-line.highlighted { border-left-color: var(--warning); background: rgba(251,191,36,.1); color: #f3f5ff; }
