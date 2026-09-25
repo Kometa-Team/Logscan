@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
+  <title>Active logs · Kometa Support</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260925-2') }}">
+</head>
+<body>
+  {% macro sort_link(key, label) -%}
+    {% set next_direction = 'asc' if sort_key != key or direction == 'desc' else 'desc' %}
+    <a class="support-sort{% if sort_key == key %} active{% endif %}" href="{{ url_for('support.logs', q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=key, direction=next_direction) }}">{{ label }}{% if sort_key == key %}<span aria-hidden="true">{{ '↓' if direction == 'desc' else '↑' }}</span>{% endif %}</a>
+  {%- endmacro %}
+  <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links" aria-label="Support utilities"><a href="/">Log Scanner</a><span class="utility-label">Active Logs</span><span class="support-identity">{% if support_user.avatar %}<img src="{{ support_user.avatar }}" alt="">{% endif %}{{ support_user.username }}</span><form method="post" action="{{ url_for('support.logout') }}"><button class="support-logout" type="submit">Sign out</button></form></nav></header>
+  <main class="support-shell">
+    <section class="support-heading"><div><p class="eyebrow">Support console</p><h1>Active logs</h1><p class="hero-copy">Review every scan currently retained on this server. Logs disappear automatically at their displayed deletion time.</p></div><div class="support-total"><strong>{{ total_logs }}</strong><span>on server</span></div></section>
+
+    <form class="support-filters" method="get">
+      <label class="support-search"><span>Search</span><input type="search" name="q" value="{{ query }}" placeholder="Title, uploader, ID, version, platform…"></label>
+      <label><span>Source</span><select name="source"><option value="all"{% if source_filter == 'all' %} selected{% endif %}>All sources</option><option value="discord"{% if source_filter == 'discord' %} selected{% endif %}>Discord</option><option value="web"{% if source_filter == 'web' %} selected{% endif %}>Web</option></select></label>
+      <label><span>Severity</span><select name="severity"><option value="all"{% if severity_filter == 'all' %} selected{% endif %}>All findings</option>{% for severity in ('critical','error','warning','schema','advice') %}<option value="{{ severity }}"{% if severity_filter == severity %} selected{% endif %}>{{ severity|title }}</option>{% endfor %}<option value="none"{% if severity_filter == 'none' %} selected{% endif %}>No findings</option></select></label>
+      <label><span>Rows</span><select name="page_size">{% for size in (25,50,100) %}<option value="{{ size }}"{% if page_size == size %} selected{% endif %}>{{ size }}</option>{% endfor %}</select></label>
+      <input type="hidden" name="sort" value="{{ sort_key }}"><input type="hidden" name="direction" value="{{ direction }}">
+      <button class="primary-button support-apply" type="submit">Apply</button>
+      <a class="secondary-button support-reset" href="{{ url_for('support.logs') }}">Reset</a>
+    </form>
+
+    <div class="support-results-meta"><span>{{ filtered_logs }} matching log{% if filtered_logs != 1 %}s{% endif %}</span><span>Page {{ page }} of {{ page_count }}</span></div>
+    <div class="support-table-wrap">
+      <table class="support-table">
+        <thead><tr><th>{{ sort_link('title','Title') }}</th><th>{{ sort_link('uploader','Uploaded by') }}</th><th>{{ sort_link('source','Source') }}</th><th>{{ sort_link('created_at','Uploaded') }}</th><th>{{ sort_link('updated_at','Updated') }}</th><th>{{ sort_link('expires_at','Deletes') }}</th><th>{{ sort_link('findings','Findings') }}</th><th>{{ sort_link('version','Kometa') }}</th><th>Environment</th><th>{{ sort_link('lines','Lines') }}</th><th>{{ sort_link('size','Size') }}</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td class="support-title"><a href="{{ url_for('result_page', scan_id=row.id) }}">{{ row.filename }}</a><code>{{ row.id }}</code></td>
+            <td><strong>{{ row.uploader }}</strong>{% if row.uploader_id %}<small>{{ row.uploader_id }}</small>{% endif %}</td>
+            <td><span class="support-source {{ row.source }}">{{ row.source|title }}</span></td>
+            <td><time datetime="{{ row.created_at.isoformat() }}">{{ row.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</time></td>
+            <td><time datetime="{{ row.updated_at.isoformat() }}">{{ row.updated_at.strftime('%Y-%m-%d %H:%M') }} UTC</time></td>
+            <td><time datetime="{{ row.expires_at.isoformat() }}">{{ row.expires_at.strftime('%Y-%m-%d %H:%M') }} UTC</time><small>{% set hours = (row.remaining_seconds // 3600) %}{% set minutes = ((row.remaining_seconds % 3600) // 60) %}in {{ hours }}h {{ minutes }}m</small></td>
+            <td><div class="support-severities">{% for severity in ('critical','error','warning','schema','advice') %}{% if row.counts[severity] %}<span class="severity-chip {{ severity }}" title="{{ severity|title }}">{{ row.counts[severity] }}</span>{% endif %}{% endfor %}{% if not row.finding_count %}<span class="support-none">None</span>{% endif %}</div></td>
+            <td><strong>{{ row.kometa_version }}</strong><small>{{ row.kometa_branch|title }} · {{ row.installation }}</small></td>
+            <td>{{ '{:,}'.format(row.line_count) }}</td>
+            <td>{% if row.size_bytes >= 1048576 %}{{ '%.1f'|format(row.size_bytes / 1048576) }} MB{% else %}{{ '%.1f'|format(row.size_bytes / 1024) }} KB{% endif %}</td>
+            <td class="support-actions"><details class="support-destinations"><summary>Navigate</summary><div class="support-destination-menu"><a href="{{ url_for('result_page', scan_id=row.id) }}#section=overview">Overview</a>{% for severity in ('critical','error','warning','schema','advice') %}{% if row.counts[severity] %}<a href="{{ url_for('result_page', scan_id=row.id) }}#section={{ severity }}">{{ severity|title }} <span>{{ row.counts[severity] }}</span></a>{% endif %}{% endfor %}<a href="{{ url_for('result_page', scan_id=row.id) }}#viewer=config">Configuration</a><a href="{{ url_for('result_page', scan_id=row.id) }}#viewer=log">Raw log</a>{% if row.message_url %}<a href="{{ row.message_url }}" target="_blank" rel="noopener">Discord message</a>{% endif %}</div></details></td>
+          </tr>
+          {% else %}<tr><td class="support-empty" colspan="12">No active logs match these filters.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_count > 1 %}<nav class="pagination" aria-label="Log pages">{% if page > 1 %}<a class="secondary-button" href="{{ url_for('support.logs', q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page-1) }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ page_count }}</span>{% if page < page_count %}<a class="secondary-button" href="{{ url_for('support.logs', q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page+1) }}">Next</a>{% endif %}</nav>{% endif %}
+  </main>
+</body>
+</html>

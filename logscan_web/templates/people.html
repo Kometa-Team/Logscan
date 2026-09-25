@@ -11,7 +11,7 @@
   <script src="{{ url_for('static', filename='people_images.js', v='20260920-7') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20260920-7') }}" defer></script>
 </head>
 <body>
-  <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links" aria-label="Utilities"><a href="/">Log Scanner</a><span class="utility-label">People</span><a href="{{ url_for('analytics_page') }}">Analytics</a></nav></header>
+  <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links" aria-label="Utilities"><a href="/">Log Scanner</a><span class="utility-label">People</span><a href="{{ url_for('analytics_page') }}">Analytics</a><a href="{{ url_for('support.logs') }}">Support</a></nav></header>
   <main class="shell people-shell">
     <section class="hero"><p class="eyebrow">People Posters</p><h1>People</h1><p class="hero-copy">One queue for people discovered in logs and people currently trending across IMDb and TMDb. IMDb StarMeter people appear first, topped up to 250 from TMDb Popular People, with current TMDb profile images and matching Kometa People Images.</p>
       <dl class="usage-stats" aria-label="Service activity since tracking began">

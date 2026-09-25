@@ -1073,6 +1073,21 @@ async function loadSchemaValidation(data) {
   updated.metadata.counts.advice = updated.recommendations.filter((item) => item.severity === "advice").length;
   renderResults(updated, false);
 }
+function applySupportDestination(data, groups, recommendations) {
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const sectionKey = fragment.get("section");
+  const viewer = fragment.get("viewer");
+  const group = groups.find((item) => item.key === sectionKey);
+  if (group && document.querySelector(`#section-select option[value="${group.key}"]`)) {
+    group.key === "overview" ? showOverview(group, data.overview || {}) : showGroup(group, recommendations);
+  }
+  if (viewer === "config" && !logViewer.open) {
+    showConfigInViewer().catch((error) => alert(error.message));
+  } else if (viewer === "log" && !logViewer.open) {
+    openLogViewer(1).catch((error) => alert(error.message));
+  }
+}
+
 function renderResults(data, runSchemaValidation = true) {
   if (data.id && data.id !== currentScanId) currentLogLines = null;
   if (data.id) {
