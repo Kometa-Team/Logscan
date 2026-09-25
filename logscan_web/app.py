@@ -6,6 +6,7 @@ import re
 import secrets
 import threading
 import time
+import unicodedata
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -47,6 +48,13 @@ TMDB_FIND_CACHE_SECONDS = 7 * 24 * 60 * 60
 TMDB_FIND_MAX_WORKERS = 8
 
 
+def _person_name_key(value: str | None) -> str:
+    """Return an accent-insensitive key for matching person image names."""
+    decomposed = unicodedata.normalize("NFKD", value or "")
+    unaccented = "".join(character for character in decomposed if not unicodedata.combining(character))
+    return " ".join(unaccented.casefold().split())
+
+
 def add_missing_people_recommendations(
     result, candidates: list[dict], repository_people: dict[str, str], people_url: str | None = None,
 ) -> None:
@@ -55,7 +63,7 @@ def add_missing_people_recommendations(
     pending = []
     for candidate in candidates:
         name = candidate["name"]
-        (found if name.casefold() in repository_people else pending).append(name)
+        (found if _person_name_key(name) in repository_people else pending).append(name)
 
     def add_advice(identifier: str, title: str, description: str, solution: str) -> None:
         result.recommendations.append(Finding(identifier, "advice", title, description, solution).as_dict())
@@ -90,7 +98,7 @@ def _people_needing_repository_images(candidates: list[dict], repository_people:
     if repository_people is None:
         # Keep the existing reporting path when GitHub is temporarily unavailable.
         return candidates
-    return [candidate for candidate in candidates if candidate["name"].casefold() not in repository_people]
+    return [candidate for candidate in candidates if _person_name_key(candidate["name"]) not in repository_people]
 
 
 def _has_current_tmdb_image(person: dict) -> bool:
@@ -196,7 +204,7 @@ def create_app() -> Flask:
                     app.logger.warning("Unable to fetch the %s people-image README.", label)
                     continue
                 images[label] = {
-                    name.casefold(): url
+                    _person_name_key(name): url
                     for name, url in re.findall(r"^\* \[([^]]+)]\((https://[^)]+)\)$", readme, re.MULTILINE)
                 }
             kometa_images_cache.update(expires_at=time.monotonic() + KOMETA_IMAGE_CACHE_SECONDS, images=images)
@@ -389,11 +397,12 @@ def create_app() -> Flask:
                 title = credit.get("title") or credit.get("name")
                 if media_type in {"movie", "tv"} and credit_id and title:
                     known_for.append({"title": title, "url": f"https://www.themoviedb.org/{media_type}/{credit_id}"})
-            repo_image = kometa_images.get("Kometa Repo Image", {}).get(name.casefold())
+            name_key = _person_name_key(name)
+            repo_image = kometa_images.get("Kometa Repo Image", {}).get(name_key)
             variant_images = [
-                {"label": label, "url": urls[name.casefold()]}
+                {"label": label, "url": urls[name_key]}
                 for label, urls in kometa_images.items()
-                if label != "Kometa Repo Image" and name.casefold() in urls
+                if label != "Kometa Repo Image" and name_key in urls
             ]
             payload.append({
                 "tmdb_id": person_id, "name": name,
@@ -534,7 +543,7 @@ def create_app() -> Flask:
                 name = person.get("name", "Unknown person")
                 if not _has_current_tmdb_image(person):
                     continue
-                missing_image = name.casefold() not in primary_images
+                missing_image = _person_name_key(name) not in primary_images
                 if "trending" not in sources and not missing_image:
                     continue
                 person_sources = {"trending"}
@@ -549,7 +558,7 @@ def create_app() -> Flask:
                 if person.get("name")
             }
             for record in people_store.list():
-                if record.get("name", "").casefold() in primary_images:
+                if _person_name_key(record.get("name")) in primary_images:
                     analytics.record_addressed([record])
                     continue
                 person_id = record.get("tmdb_id")
