@@ -25,7 +25,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
     ],
 }), encoding="utf-8")
 
-from logscan_web.app import add_missing_people_recommendations, app
+from logscan_web.app import add_missing_people_recommendations, app, create_app
 from logscan_web.scanner import (
     MAX_FILE_BYTES,
     extract_missing_people,
@@ -78,6 +78,10 @@ def fake_urlopen(request, timeout=0):
         return Response({"id": 3, "name": "Bob Person", "profile_path": "/bob.jpg", "known_for_department": "Directing"})
     if "/person/5?" in url:
         return Response({"id": 5, "name": "Blocked Person", "profile_path": None, "known_for_department": "Acting"})
+    if "/person/6?" in url:
+        return Response({"id": 6, "name": "Hikaru Kondo", "profile_path": "/hikaru.jpg", "known_for_department": "Acting"})
+    if "/person/7?" in url:
+        return Response({"id": 7, "name": "Hikaru", "profile_path": "/other-hikaru.jpg", "known_for_department": "Acting"})
     raise AssertionError(f"Unexpected URL: {url}")
 
 
@@ -1150,6 +1154,25 @@ class PeopleUnionTests(unittest.TestCase):
         completed = next(person for person in self.request_people() if person["name"] == "Completed Person")
         self.assertEqual(completed["sources"], ["trending"])
         self.assertEqual(completed["kometa_image"], "https://example.test/completed.jpg")
+
+    def test_repository_image_reconciliation_ignores_accents_but_not_partial_names(self):
+        Path(STORE.name, "people.json").write_text(json.dumps([
+            {"key": "tmdb-6", "tmdb_id": 6, "name": "Hikaru Kondo", "log_url": "/scan/hikaru"},
+            {"key": "tmdb-7", "tmdb_id": 7, "name": "Hikaru", "log_url": "/scan/other-hikaru"},
+        ]), encoding="utf-8")
+
+        def accented_urlopen(request, timeout=0):
+            if "People-Images/refs" in request.full_url:
+                return Response("* [Hikaru Kondô](https://example.test/hikaru.jpg)\n", "text/plain")
+            return fake_urlopen(request, timeout)
+
+        with patch("logscan_web.app.urlopen", side_effect=accented_urlopen):
+            response = create_app().test_client().get("/api/people", query_string={"sources": "missing,trending"})
+        self.assertEqual(response.status_code, 200)
+        people = response.get_json()["people"]
+        self.assertNotIn(6, [person["tmdb_id"] for person in people])
+        partial = next(person for person in people if person["tmdb_id"] == 7)
+        self.assertIn("missing", partial["sources"])
 
     def test_export_uses_the_same_filtered_union(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
