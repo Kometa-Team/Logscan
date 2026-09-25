@@ -1258,6 +1258,12 @@ def create_app() -> Flask:
             return jsonify(error="The requested resource was not found."), 404
         return render_template("404.html"), 404
 
+    @app.errorhandler(503)
+    def service_unavailable(error):
+        if request.path.startswith("/api/"):
+            return jsonify(error=getattr(error, "description", "The service is unavailable.")), 503
+        return render_template("503.html"), 503
+
     @app.errorhandler(500)
     def internal_server_error(error):
         update_scan_job(

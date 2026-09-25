@@ -1277,6 +1277,32 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(response.mimetype, "application/json")
         self.assertNotIn("private failure detail", response.get_data(as_text=True))
 
+    def test_unconfigured_support_console_uses_themed_503_page(self):
+        keys = (
+            "DISCORD_CLIENT_ID",
+            "DISCORD_CLIENT_SECRET",
+            "DISCORD_GUILD_ID",
+            "DISCORD_SUPPORT_ROLE_IDS",
+            "LOGSCAN_SECRET_KEY",
+        )
+        previous = {key: app.config.get(key) for key in keys}
+        try:
+            app.config.update({
+                "DISCORD_CLIENT_ID": "",
+                "DISCORD_CLIENT_SECRET": "",
+                "DISCORD_GUILD_ID": "",
+                "DISCORD_SUPPORT_ROLE_IDS": set(),
+                "LOGSCAN_SECRET_KEY": "",
+            })
+            response = self.client.get("/support/logs")
+        finally:
+            app.config.update(previous)
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Kometa Utilities", html)
+        self.assertIn("Discord access needs to be configured", html)
+        self.assertNotIn("<h1>Service Unavailable</h1>", html)
+
     def test_old_beta_routes_are_removed(self):
         self.assertEqual(self.client.get("/people/popular").status_code, 404)
         self.assertEqual(self.client.get("/people/tmdb-1").status_code, 404)

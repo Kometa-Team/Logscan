@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
+  <title>Support Setup Required - Kometa Utilities</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260925-3') }}">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="site-header"><a class="brand" href="/" aria-label="Kometa Utilities home"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links" aria-label="Utilities"><a href="/">Log Scanner</a><a href="{{ url_for('people_page') }}">People</a><a href="{{ url_for('analytics_page') }}">Analytics</a><span class="utility-label">Support</span></nav></header>
+  <main class="shell error-page">
+    <section class="error-card">
+      <p class="eyebrow">Support console</p>
+      <h2>Discord access needs to be configured.</h2>
+      <p>The support log inventory is installed, but an administrator still needs to connect the Kometa Discord server and choose which support roles may sign in. No scan information is exposed until that setup is complete.</p>
+      <a class="primary-button error-page-action" href="/"><span>Go to Log Scanner</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+    </section>
+  </main>
+</body>
+</html>
