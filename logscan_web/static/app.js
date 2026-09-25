@@ -1442,10 +1442,10 @@ nextHighlight.addEventListener("click", goToNextHighlightedLine);
 sectionJump.addEventListener("change", () => {
   if (!sectionJump.value) return;
   const targetLine = Number(sectionJump.value);
+  viewerNavigationLines = null;
   if (viewerMode === "config") showConfigInViewer(targetLine).catch((error) => alert(error.message));
   else renderLogWindow(targetLine, targetLine);
 });
-  viewerNavigationLines = null;
 logViewer.addEventListener("click", (event) => {
   if (event.target === logViewer) logViewer.close();
 });
