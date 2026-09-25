@@ -679,7 +679,6 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("schemaIssueRecommendations(updated.recommendations).length", script)
         self.assertNotIn('id: "live_schema_passed"', script)
 
-
     def test_yaml_schema_directive_detection_uses_extracted_config(self):
         prefix = "[config.py:1] [INFO] |"
         without_directive = "\n".join([
