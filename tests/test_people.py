@@ -661,10 +661,28 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Review issues in config", script)
         self.assertIn("Longest section run times", script)
         self.assertIn('["100", "Top 100"]', script)
-        self.assertIn('["all", "All"]', script)
+        self.assertIn('["all", `All (', script)
+        self.assertIn('document.createElement("details")', script)
+        self.assertIn('rank.textContent = `${index + 1} of ${sectionRunTimes.length}`', script)
+        self.assertIn("async function openRuntimeLine", script)
+        self.assertIn("block.includes(duration)", script)
+        self.assertEqual(template.count('class="secondary-button compact"'), 2)
+        self.assertIn("viewerNavigationLines", script)
+        self.assertIn("runtimeTargetLine", script)
+        self.assertIn("openRuntimeLine(runtime, visibleRunTimes)", script)
+        self.assertIn('runtimeContext ? "ranked section" : "highlighted line"', script)
+        self.assertIn("viewerNavigationLines.indexOf(highlightedRange.start)", script)
         self.assertIn("Jump to schema issue", script)
         self.assertIn("schemaRecommendationsForConfigLine", script)
         self.assertIn('"schema-validation-line"', script)
+
+    def test_schema_issue_counts_use_one_canonical_collection(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn("function schemaIssueRecommendations", script)
+        self.assertIn("const schemaIssueCount = schemaIssueRecommendations().length", script)
+        self.assertIn("schemaIssueRecommendations(updated.recommendations).length", script)
+        self.assertNotIn('id: "live_schema_passed"', script)
 
     def test_yaml_schema_directive_detection_uses_extracted_config(self):
         prefix = "[config.py:1] [INFO] |"

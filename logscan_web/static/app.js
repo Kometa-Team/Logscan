@@ -37,6 +37,7 @@ let deleteToken = null;
 let currentLogLines = null;
 let currentLogSections = [];
 let highlightedRange = { start: 1, end: 1 };
+let viewerNavigationLines = null;
 let viewerFirstLine = 1;
 let viewerLastLine = 1;
 let loadingViewerChunk = false;
@@ -162,45 +163,66 @@ function showOverview(group, overview) {
   sectionContent.append(grid);
   const sectionRunTimes = overview.section_run_times || [];
   if (sectionRunTimes.length) {
-    const runtimeSection = document.createElement("section");
+    const runtimeSection = document.createElement("details");
     runtimeSection.className = "runtime-summary";
+    const runtimeSummary = document.createElement("summary");
+    const runtimeSummaryTitle = document.createElement("span");
+    runtimeSummaryTitle.textContent = "Longest section run times";
+    const runtimeSummaryCount = document.createElement("span");
+    runtimeSummaryCount.className = "runtime-summary-count";
+    runtimeSummaryCount.textContent = `${sectionRunTimes.length.toLocaleString()} section${sectionRunTimes.length === 1 ? "" : "s"}`;
+    const runtimeChevron = document.createElement("span");
+    runtimeChevron.className = "chevron";
+    runtimeChevron.textContent = "\u203a";
+    runtimeSummary.append(runtimeSummaryTitle, runtimeSummaryCount, runtimeChevron);
+    const runtimeBody = document.createElement("div");
+    runtimeBody.className = "runtime-summary-body";
     const runtimeHeader = document.createElement("div");
     runtimeHeader.className = "runtime-summary-header";
-    const runtimeTitle = document.createElement("h4");
-    runtimeTitle.textContent = "Longest section run times";
+    const runtimeLabel = document.createElement("label");
+    runtimeLabel.htmlFor = "runtime-limit";
+    runtimeLabel.textContent = "Show";
     const runtimeLimit = document.createElement("select");
+    runtimeLimit.id = "runtime-limit";
     runtimeLimit.setAttribute("aria-label", "Number of section run times to show");
-    [["10", "Top 10"], ["25", "Top 25"], ["100", "Top 100"], ["all", "All"]].forEach(([value, label]) => {
+    [["10", "Top 10"], ["25", "Top 25"], ["100", "Top 100"], ["all", `All (${sectionRunTimes.length.toLocaleString()})`]].forEach(([value, label]) => {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
       runtimeLimit.append(option);
     });
-    runtimeHeader.append(runtimeTitle, runtimeLimit);
+    runtimeHeader.append(runtimeLabel, runtimeLimit);
     const runtimeNote = document.createElement("p");
-    runtimeNote.textContent = "Sorted by duration. Sections with a run time of zero are excluded.";
+    runtimeNote.setAttribute("aria-live", "polite");
     const runtimeList = document.createElement("ol");
     runtimeList.className = "runtime-list";
     const renderRunTimes = () => {
       const limit = runtimeLimit.value === "all" ? sectionRunTimes.length : Number(runtimeLimit.value);
       runtimeList.replaceChildren();
-      sectionRunTimes.slice(0, limit).forEach((runtime) => {
+      const visibleRunTimes = sectionRunTimes.slice(0, limit);
+      visibleRunTimes.forEach((runtime, index) => {
         const row = document.createElement("li");
+        const rank = document.createElement("span");
+        rank.className = "runtime-rank";
+        rank.textContent = `${index + 1} of ${sectionRunTimes.length}`;
         const link = document.createElement("button");
         link.type = "button";
         link.className = "runtime-line-link";
         link.textContent = runtime.name;
         link.title = `View ${runtime.name} in the log`;
-        link.addEventListener("click", () => openLogViewer(Number(runtime.line) || 1));
+        link.addEventListener("click", () => openRuntimeLine(runtime, visibleRunTimes));
         const duration = document.createElement("span");
+        duration.className = "runtime-duration";
         duration.textContent = runtime.duration;
-        row.append(link, duration);
+        row.append(rank, link, duration);
         runtimeList.append(row);
       });
+      runtimeNote.textContent = `Showing ${Math.min(limit, sectionRunTimes.length).toLocaleString()} of ${sectionRunTimes.length.toLocaleString()} sections, sorted by duration. Zero-second sections are excluded.`;
     };
     runtimeLimit.addEventListener("change", renderRunTimes);
     renderRunTimes();
-    runtimeSection.append(runtimeHeader, runtimeNote, runtimeList);
+    runtimeBody.append(runtimeHeader, runtimeNote, runtimeList);
+    runtimeSection.append(runtimeSummary, runtimeBody);
     sectionContent.append(runtimeSection);
   }
   const plexConfigurations = overview.plex_configurations || [];
@@ -560,6 +582,7 @@ function updateViewerMode(mode) {
 }
 
 async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
+  viewerNavigationLines = null;
   const lines = await loadLogLines();
   extractedConfig = extractConfig(lines);
   updateViewerMode("config");
@@ -570,7 +593,8 @@ async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
   );
   logCode.scrollTop = 0;
   const configLineCount = extractedConfig ? extractedConfig.split("\n").length : 0;
-  viewerPosition.textContent = `${configLineCount.toLocaleString()} config line${configLineCount === 1 ? "" : "s"} | ${schemaValidationFailures.length.toLocaleString()} schema issue${schemaValidationFailures.length === 1 ? "" : "s"}`;
+  const schemaIssueCount = schemaIssueRecommendations().length;
+  viewerPosition.textContent = `${configLineCount.toLocaleString()} config line${configLineCount === 1 ? "" : "s"} | ${schemaIssueCount.toLocaleString()} schema issue${schemaIssueCount === 1 ? "" : "s"}`;
   updateHighlightNavigationControls();
   if (targetStart) {
     highlightedRange = { start: targetStart, end: targetEnd };
@@ -595,7 +619,9 @@ function populateSectionJump() {
 
 function populateSchemaIssueJump() {
   sectionJump.replaceChildren();
-  const failures = [...schemaValidationFailures].sort((left, right) => left.config_line - right.config_line);
+  const failures = schemaIssueRecommendations()
+    .filter((item) => Number(item.config_line) > 0)
+    .sort((left, right) => Number(left.config_line) - Number(right.config_line));
   const placeholder = document.createElement("option");
   placeholder.value = "";
   placeholder.textContent = failures.length ? "Select a schema issue" : "No schema issues found";
@@ -610,7 +636,12 @@ function populateSchemaIssueJump() {
 }
 
 function schemaRecommendationsForConfigLine(lineNumber) {
-  return currentRecommendations.filter((item) => item.severity === "schema" && item.config_line === lineNumber);
+  return schemaIssueRecommendations().filter((item) => Number(item.config_line) === lineNumber);
+}
+
+function schemaIssueRecommendations(recommendations = currentRecommendations) {
+  return recommendations.filter((item) => item.severity === "schema"
+    && !["live_schema_passed", "live_schema_unavailable"].includes(item.id));
 }
 
 function createLogRows(first, last) {
@@ -662,8 +693,9 @@ function recommendationsForLine(lineNumber) {
 }
 
 function highlightedLineNumbers() {
+  if (viewerMode === "log" && viewerNavigationLines?.length) return viewerNavigationLines;
   if (viewerMode === "config") {
-    return [...new Set(schemaValidationFailures.map((failure) => failure.config_line))]
+    return [...new Set(schemaIssueRecommendations().map((item) => Number(item.config_line)))]
       .filter((lineNumber) => Number.isInteger(lineNumber) && lineNumber >= 1)
       .sort((left, right) => left - right);
   }
@@ -679,17 +711,28 @@ function highlightedLineNumbers() {
 }
 
 function updateHighlightNavigationControls() {
+  const runtimeContext = viewerMode === "log" && viewerNavigationLines?.length;
   const hasHighlights = currentLogLines && highlightedLineNumbers().length > 0;
   previousHighlight.disabled = !hasHighlights;
   nextHighlight.disabled = !hasHighlights;
-  previousHighlight.title = hasHighlights ? "Go to the previous highlighted line" : "No lines match this highlight mode";
-  nextHighlight.title = hasHighlights ? "Go to the next highlighted line" : "No lines match this highlight mode";
+  previousHighlight.title = hasHighlights
+    ? `Go to the previous ${runtimeContext ? "ranked section" : "highlighted line"}` : "No lines match this highlight mode";
+  nextHighlight.title = hasHighlights
+    ? `Go to the next ${runtimeContext ? "ranked section" : "highlighted line"}` : "No lines match this highlight mode";
 }
 
 function goToHighlightedLine(direction) {
   if (!currentLogLines) return;
   const lines = highlightedLineNumbers();
   if (!lines.length) return;
+  if (viewerMode === "log" && viewerNavigationLines?.length) {
+    const currentIndex = viewerNavigationLines.indexOf(highlightedRange.start);
+    const offset = direction === "previous" ? -1 : 1;
+    const fallbackIndex = direction === "previous" ? 0 : -1;
+    const targetIndex = (Math.max(currentIndex, fallbackIndex) + offset + lines.length) % lines.length;
+    renderLogWindow(lines[targetIndex]);
+    return;
+  }
   const targetLine = direction === "previous"
     ? [...lines].reverse().find((lineNumber) => lineNumber < highlightedRange.start) || lines.at(-1)
     : lines.find((lineNumber) => lineNumber > highlightedRange.start) || lines[0];
@@ -777,7 +820,47 @@ async function openLogViewer(targetStart = 1, targetEnd = targetStart) {
     await loadLogLines();
     if (!logViewer.open) logViewer.showModal();
     updateViewerMode("log");
+    viewerNavigationLines = null;
     renderLogWindow(targetStart, targetEnd);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+function runtimeTargetLine(lines, runtime) {
+  if (!lines.length) return 1;
+  const recordedIndex = Math.max(0, Math.min(lines.length - 1, Number(runtime.line || 1) - 1));
+  const name = `${runtime.name || ""}`.trim().toLocaleLowerCase();
+  const duration = `${runtime.duration || ""}`.trim().toLocaleLowerCase();
+  const candidates = [];
+  lines.forEach((line, index) => {
+    const current = line.toLocaleLowerCase();
+    if (!current.includes("finished") || !current.includes(name)) return;
+    const block = `${line}\n${lines[index + 1] || ""}`.toLocaleLowerCase();
+    if (!duration || block.includes(duration)) candidates.push(index);
+  });
+  if (!candidates.length) {
+    lines.forEach((line, index) => {
+      const current = line.toLocaleLowerCase();
+      if (current.includes("finished") && current.includes(name)) candidates.push(index);
+    });
+  }
+  const targetIndex = candidates.length
+    ? candidates.reduce((closest, candidate) => (
+      Math.abs(candidate - recordedIndex) < Math.abs(closest - recordedIndex) ? candidate : closest
+    ), candidates[0])
+    : recordedIndex;
+  return targetIndex + 1;
+}
+
+async function openRuntimeLine(runtime, rankedRunTimes = [runtime]) {
+  try {
+    const lines = await loadLogLines();
+    viewerNavigationLines = [...new Set(rankedRunTimes.map((item) => runtimeTargetLine(lines, item)))];
+    const targetLine = runtimeTargetLine(lines, runtime);
+    if (!logViewer.open) logViewer.showModal();
+    updateViewerMode("log");
+    renderLogWindow(targetLine);
   } catch (error) {
     alert(error.message);
   }
@@ -799,8 +882,9 @@ function showGroup(group, recommendations) {
   header.append(title, copy);
   sectionContent.append(header);
 
-  const matches = recommendations
-    .filter((item) => item.severity === group.key)
+  const matches = (group.key === "schema"
+    ? schemaIssueRecommendations(recommendations)
+    : recommendations.filter((item) => item.severity === group.key))
     .sort((left, right) => {
       const summaryIds = ["kometa_critical", "kometa_error", "kometa_warning"];
       const leftPriority = summaryIds.indexOf(left.id);
@@ -975,14 +1059,6 @@ async function loadSchemaValidation(data) {
         config_column: failure.config_column,
         config_end_column: failure.config_end_column,
       }));
-    } else {
-      updated.recommendations.push({
-        id: "live_schema_passed",
-        severity: "schema",
-        title: "Config passed JSON Schema validation",
-        message: `The extracted config.yml passed the Kometa ${validation.branch} schema.`,
-        evidence_lines: [],
-      });
     }
   } catch (error) {
     updated.recommendations.push({
@@ -993,7 +1069,7 @@ async function loadSchemaValidation(data) {
       evidence_lines: [],
     });
   }
-  updated.metadata.counts.schema = updated.recommendations.filter((item) => item.severity === "schema").length;
+  updated.metadata.counts.schema = schemaIssueRecommendations(updated.recommendations).length;
   updated.metadata.counts.advice = updated.recommendations.filter((item) => item.severity === "advice").length;
   renderResults(updated, false);
 }
@@ -1028,7 +1104,9 @@ function renderResults(data, runSchemaValidation = true) {
   sectionSelect.className = "section-select";
   sectionSelect.setAttribute("aria-label", "View a log section");
   groups.forEach((group) => {
-    const recommendationCount = recommendations.filter((item) => item.severity === group.key).length;
+    const recommendationCount = group.key === "schema"
+      ? schemaIssueRecommendations(recommendations).length
+      : recommendations.filter((item) => item.severity === group.key).length;
     if (group.key !== "overview" && recommendationCount === 0) return;
     const option = document.createElement("option");
     option.value = group.key;
@@ -1354,13 +1432,17 @@ window.addEventListener("hashchange", () => {
 });
 document.querySelector("#close-viewer").addEventListener("click", () => logViewer.close());
 highlightMode.addEventListener("change", () => {
-  if (currentLogLines && viewerMode === "log") renderLogWindow(highlightedRange.start);
+  if (currentLogLines && viewerMode === "log") {
+    viewerNavigationLines = null;
+    renderLogWindow(highlightedRange.start);
+  }
 });
 previousHighlight.addEventListener("click", goToPreviousHighlightedLine);
 nextHighlight.addEventListener("click", goToNextHighlightedLine);
 sectionJump.addEventListener("change", () => {
   if (!sectionJump.value) return;
   const targetLine = Number(sectionJump.value);
+  viewerNavigationLines = null;
   if (viewerMode === "config") showConfigInViewer(targetLine).catch((error) => alert(error.message));
   else renderLogWindow(targetLine, targetLine);
 });
