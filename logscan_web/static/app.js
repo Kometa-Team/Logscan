@@ -37,6 +37,7 @@ let deleteToken = null;
 let currentLogLines = null;
 let currentLogSections = [];
 let highlightedRange = { start: 1, end: 1 };
+let viewerNavigationLines = null;
 let viewerFirstLine = 1;
 let viewerLastLine = 1;
 let loadingViewerChunk = false;
@@ -198,7 +199,8 @@ function showOverview(group, overview) {
     const renderRunTimes = () => {
       const limit = runtimeLimit.value === "all" ? sectionRunTimes.length : Number(runtimeLimit.value);
       runtimeList.replaceChildren();
-      sectionRunTimes.slice(0, limit).forEach((runtime, index) => {
+      const visibleRunTimes = sectionRunTimes.slice(0, limit);
+      visibleRunTimes.forEach((runtime, index) => {
         const row = document.createElement("li");
         const rank = document.createElement("span");
         rank.className = "runtime-rank";
@@ -208,7 +210,7 @@ function showOverview(group, overview) {
         link.className = "runtime-line-link";
         link.textContent = runtime.name;
         link.title = `View ${runtime.name} in the log`;
-        link.addEventListener("click", () => openRuntimeLine(runtime));
+        link.addEventListener("click", () => openRuntimeLine(runtime, visibleRunTimes));
         const duration = document.createElement("span");
         duration.className = "runtime-duration";
         duration.textContent = runtime.duration;
@@ -580,6 +582,7 @@ function updateViewerMode(mode) {
 }
 
 async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
+  viewerNavigationLines = null;
   const lines = await loadLogLines();
   extractedConfig = extractConfig(lines);
   updateViewerMode("config");
@@ -690,6 +693,7 @@ function recommendationsForLine(lineNumber) {
 }
 
 function highlightedLineNumbers() {
+  if (viewerMode === "log" && viewerNavigationLines?.length) return viewerNavigationLines;
   if (viewerMode === "config") {
     return [...new Set(schemaIssueRecommendations().map((item) => Number(item.config_line)))]
       .filter((lineNumber) => Number.isInteger(lineNumber) && lineNumber >= 1)
@@ -707,17 +711,28 @@ function highlightedLineNumbers() {
 }
 
 function updateHighlightNavigationControls() {
+  const runtimeContext = viewerMode === "log" && viewerNavigationLines?.length;
   const hasHighlights = currentLogLines && highlightedLineNumbers().length > 0;
   previousHighlight.disabled = !hasHighlights;
   nextHighlight.disabled = !hasHighlights;
-  previousHighlight.title = hasHighlights ? "Go to the previous highlighted line" : "No lines match this highlight mode";
-  nextHighlight.title = hasHighlights ? "Go to the next highlighted line" : "No lines match this highlight mode";
+  previousHighlight.title = hasHighlights
+    ? `Go to the previous ${runtimeContext ? "ranked section" : "highlighted line"}` : "No lines match this highlight mode";
+  nextHighlight.title = hasHighlights
+    ? `Go to the next ${runtimeContext ? "ranked section" : "highlighted line"}` : "No lines match this highlight mode";
 }
 
 function goToHighlightedLine(direction) {
   if (!currentLogLines) return;
   const lines = highlightedLineNumbers();
   if (!lines.length) return;
+  if (viewerMode === "log" && viewerNavigationLines?.length) {
+    const currentIndex = viewerNavigationLines.indexOf(highlightedRange.start);
+    const offset = direction === "previous" ? -1 : 1;
+    const fallbackIndex = direction === "previous" ? 0 : -1;
+    const targetIndex = (Math.max(currentIndex, fallbackIndex) + offset + lines.length) % lines.length;
+    renderLogWindow(lines[targetIndex]);
+    return;
+  }
   const targetLine = direction === "previous"
     ? [...lines].reverse().find((lineNumber) => lineNumber < highlightedRange.start) || lines.at(-1)
     : lines.find((lineNumber) => lineNumber > highlightedRange.start) || lines[0];
@@ -805,39 +820,47 @@ async function openLogViewer(targetStart = 1, targetEnd = targetStart) {
     await loadLogLines();
     if (!logViewer.open) logViewer.showModal();
     updateViewerMode("log");
+    viewerNavigationLines = null;
     renderLogWindow(targetStart, targetEnd);
   } catch (error) {
     alert(error.message);
   }
 }
 
-async function openRuntimeLine(runtime) {
-  try {
-    const lines = await loadLogLines();
-    const recordedIndex = Math.max(0, Math.min(lines.length - 1, Number(runtime.line || 1) - 1));
-    const name = `${runtime.name || ""}`.trim().toLocaleLowerCase();
-    const duration = `${runtime.duration || ""}`.trim().toLocaleLowerCase();
-    const candidates = [];
+function runtimeTargetLine(lines, runtime) {
+  if (!lines.length) return 1;
+  const recordedIndex = Math.max(0, Math.min(lines.length - 1, Number(runtime.line || 1) - 1));
+  const name = `${runtime.name || ""}`.trim().toLocaleLowerCase();
+  const duration = `${runtime.duration || ""}`.trim().toLocaleLowerCase();
+  const candidates = [];
+  lines.forEach((line, index) => {
+    const current = line.toLocaleLowerCase();
+    if (!current.includes("finished") || !current.includes(name)) return;
+    const block = `${line}\n${lines[index + 1] || ""}`.toLocaleLowerCase();
+    if (!duration || block.includes(duration)) candidates.push(index);
+  });
+  if (!candidates.length) {
     lines.forEach((line, index) => {
       const current = line.toLocaleLowerCase();
-      if (!current.includes("finished") || !current.includes(name)) return;
-      const block = `${line}\n${lines[index + 1] || ""}`.toLocaleLowerCase();
-      if (!duration || block.includes(duration)) candidates.push(index);
+      if (current.includes("finished") && current.includes(name)) candidates.push(index);
     });
-    if (!candidates.length) {
-      lines.forEach((line, index) => {
-        const current = line.toLocaleLowerCase();
-        if (current.includes("finished") && current.includes(name)) candidates.push(index);
-      });
-    }
-    const targetIndex = candidates.length
-      ? candidates.reduce((closest, candidate) => (
-        Math.abs(candidate - recordedIndex) < Math.abs(closest - recordedIndex) ? candidate : closest
-      ), candidates[0])
-      : recordedIndex;
+  }
+  const targetIndex = candidates.length
+    ? candidates.reduce((closest, candidate) => (
+      Math.abs(candidate - recordedIndex) < Math.abs(closest - recordedIndex) ? candidate : closest
+    ), candidates[0])
+    : recordedIndex;
+  return targetIndex + 1;
+}
+
+async function openRuntimeLine(runtime, rankedRunTimes = [runtime]) {
+  try {
+    const lines = await loadLogLines();
+    viewerNavigationLines = [...new Set(rankedRunTimes.map((item) => runtimeTargetLine(lines, item)))];
+    const targetLine = runtimeTargetLine(lines, runtime);
     if (!logViewer.open) logViewer.showModal();
     updateViewerMode("log");
-    renderLogWindow(targetIndex + 1);
+    renderLogWindow(targetLine);
   } catch (error) {
     alert(error.message);
   }
@@ -1409,7 +1432,10 @@ window.addEventListener("hashchange", () => {
 });
 document.querySelector("#close-viewer").addEventListener("click", () => logViewer.close());
 highlightMode.addEventListener("change", () => {
-  if (currentLogLines && viewerMode === "log") renderLogWindow(highlightedRange.start);
+  if (currentLogLines && viewerMode === "log") {
+    viewerNavigationLines = null;
+    renderLogWindow(highlightedRange.start);
+  }
 });
 previousHighlight.addEventListener("click", goToPreviousHighlightedLine);
 nextHighlight.addEventListener("click", goToNextHighlightedLine);
@@ -1419,6 +1445,7 @@ sectionJump.addEventListener("change", () => {
   if (viewerMode === "config") showConfigInViewer(targetLine).catch((error) => alert(error.message));
   else renderLogWindow(targetLine, targetLine);
 });
+  viewerNavigationLines = null;
 logViewer.addEventListener("click", (event) => {
   if (event.target === logViewer) logViewer.close();
 });
