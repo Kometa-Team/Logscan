@@ -590,7 +590,8 @@ async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
   );
   logCode.scrollTop = 0;
   const configLineCount = extractedConfig ? extractedConfig.split("\n").length : 0;
-  viewerPosition.textContent = `${configLineCount.toLocaleString()} config line${configLineCount === 1 ? "" : "s"} | ${schemaValidationFailures.length.toLocaleString()} schema issue${schemaValidationFailures.length === 1 ? "" : "s"}`;
+  const schemaIssueCount = schemaIssueRecommendations().length;
+  viewerPosition.textContent = `${configLineCount.toLocaleString()} config line${configLineCount === 1 ? "" : "s"} | ${schemaIssueCount.toLocaleString()} schema issue${schemaIssueCount === 1 ? "" : "s"}`;
   updateHighlightNavigationControls();
   if (targetStart) {
     highlightedRange = { start: targetStart, end: targetEnd };
@@ -615,7 +616,9 @@ function populateSectionJump() {
 
 function populateSchemaIssueJump() {
   sectionJump.replaceChildren();
-  const failures = [...schemaValidationFailures].sort((left, right) => left.config_line - right.config_line);
+  const failures = schemaIssueRecommendations()
+    .filter((item) => Number(item.config_line) > 0)
+    .sort((left, right) => Number(left.config_line) - Number(right.config_line));
   const placeholder = document.createElement("option");
   placeholder.value = "";
   placeholder.textContent = failures.length ? "Select a schema issue" : "No schema issues found";
@@ -630,7 +633,12 @@ function populateSchemaIssueJump() {
 }
 
 function schemaRecommendationsForConfigLine(lineNumber) {
-  return currentRecommendations.filter((item) => item.severity === "schema" && item.config_line === lineNumber);
+  return schemaIssueRecommendations().filter((item) => Number(item.config_line) === lineNumber);
+}
+
+function schemaIssueRecommendations(recommendations = currentRecommendations) {
+  return recommendations.filter((item) => item.severity === "schema"
+    && !["live_schema_passed", "live_schema_unavailable"].includes(item.id));
 }
 
 function createLogRows(first, last) {
@@ -683,7 +691,7 @@ function recommendationsForLine(lineNumber) {
 
 function highlightedLineNumbers() {
   if (viewerMode === "config") {
-    return [...new Set(schemaValidationFailures.map((failure) => failure.config_line))]
+    return [...new Set(schemaIssueRecommendations().map((item) => Number(item.config_line)))]
       .filter((lineNumber) => Number.isInteger(lineNumber) && lineNumber >= 1)
       .sort((left, right) => left - right);
   }
@@ -851,8 +859,9 @@ function showGroup(group, recommendations) {
   header.append(title, copy);
   sectionContent.append(header);
 
-  const matches = recommendations
-    .filter((item) => item.severity === group.key)
+  const matches = (group.key === "schema"
+    ? schemaIssueRecommendations(recommendations)
+    : recommendations.filter((item) => item.severity === group.key))
     .sort((left, right) => {
       const summaryIds = ["kometa_critical", "kometa_error", "kometa_warning"];
       const leftPriority = summaryIds.indexOf(left.id);
@@ -1027,14 +1036,6 @@ async function loadSchemaValidation(data) {
         config_column: failure.config_column,
         config_end_column: failure.config_end_column,
       }));
-    } else {
-      updated.recommendations.push({
-        id: "live_schema_passed",
-        severity: "schema",
-        title: "Config passed JSON Schema validation",
-        message: `The extracted config.yml passed the Kometa ${validation.branch} schema.`,
-        evidence_lines: [],
-      });
     }
   } catch (error) {
     updated.recommendations.push({
@@ -1045,7 +1046,7 @@ async function loadSchemaValidation(data) {
       evidence_lines: [],
     });
   }
-  updated.metadata.counts.schema = updated.recommendations.filter((item) => item.severity === "schema").length;
+  updated.metadata.counts.schema = schemaIssueRecommendations(updated.recommendations).length;
   updated.metadata.counts.advice = updated.recommendations.filter((item) => item.severity === "advice").length;
   renderResults(updated, false);
 }
@@ -1080,7 +1081,9 @@ function renderResults(data, runSchemaValidation = true) {
   sectionSelect.className = "section-select";
   sectionSelect.setAttribute("aria-label", "View a log section");
   groups.forEach((group) => {
-    const recommendationCount = recommendations.filter((item) => item.severity === group.key).length;
+    const recommendationCount = group.key === "schema"
+      ? schemaIssueRecommendations(recommendations).length
+      : recommendations.filter((item) => item.severity === group.key).length;
     if (group.key !== "overview" && recommendationCount === 0) return;
     const option = document.createElement("option");
     option.value = group.key;
