@@ -23,6 +23,7 @@ from .models import Finding
 from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
+from .support import create_support_blueprint
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
@@ -129,6 +130,22 @@ def create_app() -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_BYTES + (1024 * 1024)
     app.config["SCAN_STORE"] = os.environ.get("SCAN_STORE", "/data/scans")
     app.config["LOGSCAN_API_KEY"] = os.environ.get("LOGSCAN_API_KEY", "")
+    app.config["DISCORD_CLIENT_ID"] = os.environ.get("DISCORD_CLIENT_ID", "")
+    app.config["DISCORD_CLIENT_SECRET"] = os.environ.get("DISCORD_CLIENT_SECRET", "")
+    app.config["DISCORD_GUILD_ID"] = os.environ.get("DISCORD_GUILD_ID", "")
+    app.config["DISCORD_SUPPORT_ROLE_IDS"] = {
+        role.strip()
+        for role in os.environ.get("DISCORD_SUPPORT_ROLE_IDS", "").split(",")
+        if role.strip()
+    }
+    app.config["DISCORD_REDIRECT_URI"] = os.environ.get(
+        "DISCORD_REDIRECT_URI", "http://127.0.0.1:5000/support/callback"
+    )
+    app.config["LOGSCAN_SECRET_KEY"] = os.environ.get("LOGSCAN_SECRET_KEY", "")
+    app.secret_key = app.config["LOGSCAN_SECRET_KEY"] or secrets.token_bytes(32)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = os.environ.get("LOGSCAN_SECURE_COOKIES", "false").casefold() in {"1", "true", "yes"}
     app.config["TMDB_API_KEY"] = os.environ.get("TMDB_API_KEY", "")
     app.config["DISCORD_PEOPLE_WEBHOOK_URL"] = os.environ.get("DISCORD_PEOPLE_WEBHOOK_URL", "")
     app.config["PEOPLE_ACTIONS_ENABLED"] = os.environ.get("PEOPLE_ACTIONS_ENABLED", "false").casefold() in {"1", "true", "yes"}
@@ -144,6 +161,7 @@ def create_app() -> Flask:
     popular_people_flags = PopularPeopleFlagStore(app.config["SCAN_STORE"])
     popular_people_store = PopularPeopleCacheStore(app.config["SCAN_STORE"])
     tmdb_find_cache = TMDbFindCacheStore(app.config["SCAN_STORE"])
+    app.register_blueprint(create_support_blueprint(store, RETENTION_SECONDS))
     kometa_images_cache = {"expires_at": 0.0, "images": {}}
     kometa_images_lock = threading.Lock()
     popular_people_cache = {"expires_at": 0.0, "snapshot_id": "", "people": []}

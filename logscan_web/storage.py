@@ -81,6 +81,23 @@ class ScanStore:
         except (FileNotFoundError, json.JSONDecodeError):
             return None
 
+    def list(self) -> list[dict]:
+        """Return stored scan records with filesystem update timestamps."""
+        records = []
+        for directory in self.root.iterdir():
+            if not directory.is_dir() or not self._valid_id(directory.name):
+                continue
+            result_path = directory / "result.json"
+            record = self.get(directory.name)
+            if record is None:
+                continue
+            try:
+                updated_at = datetime.fromtimestamp(result_path.stat().st_mtime, UTC).isoformat()
+            except OSError:
+                updated_at = record.get("created_at")
+            records.append({**record, "updated_at": updated_at})
+        return records
+
     def log_path(self, scan_id: str) -> Path | None:
         if self.get(scan_id) is None:
             return None

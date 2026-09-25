@@ -61,6 +61,12 @@ The application loads `.env` from the current working directory for local
 development. Real process environment variables take precedence.
 
 - `LOGSCAN_API_KEY` authenticates automated log uploads. Generate a long random value.
+- `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` identify a Discord application used for support sign-in.
+- `DISCORD_REDIRECT_URI` must exactly match the application's OAuth redirect; production uses `https://logscan.kometa.team/support/callback`.
+- `DISCORD_GUILD_ID` is the Kometa Discord server ID.
+- `DISCORD_SUPPORT_ROLE_IDS` is a comma-separated allowlist of support or administrator role IDs. Holding any listed role grants access.
+- `LOGSCAN_SECRET_KEY` signs browser sessions. Generate a separate long random value and keep it stable across restarts.
+- `LOGSCAN_SECURE_COOKIES=true` restricts support sessions to HTTPS in production.
 - `TMDB_API_KEY` enables TMDb identity resolution, profile images, and trending people.
 - `DISCORD_PEOPLE_WEBHOOK_URL` optionally announces newly discovered missing people.
 - `SCAN_STORE` selects persistent storage. For local testing, `./data/scans` keeps data inside the checkout; containers use `/data/scans`.
@@ -68,6 +74,12 @@ development. Real process environment variables take precedence.
 The unified People page is available at <http://127.0.0.1:5000/people> when
 using Flask, or the equivalent path on the selected Waitress port.
 
+
+The protected support inventory is available at `/support/logs`. In the Discord
+Developer Portal, register the configured callback under OAuth2 Redirects.
+Enable Discord Developer Mode to copy the server and role IDs. Sign-in requests
+only `identify` and `guilds.members.read`, stores no Discord access token, and
+expires the local authorization after eight hours.
 ## Production
 
 Do not use Flask's development server for a public deployment.
