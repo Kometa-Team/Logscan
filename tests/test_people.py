@@ -706,6 +706,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('item.classList.add("overview-validation-issue")', script)
         self.assertIn('item.setAttribute("role", "button")', script)
         self.assertIn("showConfigInViewer(Number(firstIssue?.config_line) || 0)", script)
+        config_viewer = script[script.index("async function showConfigInViewer"):script.index("function populateSectionJump")]
+        self.assertIn("if (!logViewer.open) logViewer.showModal()", config_viewer)
         self.assertIn(".overview-validation-issue:hover", css)
         self.assertIn("box-shadow: inset 3px 0 0 var(--schema)", css)
 
