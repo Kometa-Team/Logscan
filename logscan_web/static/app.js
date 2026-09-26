@@ -619,6 +619,7 @@ async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
     highlightedRange = { start: targetStart, end: targetEnd };
     requestAnimationFrame(() => logCode.querySelector(`[data-line="${targetStart}"]`)?.scrollIntoView({ block: "center" }));
   }
+  if (!logViewer.open) logViewer.showModal();
 }
 
 function populateSectionJump() {
