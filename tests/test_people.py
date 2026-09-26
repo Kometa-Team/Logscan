@@ -698,6 +698,15 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("No schema issues detected", script)
         self.assertIn("Live schema validation pending", script)
 
+    def test_schema_dialog_constrains_long_paths_to_its_viewport(self):
+        css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
+
+        self.assertIn(".help-dialog-shell { width: 100%; min-width: 0; max-width: 100%;", css)
+        self.assertIn(".viewer-header > div { min-width: 0; flex: 1 1 auto; }", css)
+        self.assertIn(".viewer-header h2 { width: 100%; max-width: 100%;", css)
+        self.assertIn(".recommendation-dialog-content { min-width: 0;", css)
+        self.assertIn("overflow-wrap: anywhere; word-break: break-word;", css)
+
     def test_overview_validation_card_opens_first_config_issue(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
