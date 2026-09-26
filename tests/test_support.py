@@ -156,6 +156,9 @@ class SupportConsoleTests(unittest.TestCase):
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
         self.assertIn(".support-actions-heading, .support-actions { position: sticky", css)
         self.assertIn("severity == 'schema' or row.counts[severity]", template)
+        self.assertIn("Expires in", template)
+        self.assertIn("Kometa / Environment", template)
+        self.assertNotIn("sort_link('updated_at','Updated')", template)
 
 if __name__ == "__main__":
     unittest.main()
