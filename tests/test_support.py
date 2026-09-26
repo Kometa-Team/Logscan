@@ -164,6 +164,8 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn('class="destination-{{ severity }}"', template)
         self.assertIn(".destination-critical { color: #fda4af; }", css)
         self.assertIn(".destination-schema, .support-destination-menu .destination-config", css)
+        self.assertIn(".support-actions:has(.support-destinations[open]) { z-index: 50; }", css)
+        self.assertIn("width: 100%; min-height: 34px", css)
 
 if __name__ == "__main__":
     unittest.main()
