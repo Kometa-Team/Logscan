@@ -1036,7 +1036,7 @@ async function loadSchemaValidation(data) {
     const response = await fetch(`/api/scans/${encodeURIComponent(data.id)}/validate-config`, { method: "POST" });
     const validation = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(validation.error || "Schema validation could not run.");
-    currentSchemaBranch = ["master", "develop", "nightly"].includes(validation.branch) ? validation.branch : "master";
+    currentSchemaBranch = validation.branch === "master" ? "master" : "develop";
     schemaValidationFailures = validation.failures || [];
     if (validation.schema_directive_missing) {
       const schemaUrl = `https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/${currentSchemaBranch}/json-schema/config-schema.json`;
@@ -1098,7 +1098,7 @@ function renderResults(data, runSchemaValidation = true) {
   updateRetentionCountdown(data);
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
   currentRecommendations = recommendations;
-  currentSchemaBranch = ["master", "develop", "nightly"].includes(metadata.kometa_branch) ? metadata.kometa_branch : "master";
+  currentSchemaBranch = metadata.kometa_branch === "master" ? "master" : "develop";
   currentOverview = overview;
   if (data.expires_at) {
     overview.auto_delete = formatOverviewTimestamp(data.expires_at);

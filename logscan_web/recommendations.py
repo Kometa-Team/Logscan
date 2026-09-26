@@ -18,7 +18,7 @@ def schema_branch_for_log(log_content: str) -> str:
     versions = re.findall(r"(?:Newest )?Version:\s*([^\r\n|]+)", log_content, flags=re.IGNORECASE)
     version_text = " ".join(versions).lower()
     if "nightly" in version_text:
-        return "nightly"
+        return "develop"
     if "develop" in version_text:
         return "develop"
     return "master"
@@ -307,6 +307,7 @@ RULE_SPECS = (
     {'id': 'legacy_delete_unmanaged', 'category': 'warning', 'title': 'Legacy collection deletion setting detected', 'description': 'The configuration uses a legacy collection-deletion setting.', 'solution': 'Update this deprecated collection setting.', 'captures': ('delete_unmanaged_collections',)},
     {'id': 'flixpatrol_parse', 'category': 'error', 'title': 'FlixPatrol data could not be parsed', 'description': 'Kometa could not parse data returned by FlixPatrol.', 'solution': 'Check the source data and service availability.', 'captures': ('FlixPatrol Error:', 'failed to parse')},
     {'id': 'flixpatrol_subscription', 'category': 'error', 'title': 'FlixPatrol source requires a subscription', 'description': 'The configuration references a FlixPatrol source that is no longer supported by Kometa.', 'solution': 'Use a supported subscription or another data source.', 'captures': ('flixpatrol', '- pmm:')},
+    {'id': 'retired_nightly_branch', 'category': 'warning', 'title': 'Retired Kometa nightly branch detected', 'description': 'This log was produced by the retired nightly branch. Kometa now uses develop for ongoing development builds and master for stable releases.', 'solution': 'Switch the Kometa install and any branch-specific URLs or schema references from nightly to develop, or choose master for stable releases.', 'captures': ('(Branch: nightly)',)},
     {'id': 'legacy_git', 'category': 'advice', 'title': 'Legacy Kometa repository reference detected', 'description': 'The configuration contains a pre-1.18 Kometa metadata reference.', 'solution': 'Use the current Kometa repository reference.', 'captures': ('- git: PMM',)},
     {'id': 'legacy_pmm', 'category': 'advice', 'title': 'Pre-Kometa YAML detected', 'description': 'This config.yml references metadata files using syntax that predates Kometa.', 'solution': 'In config.yml, replace `- pmm:` with `- default:`. See https://kometa.wiki/en/latest/config/overview/?h=configuration', 'captures': ('- pmm:',)},
     {'id': 'image_size', 'category': 'error', 'title': 'Image exceeds the permitted size', 'description': "Artwork exceeds Plex's supported upload size.", 'solution': 'Reduce the image dimensions or file size.', 'captures': ('in _upload_image',)},

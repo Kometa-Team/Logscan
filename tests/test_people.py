@@ -630,7 +630,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("function configForDownload()", script)
         self.assertIn("yaml-language-server:", script)
         self.assertIn("refs/heads/${currentSchemaBranch}/json-schema/config-schema.json", script)
-        self.assertIn('["master", "develop", "nightly"].includes(metadata.kometa_branch) ? metadata.kometa_branch : "master"', script)
+        self.assertIn('metadata.kometa_branch === "master" ? "master" : "develop"', script)
         self.assertIn("new Blob([configForDownload()]", script)
 
     def test_config_download_uses_yaml_extension(self):
@@ -711,7 +711,22 @@ class RuntimeMetadataTests(unittest.TestCase):
     def test_schema_branch_matches_release_channel(self):
         self.assertEqual(schema_branch_for_log("Version: 2.2.0 (Branch: master)"), "master")
         self.assertEqual(schema_branch_for_log("Version: 2.3.0 (Branch: develop)"), "develop")
-        self.assertEqual(schema_branch_for_log("Version: 2.1.0 (Branch: nightly)"), "nightly")
+        self.assertEqual(schema_branch_for_log("Version: 2.1.0 (Branch: nightly)"), "develop")
+    def test_retired_nightly_branch_recommends_develop_or_master(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
+            "[kometa.py:2] [INFO] | Finished: Run Time: 0:01:00 |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "retired_nightly_branch")
+
+        self.assertEqual(finding["severity"], "warning")
+        self.assertEqual(finding["evidence_lines"], [1])
+        self.assertIn("develop", finding["message"])
+        self.assertIn("master", finding["message"])
+        self.assertEqual(result.metadata["kometa_branch"], "nightly")
+
     def test_traceback_is_critical(self):
         self.assertEqual(next(rule for rule in RULES.values() if rule.id == "traceback").category, "critical")
     def test_internal_server_error_is_critical(self):

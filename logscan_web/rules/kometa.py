@@ -131,6 +131,7 @@ RULES = (
     _rule("kometa_critical", "[CRITICAL]"),
     _rule("kometa_error", "[ERROR]"),
     _rule("kometa_warning", "[WARNING]"),
+    _rule("retired_nightly_branch", "(Branch: nightly)"),
     _same_line_rule("id_conversion", "Convert Warning: No ", "ID Found for"),
     _rule("image_unreadable", "PIL.UnidentifiedImageError: cannot"),
     _same_line_rule("flixpatrol_parse", "FlixPatrol Error:", "failed to parse"),
