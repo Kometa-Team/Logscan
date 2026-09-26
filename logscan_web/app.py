@@ -149,6 +149,27 @@ def create_app() -> Flask:
     app.config["TMDB_API_KEY"] = os.environ.get("TMDB_API_KEY", "")
     app.config["DISCORD_PEOPLE_WEBHOOK_URL"] = os.environ.get("DISCORD_PEOPLE_WEBHOOK_URL", "")
     app.config["PEOPLE_ACTIONS_ENABLED"] = os.environ.get("PEOPLE_ACTIONS_ENABLED", "false").casefold() in {"1", "true", "yes"}
+    support_keys = (
+        "DISCORD_CLIENT_ID",
+        "DISCORD_CLIENT_SECRET",
+        "DISCORD_GUILD_ID",
+        "DISCORD_SUPPORT_ROLE_IDS",
+        "LOGSCAN_SECRET_KEY",
+    )
+    missing_support_keys = [key for key in support_keys if not app.config.get(key)]
+    if missing_support_keys:
+        app.logger.warning(
+            "Discord support OAuth disabled; missing configuration: %s",
+            ", ".join(missing_support_keys),
+        )
+    else:
+        app.logger.warning(
+            "Discord support OAuth enabled: guild_id=%s roles=%d redirect_uri=%s secure_cookie=%s",
+            app.config["DISCORD_GUILD_ID"],
+            len(app.config["DISCORD_SUPPORT_ROLE_IDS"]),
+            app.config["DISCORD_REDIRECT_URI"],
+            app.config["SESSION_COOKIE_SECURE"],
+        )
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     store = ScanStore(app.config["SCAN_STORE"])
     people_store = PeopleStore(app.config["SCAN_STORE"])

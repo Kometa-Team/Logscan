@@ -14,25 +14,30 @@ from flask import Blueprint, abort, current_app, redirect, render_template, requ
 DISCORD_API_URL = "https://discord.com/api/v10"
 DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
+SUPPORT_CONFIG_KEYS = (
+    "DISCORD_CLIENT_ID",
+    "DISCORD_CLIENT_SECRET",
+    "DISCORD_GUILD_ID",
+    "DISCORD_SUPPORT_ROLE_IDS",
+    "LOGSCAN_SECRET_KEY",
+)
 
 
 def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
     blueprint = Blueprint("support", __name__, url_prefix="/support")
 
     def oauth_configured() -> bool:
-        keys = (
-            "DISCORD_CLIENT_ID",
-            "DISCORD_CLIENT_SECRET",
-            "DISCORD_GUILD_ID",
-            "DISCORD_SUPPORT_ROLE_IDS",
-            "LOGSCAN_SECRET_KEY",
-        )
-        return all(current_app.config.get(key) for key in keys)
+        return all(current_app.config.get(key) for key in SUPPORT_CONFIG_KEYS)
 
     def login_required(view):
         @wraps(view)
         def wrapped(*args, **kwargs):
             if not oauth_configured():
+                missing = [key for key in SUPPORT_CONFIG_KEYS if not current_app.config.get(key)]
+                current_app.logger.warning(
+                    "Discord support access unavailable: missing configuration: %s",
+                    ", ".join(missing),
+                )
                 abort(503, description="Support access is not configured.")
             if not session.get("support_user") or time.time() - session.get("support_authorized_at", 0) > SESSION_MAX_AGE_SECONDS:
                 session.clear()
@@ -63,6 +68,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             "scope": "identify guilds.members.read",
             "state": state,
         }
+        current_app.logger.warning("Discord support OAuth authorization started")
         return redirect(f"{DISCORD_AUTHORIZE_URL}?{urlencode(params)}")
 
     @blueprint.get("/callback")
@@ -71,23 +77,53 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             abort(503, description="Support access is not configured.")
         expected_state = session.pop("oauth_state", None)
         if not expected_state or not secrets.compare_digest(request.args.get("state", ""), expected_state):
+            current_app.logger.warning("Discord support OAuth rejected: invalid or expired state")
             abort(400, description="Discord sign-in state was invalid or expired.")
         code = request.args.get("code")
         if not code:
+            current_app.logger.warning(
+                "Discord support OAuth cancelled: %s",
+                request.args.get("error", "authorization code missing"),
+            )
             return redirect(url_for("support.login", error="Discord sign-in was cancelled."))
         try:
             token = _discord_token(code)
             user = _discord_get("/users/@me", token)
             member = _discord_get(f"/users/@me/guilds/{current_app.config['DISCORD_GUILD_ID']}/member", token)
-        except (HTTPError, URLError, KeyError, ValueError):
-            current_app.logger.exception("Discord support authorization failed")
+        except HTTPError as exc:
+            current_app.logger.error(
+                "Discord support authorization failed: Discord HTTP %s: %s",
+                exc.code,
+                _discord_http_error(exc),
+            )
+            return redirect(url_for("support.login", error="Discord could not verify your server membership."))
+        except URLError as exc:
+            current_app.logger.error(
+                "Discord support authorization failed: Discord network error: %s",
+                exc.reason,
+            )
+            return redirect(url_for("support.login", error="Discord could not verify your server membership."))
+        except (KeyError, ValueError):
+            current_app.logger.exception("Discord support authorization failed: invalid Discord response")
             return redirect(url_for("support.login", error="Discord could not verify your server membership."))
         if not current_app.config["DISCORD_SUPPORT_ROLE_IDS"].intersection(member.get("roles", [])):
+            current_app.logger.warning(
+                "Discord support access denied: user_id=%s guild_id=%s configured_roles=%d member_roles=%d",
+                user.get("id", "unknown"),
+                current_app.config["DISCORD_GUILD_ID"],
+                len(current_app.config["DISCORD_SUPPORT_ROLE_IDS"]),
+                len(member.get("roles", [])),
+            )
             session.clear()
             return render_template("support_login.html", error="Your Discord account does not have a configured support role.", next=""), 403
         destination = session.pop("oauth_next", url_for("support.logs"))
         session.clear()
         session["support_authorized_at"] = int(time.time())
+        current_app.logger.warning(
+            "Discord support access granted: user_id=%s guild_id=%s",
+            user["id"],
+            current_app.config["DISCORD_GUILD_ID"],
+        )
         session["support_user"] = {
             "id": user["id"],
             "username": user.get("global_name") or user.get("username") or "Discord user",
@@ -187,6 +223,14 @@ def _discord_request(path: str, *, data: bytes | None = None, headers: dict | No
     url = path if path.startswith("http") else f"{DISCORD_API_URL}{path}"
     with urlopen(Request(url, data=data, headers=headers or {}), timeout=10) as response:
         return json.load(response)
+
+
+def _discord_http_error(error: HTTPError) -> str:
+    try:
+        payload = json.loads(error.read(2048).decode("utf-8", errors="replace"))
+        return str(payload.get("error_description") or payload.get("message") or payload.get("error") or "unknown error")
+    except (json.JSONDecodeError, AttributeError):
+        return "unknown error"
 
 
 def _discord_avatar_url(user: dict) -> str:
