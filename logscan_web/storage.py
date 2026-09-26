@@ -111,6 +111,12 @@ class ScanStore:
         supplied = hashlib.sha256(token.encode()).hexdigest()
         if not hmac.compare_digest(supplied, record["delete_token_hash"]):
             return False
+        return self.delete_authorized(scan_id)
+
+    def delete_authorized(self, scan_id: str) -> bool:
+        """Delete an existing scan after its caller has performed authorization."""
+        if self.get(scan_id) is None:
+            return False
         directory = self.root / scan_id
         for name in ("log", "result.json", "result.json.tmp"):
             try:

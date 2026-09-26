@@ -226,6 +226,19 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             support_user=session["support_user"],
         )
 
+    @blueprint.post("/logs/<scan_id>/delete")
+    @login_required
+    def delete_log(scan_id):
+        if not store.delete_authorized(scan_id):
+            abort(404)
+        user = session["support_user"]
+        current_app.logger.warning(
+            "Support log deleted: scan_id=%s user_id=%s",
+            scan_id,
+            user.get("id", "unknown"),
+        )
+        return redirect(url_for("support.logs"))
+
     return blueprint
 
 

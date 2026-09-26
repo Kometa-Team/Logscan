@@ -147,18 +147,22 @@ class SupportConsoleTests(unittest.TestCase):
         sent_request = mocked_urlopen.call_args.args[0]
         self.assertEqual(sent_request.get_header("User-agent"), DISCORD_USER_AGENT)
         self.assertEqual(sent_request.get_header("Authorization"), "Bearer token")
-    def test_navigation_menu_loads_positioning_script(self):
+    def test_navigation_dialog_is_responsive_and_contextual(self):
         template = Path("logscan_web/templates/support_logs.html").read_text(encoding="utf-8")
         script = Path("logscan_web/static/support_logs.js").read_text(encoding="utf-8")
         self.assertIn("support_logs.js", template)
-        self.assertIn("positionDestinationMenu", script)
-        self.assertIn("getBoundingClientRect", script)
-        self.assertIn("menu.style.left", script)
-        self.assertIn("menu.style.top", script)
+        self.assertIn('id="support-navigation-dialog"', template)
+        self.assertIn('class="support-navigate"', template)
+        self.assertIn('class="support-destination-options"', template)
+        self.assertIn("links.replaceChildren", script)
+        self.assertIn("dialog.showModal()", script)
+        self.assertIn("event.target === dialog", script)
+        self.assertIn("window.confirm", script)
         self.assertLess(template.index("support-actions-heading"), template.index("support-title"))
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
         self.assertIn(".support-actions-heading, .support-actions { position: sticky", css)
         self.assertIn("severity == 'schema' or row.counts[severity]", template)
+        self.assertIn("Live check", template)
         self.assertIn("Expires in", template)
         self.assertIn("Kometa / Environment", template)
         self.assertNotIn("sort_link('updated_at','Updated')", template)
@@ -167,8 +171,23 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn('class="destination-{{ severity }}"', template)
         self.assertIn(".destination-critical { color: #fda4af; }", css)
         self.assertIn(".destination-schema, .support-destination-menu .destination-config", css)
-        self.assertIn(".support-actions:has(.support-destinations[open]) { z-index: 50; }", css)
-        self.assertIn("width: 100%; min-height: 34px", css)
+        self.assertIn(".support-navigation-dialog::backdrop", css)
+        self.assertIn("grid-template-columns: repeat(2,minmax(0,1fr))", css)
+        self.assertIn("@media (max-width: 560px)", css)
+        self.assertIn("width: 100%; min-height: 42px", css)
+
+    def test_support_member_can_delete_log_without_exposing_token(self):
+        unauthorized = self.client.post(f"/support/logs/{self.scan_id}/delete")
+        self.assertEqual(unauthorized.status_code, 302)
+        self.assertIsNotNone(self.store.get(self.scan_id))
+
+        self.authorize_session()
+        with self.assertLogs(self.app.logger, level="WARNING") as captured:
+            response = self.client.post(f"/support/logs/{self.scan_id}/delete")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/support/logs")
+        self.assertIsNone(self.store.get(self.scan_id))
+        self.assertIn("user_id=42", "\n".join(captured.output))
 
 if __name__ == "__main__":
     unittest.main()

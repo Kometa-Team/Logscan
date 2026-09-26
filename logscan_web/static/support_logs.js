@@ -1,42 +1,36 @@
-function closeDestinationMenus(except = null) {
-  document.querySelectorAll(".support-destinations[open]").forEach((details) => {
-    if (details !== except) details.open = false;
-  });
-}
+const dialog = document.querySelector("#support-navigation-dialog");
+const closeButton = document.querySelector("#support-navigation-close");
+const links = document.querySelector("#support-navigation-links");
+const deleteForm = document.querySelector("#support-delete-form");
 
-function positionDestinationMenu(details) {
-  const summary = details.querySelector("summary");
-  const menu = details.querySelector(".support-destination-menu");
-  if (!summary || !menu) return;
+const fields = {
+  title: document.querySelector("#support-navigation-title"),
+  uploader: document.querySelector("#support-navigation-uploader"),
+  source: document.querySelector("#support-navigation-source"),
+  expires: document.querySelector("#support-navigation-expires"),
+  findings: document.querySelector("#support-navigation-findings"),
+  environment: document.querySelector("#support-navigation-environment"),
+};
 
-  const trigger = summary.getBoundingClientRect();
-  const menuWidth = menu.offsetWidth;
-  const menuHeight = menu.offsetHeight;
-  const gutter = 8;
-  const left = Math.min(
-    window.innerWidth - menuWidth - gutter,
-    Math.max(gutter, trigger.right - menuWidth),
-  );
-  const roomBelow = window.innerHeight - trigger.bottom;
-  const top = roomBelow >= menuHeight + gutter
-    ? trigger.bottom + 5
-    : Math.max(gutter, trigger.top - menuHeight - 5);
+document.querySelectorAll(".support-navigate").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (!dialog || !links) return;
 
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
-}
+    Object.entries(fields).forEach(([name, field]) => {
+      if (field) field.textContent = button.dataset[name] || "Unknown";
+    });
 
-document.querySelectorAll(".support-destinations").forEach((details) => {
-  details.addEventListener("toggle", () => {
-    if (!details.open) return;
-    closeDestinationMenus(details);
-    requestAnimationFrame(() => positionDestinationMenu(details));
+    const options = button.nextElementSibling;
+    links.replaceChildren(...Array.from(options?.children || [], (link) => link.cloneNode(true)));
+    if (deleteForm) deleteForm.action = `/support/logs/${encodeURIComponent(button.dataset.scanId)}/delete`;
+    dialog.showModal();
   });
 });
 
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".support-destinations")) closeDestinationMenus();
+closeButton?.addEventListener("click", () => dialog?.close());
+dialog?.addEventListener("click", (event) => {
+  if (event.target === dialog) dialog.close();
 });
-
-window.addEventListener("resize", () => closeDestinationMenus());
-document.querySelector(".support-table-wrap")?.addEventListener("scroll", () => closeDestinationMenus());
+deleteForm?.addEventListener("submit", (event) => {
+  if (!window.confirm(`Permanently delete ${fields.title?.textContent || "this log"}?`)) event.preventDefault();
+});

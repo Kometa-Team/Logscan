@@ -6,8 +6,8 @@
   <title>Active logs · Kometa Support</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-3') }}">
-  <script src="{{ url_for('static', filename='support_logs.js', v='20260926-1') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-4') }}">
+  <script src="{{ url_for('static', filename='support_logs.js', v='20260926-2') }}" defer></script>
 </head>
 <body>
   {% macro sort_link(key, label) -%}
@@ -35,12 +35,12 @@
         <tbody>
           {% for row in rows %}
           <tr>
-            <td class="support-actions"><details class="support-destinations"><summary>Navigate</summary><div class="support-destination-menu"><a href="{{ url_for('result_page', scan_id=row.id) }}#section=overview">Overview</a>{% for severity in ('critical','error','warning','schema','advice') %}{% if severity == 'schema' or row.counts[severity] %}<a class="destination-{{ severity }}" href="{{ url_for('result_page', scan_id=row.id) }}#section={{ severity }}">{{ severity|title }}{% if row.counts[severity] %} <span>{{ row.counts[severity] }}</span>{% endif %}</a>{% endif %}{% endfor %}<a class="destination-config" href="{{ url_for('result_page', scan_id=row.id) }}#viewer=config">Configuration</a><a class="destination-log" href="{{ url_for('result_page', scan_id=row.id) }}#viewer=log">Raw log</a>{% if row.message_url %}<a class="destination-discord" href="{{ row.message_url }}" target="_blank" rel="noopener">Discord message</a>{% endif %}</div></details></td>
+            <td class="support-actions">{% set hours = (row.remaining_seconds // 3600) %}{% set minutes = ((row.remaining_seconds % 3600) // 60) %}<button type="button" class="support-navigate" data-scan-id="{{ row.id }}" data-title="{{ row.filename }}" data-uploader="{{ row.uploader }}" data-source="{{ row.source|title }}" data-expires="{{ hours }}h {{ minutes }}m" data-findings="{{ row.finding_count }}" data-environment="{{ row.kometa_version }} · {{ row.installation }}">Navigate</button><div class="support-destination-options" hidden><a href="{{ url_for('result_page', scan_id=row.id) }}#section=overview">Overview</a>{% for severity in ('critical','error','warning','schema','advice') %}{% if severity == 'schema' or row.counts[severity] %}<a class="destination-{{ severity }}" href="{{ url_for('result_page', scan_id=row.id) }}#section={{ severity }}">{{ severity|title }}{% if row.counts[severity] %} <span>{{ row.counts[severity] }}</span>{% elif severity == 'schema' %} <span>Live check</span>{% endif %}</a>{% endif %}{% endfor %}<a class="destination-config" href="{{ url_for('result_page', scan_id=row.id) }}#viewer=config">Configuration</a><a class="destination-log" href="{{ url_for('result_page', scan_id=row.id) }}#viewer=log">Raw log</a>{% if row.message_url %}<a class="destination-discord" href="{{ row.message_url }}" target="_blank" rel="noopener">Discord message</a>{% endif %}</div></td>
             <td class="support-title"><a href="{{ url_for('result_page', scan_id=row.id) }}">{{ row.filename }}</a><code>{{ row.id }}</code></td>
             <td><strong>{{ row.uploader }}</strong>{% if row.uploader_id %}<small>{{ row.uploader_id }}</small>{% endif %}</td>
             <td><span class="support-source {{ row.source }}">{{ row.source|title }}</span></td>
             <td><time datetime="{{ row.created_at.isoformat() }}">{{ row.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</time></td>
-            <td>{% set hours = (row.remaining_seconds // 3600) %}{% set minutes = ((row.remaining_seconds % 3600) // 60) %}<strong>{{ hours }}h {{ minutes }}m</strong><small><time datetime="{{ row.expires_at.isoformat() }}">{{ row.expires_at.strftime('%Y-%m-%d %H:%M') }} UTC</time></small></td>
+            <td><strong>{{ hours }}h {{ minutes }}m</strong><small><time datetime="{{ row.expires_at.isoformat() }}">{{ row.expires_at.strftime('%Y-%m-%d %H:%M') }} UTC</time></small></td>
             <td><div class="support-severities">{% for severity in ('critical','error','warning','schema','advice') %}{% if row.counts[severity] %}<span class="severity-chip {{ severity }}" title="{{ severity|title }}">{{ row.counts[severity] }}</span>{% endif %}{% endfor %}{% if not row.finding_count %}<span class="support-none">None</span>{% endif %}</div></td>
             <td><strong>{{ row.kometa_version }}</strong><small>{{ row.kometa_branch|title }} · {{ row.installation }}</small></td>
             <td>{{ '{:,}'.format(row.line_count) }}</td>
@@ -51,6 +51,14 @@
       </table>
     </div>
     {% if page_count > 1 %}<nav class="pagination" aria-label="Log pages">{% if page > 1 %}<a class="secondary-button" href="{{ url_for('support.logs', q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page-1) }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ page_count }}</span>{% if page < page_count %}<a class="secondary-button" href="{{ url_for('support.logs', q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page+1) }}">Next</a>{% endif %}</nav>{% endif %}
+    <dialog id="support-navigation-dialog" class="support-navigation-dialog" aria-labelledby="support-navigation-title">
+      <div class="support-navigation-panel">
+        <header class="support-navigation-header"><div><p class="eyebrow">Navigate log</p><h2 id="support-navigation-title"></h2></div><button type="button" id="support-navigation-close" class="support-navigation-close" aria-label="Close navigation dialog">×</button></header>
+        <dl class="support-navigation-context"><div><dt>Uploaded by</dt><dd id="support-navigation-uploader"></dd></div><div><dt>Source</dt><dd id="support-navigation-source"></dd></div><div><dt>Expires in</dt><dd id="support-navigation-expires"></dd></div><div><dt>Findings</dt><dd id="support-navigation-findings"></dd></div><div class="support-navigation-environment"><dt>Kometa / Environment</dt><dd id="support-navigation-environment"></dd></div></dl>
+        <nav id="support-navigation-links" class="support-destination-menu" aria-label="Log destinations"></nav>
+        <form id="support-delete-form" class="support-delete-form" method="post"><button type="submit" class="support-delete-button">Delete log</button><p>This permanently removes the stored log and scan results.</p></form>
+      </div>
+    </dialog>
   </main>
 </body>
 </html>
