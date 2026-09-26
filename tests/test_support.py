@@ -159,6 +159,9 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("Expires in", template)
         self.assertIn("Kometa / Environment", template)
         self.assertNotIn("sort_link('updated_at','Updated')", template)
+        self.assertIn('class="destination-{{ severity }}"', template)
+        self.assertIn(".destination-critical { color: #fda4af; }", css)
+        self.assertIn(".destination-schema, .support-destination-menu .destination-config", css)
 
 if __name__ == "__main__":
     unittest.main()

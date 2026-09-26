@@ -623,6 +623,13 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-destination-menu a { display: flex; justify-content: space-between; border: 0; color: #dbe0f5; }
 .support-destination-menu a:hover { background: rgba(114,119,248,.12); }
 .support-destination-menu span { color: var(--muted); }
+.support-destination-menu .destination-critical { color: #fda4af; }
+.support-destination-menu .destination-error { color: #fdba74; }
+.support-destination-menu .destination-warning { color: #fde68a; }
+.support-destination-menu .destination-schema, .support-destination-menu .destination-config { color: #c4b5fd; }
+.support-destination-menu .destination-advice { color: #bfdbfe; }
+.support-destination-menu .destination-log { color: #dbe0f5; }
+.support-destination-menu .destination-discord { color: #a5b4fc; }
 @media (max-width: 760px) {
   .support-identity { display: none; }
 }
