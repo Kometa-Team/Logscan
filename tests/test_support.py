@@ -155,6 +155,7 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertLess(template.index("support-actions-heading"), template.index("support-title"))
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
         self.assertIn(".support-actions-heading, .support-actions { position: sticky", css)
+        self.assertIn("severity == 'schema' or row.counts[severity]", template)
 
 if __name__ == "__main__":
     unittest.main()
