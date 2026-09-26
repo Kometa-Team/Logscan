@@ -6,11 +6,11 @@
   <title>Support Setup Required - Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260925-3') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-6') }}">
 </head>
 <body>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
-  <header class="site-header"><a class="brand" href="/" aria-label="Kometa Utilities home"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links" aria-label="Utilities"><a href="/">Log Scanner</a><a href="{{ url_for('people_page') }}">People</a><a href="{{ url_for('analytics_page') }}">Analytics</a><span class="utility-label">Support</span></nav></header>
+  {% set active_page = 'support' %}{% include '_site_header.html' %}
   <main class="shell error-page">
     <section class="error-card">
       <p class="eyebrow">Support console</p>

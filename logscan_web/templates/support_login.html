@@ -6,10 +6,10 @@
   <title>Support sign in � Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260925-2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-6') }}">
 </head>
 <body>
-  <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><span class="utility-label">Support</span></header>
+  {% set active_page = 'support' %}{% include '_site_header.html' %}
   <main class="support-login-shell">
     <section class="support-login-panel">
       <p class="eyebrow">Restricted utility</p>

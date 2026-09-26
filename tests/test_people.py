@@ -1263,6 +1263,13 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertIn('href="/people">People</a>', html)
         self.assertIn('aria-label="Utilities"', html)
 
+    def test_shared_navigation_has_desktop_and_mobile_controls(self):
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn('class="header-primary-links"', html)
+        self.assertIn('class="site-nav"', html)
+        self.assertIn('aria-current="page">Log Scanner</a>', html)
+        self.assertIn("site_nav.js", html)
+
     def test_people_header_uses_official_kometa_icon(self):
         response = self.client.get("/people")
         self.assertEqual(response.status_code, 200)
