@@ -9,7 +9,7 @@ from unittest.mock import patch
 from flask import Flask
 
 from logscan_web.storage import ScanStore
-from logscan_web.support import create_support_blueprint
+from logscan_web.support import DISCORD_USER_AGENT, _discord_request, create_support_blueprint
 
 
 class SupportConsoleTests(unittest.TestCase):
@@ -136,6 +136,14 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertNotIn(self.delete_token, body)
         self.assertNotIn("delete_token_hash", body)
 
+    @patch("logscan_web.support.urlopen")
+    def test_discord_requests_send_explicit_user_agent(self, mocked_urlopen):
+        response = mocked_urlopen.return_value.__enter__.return_value
+        response.read.return_value = b'{}'
+        _discord_request("/users/@me", headers={"Authorization": "Bearer token"})
+        sent_request = mocked_urlopen.call_args.args[0]
+        self.assertEqual(sent_request.get_header("User-agent"), DISCORD_USER_AGENT)
+        self.assertEqual(sent_request.get_header("Authorization"), "Bearer token")
 
 if __name__ == "__main__":
     unittest.main()

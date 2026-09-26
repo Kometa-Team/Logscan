@@ -13,6 +13,7 @@ from flask import Blueprint, abort, current_app, redirect, render_template, requ
 
 DISCORD_API_URL = "https://discord.com/api/v10"
 DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
+DISCORD_USER_AGENT = "Kometa-Logscan/1.0 (+https://github.com/Kometa-Team/Logscan)"
 SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
 SUPPORT_CONFIG_KEYS = (
     "DISCORD_CLIENT_ID",
@@ -86,13 +87,17 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
                 request.args.get("error", "authorization code missing"),
             )
             return redirect(url_for("support.login", error="Discord sign-in was cancelled."))
+        operation = "token exchange"
         try:
             token = _discord_token(code)
+            operation = "user identity"
             user = _discord_get("/users/@me", token)
+            operation = "guild membership"
             member = _discord_get(f"/users/@me/guilds/{current_app.config['DISCORD_GUILD_ID']}/member", token)
         except HTTPError as exc:
             current_app.logger.error(
-                "Discord support authorization failed: Discord HTTP %s: %s",
+                "Discord support authorization failed during %s: Discord HTTP %s: %s",
+                operation,
                 exc.code,
                 _discord_http_error(exc),
             )
@@ -221,7 +226,8 @@ def _discord_get(path: str, token: str) -> dict:
 
 def _discord_request(path: str, *, data: bytes | None = None, headers: dict | None = None) -> dict:
     url = path if path.startswith("http") else f"{DISCORD_API_URL}{path}"
-    with urlopen(Request(url, data=data, headers=headers or {}), timeout=10) as response:
+    request_headers = {"User-Agent": DISCORD_USER_AGENT, **(headers or {})}
+    with urlopen(Request(url, data=data, headers=request_headers), timeout=10) as response:
         return json.load(response)
 
 
