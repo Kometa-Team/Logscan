@@ -338,6 +338,11 @@ h2 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.5rem); letter-spacing: -.04em;
   .overview-grid > div { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
   .overview-grid dt { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
   .overview-grid dd { margin: 7px 0 0; color: #eef0ff; overflow-wrap: anywhere; }
+  .overview-grid > .overview-validation-issue { position: relative; padding-right: 52px; border-color: rgba(167,139,250,.68); background: rgba(167,139,250,.1); box-shadow: inset 3px 0 0 var(--schema); cursor: pointer; }
+  .overview-validation-issue::after { position: absolute; top: 50%; right: 20px; content: ">"; color: #c4b5fd; font-size: 1.35rem; transform: translateY(-50%); }
+  .overview-validation-issue:hover, .overview-validation-issue:focus-visible { border-color: #c4b5fd; background: rgba(167,139,250,.16); outline: none; }
+  .overview-validation-issue dt { color: #c4b5fd; }
+  .overview-validation-issue dd { font-weight: 650; }
 .overview-subheading { margin: 24px 0 12px; font-size: 1rem; }
 .runtime-summary { margin-top: 24px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .runtime-summary > summary { padding: 15px 16px; display: flex; align-items: center; gap: 12px; list-style: none; cursor: pointer; font-weight: 600; }
