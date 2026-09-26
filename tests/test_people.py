@@ -657,6 +657,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Open config.yml at line", script)
         self.assertIn("showConfigInViewer(configLine)", script)
         self.assertIn("schemaValidationFailures = validation.failures || []", script)
+        self.assertIn("applySupportDestination(data, groups, recommendations);", script)
         template = Path("logscan_web/templates/index.html").read_text(encoding="utf-8")
         self.assertIn('id="previous-highlight"', template)
         self.assertIn("goToPreviousHighlightedLine", script)

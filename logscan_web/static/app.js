@@ -1155,6 +1155,7 @@ function renderResults(data, runSchemaValidation = true) {
   results.hidden = false;
   currentScanId = data.id || currentScanId;
   document.querySelector("#delete-scan").hidden = !deleteToken;
+  applySupportDestination(data, groups, recommendations);
   results.scrollIntoView({ behavior: "smooth", block: "start" });
   if (runSchemaValidation) loadSchemaValidation(data);
   loadCurrentKometaVersions(data);
