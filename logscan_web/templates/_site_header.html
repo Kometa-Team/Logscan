@@ -1,0 +1,40 @@
+<header class="site-header">
+  <a class="brand" href="/" aria-label="Kometa Utilities home">
+    <img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt="">
+    <span>Kometa Utilities</span>
+  </a>
+  <nav class="header-primary-links" aria-label="Utilities">
+    <a href="/"{% if active_page == 'scanner' %} aria-current="page"{% endif %}>Log Scanner</a>
+    <a href="/people"{% if active_page == 'people' %} aria-current="page"{% endif %}>People</a>
+    <a href="/analytics"{% if active_page == 'analytics' %} aria-current="page"{% endif %}>Analytics</a>
+  </nav>
+  <details class="site-nav">
+    <summary aria-label="Open navigation">
+      <span class="site-nav-summary-label">
+        {% if support_user is defined and support_user %}
+          {% if support_user.avatar %}<img src="{{ support_user.avatar }}" alt="">{% endif %}
+          <span>{{ support_user.username }}</span>
+        {% else %}
+          <span>Support</span>
+        {% endif %}
+      </span>
+      <span class="site-nav-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+    </summary>
+    <div class="site-nav-menu">
+      <nav aria-label="All utilities">
+        <a class="site-nav-primary-item" href="/"{% if active_page == 'scanner' %} aria-current="page"{% endif %}>Log Scanner</a>
+        <a class="site-nav-primary-item" href="/people"{% if active_page == 'people' %} aria-current="page"{% endif %}>People</a>
+        <a class="site-nav-primary-item" href="/analytics"{% if active_page == 'analytics' %} aria-current="page"{% endif %}>Analytics</a>
+        <a href="/support/logs"{% if active_page == 'support' %} aria-current="page"{% endif %}>Support Console</a>
+      </nav>
+      {% if support_user is defined and support_user %}
+        <div class="site-nav-account">
+          {% if support_user.avatar %}<img src="{{ support_user.avatar }}" alt="">{% endif %}
+          <span><small>Signed in as</small><strong>{{ support_user.username }}</strong></span>
+        </div>
+        <form method="post" action="{{ url_for('support.logout') }}"><button class="site-nav-signout" type="submit">Sign out</button></form>
+      {% endif %}
+    </div>
+  </details>
+</header>
+<script src="{{ url_for('static', filename='site_nav.js', v='20260926-1') }}" defer></script>

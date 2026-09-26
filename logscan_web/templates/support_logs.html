@@ -6,7 +6,7 @@
   <title>Active logs · Kometa Support</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-5') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-6') }}">
   <script src="{{ url_for('static', filename='support_logs.js', v='20260926-4') }}" defer></script>
 </head>
 <body>
@@ -14,7 +14,7 @@
     {% set next_direction = 'asc' if sort_key != key or direction == 'desc' else 'desc' %}
     <a class="support-sort{% if sort_key == key %} active{% endif %}" href="{{ url_for('support.logs', q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=key, direction=next_direction) }}">{{ label }}{% if sort_key == key %}<span aria-hidden="true">{{ '↓' if direction == 'desc' else '↑' }}</span>{% endif %}</a>
   {%- endmacro %}
-  <header class="site-header"><a class="brand" href="/"><img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt=""><span>Kometa Utilities</span></a><nav class="header-links" aria-label="Support utilities"><a href="/">Log Scanner</a><a href="/people">People</a><a href="/analytics">Analytics</a><span class="utility-label">Active Logs</span><span class="support-identity">{% if support_user.avatar %}<img src="{{ support_user.avatar }}" alt="">{% endif %}{{ support_user.username }}</span><form method="post" action="{{ url_for('support.logout') }}"><button class="support-logout" type="submit">Sign out</button></form></nav></header>
+  {% set active_page = 'support' %}{% include '_site_header.html' %}
   <main class="support-shell">
     <section class="support-heading"><div><p class="eyebrow">Support console</p><h1>Active logs</h1><p class="hero-copy">Review every scan currently retained on this server. Logs disappear automatically at their displayed deletion time.</p></div><div class="support-total"><strong>{{ total_logs }}</strong><span>on server</span></div></section>
 
