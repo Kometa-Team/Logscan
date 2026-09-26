@@ -112,6 +112,19 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn("does not have a configured support role", response.get_data(as_text=True))
 
+    def test_missing_configuration_is_logged_without_secret_values(self):
+        roles = self.app.config["DISCORD_SUPPORT_ROLE_IDS"]
+        self.app.config["DISCORD_SUPPORT_ROLE_IDS"] = set()
+        try:
+            with self.assertLogs(self.app.logger, level="WARNING") as captured:
+                response = self.client.get("/support/logs")
+        finally:
+            self.app.config["DISCORD_SUPPORT_ROLE_IDS"] = roles
+        self.assertEqual(response.status_code, 503)
+        message = "\n".join(captured.output)
+        self.assertIn("DISCORD_SUPPORT_ROLE_IDS", message)
+        self.assertNotIn(self.app.config["DISCORD_CLIENT_SECRET"], message)
+
     def test_inventory_is_searchable_and_never_exposes_delete_secret(self):
         self.authorize_session()
         response = self.client.get("/support/logs?q=Support+Person&severity=critical")
