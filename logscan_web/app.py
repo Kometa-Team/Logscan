@@ -23,7 +23,7 @@ from .models import Finding
 from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
-from .support import create_support_blueprint
+from .support import create_support_blueprint, support_session_authorized
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
@@ -148,7 +148,6 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_SECURE"] = os.environ.get("LOGSCAN_SECURE_COOKIES", "false").casefold() in {"1", "true", "yes"}
     app.config["TMDB_API_KEY"] = os.environ.get("TMDB_API_KEY", "")
     app.config["DISCORD_PEOPLE_WEBHOOK_URL"] = os.environ.get("DISCORD_PEOPLE_WEBHOOK_URL", "")
-    app.config["PEOPLE_ACTIONS_ENABLED"] = os.environ.get("PEOPLE_ACTIONS_ENABLED", "false").casefold() in {"1", "true", "yes"}
     support_keys = (
         "DISCORD_CLIENT_ID",
         "DISCORD_CLIENT_SECRET",
@@ -1137,7 +1136,7 @@ def create_app() -> Flask:
             total_pages=total_pages,
             per_page=per_page,
             sources=sorted(sources),
-            actions_enabled=app.config["PEOPLE_ACTIONS_ENABLED"],
+            actions_enabled=support_session_authorized(),
             tag=tag_query,
             selected_tags=selected_tags,
             available_tags=available_tags,
@@ -1170,7 +1169,7 @@ def create_app() -> Flask:
         return person_id, record
 
     def require_people_actions() -> None:
-        if not app.config["PEOPLE_ACTIONS_ENABLED"]:
+        if not support_session_authorized():
             abort(404)
 
     @app.post("/api/people/<person_key>/check")

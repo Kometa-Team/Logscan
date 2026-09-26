@@ -15,6 +15,16 @@ DISCORD_API_URL = "https://discord.com/api/v10"
 DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 DISCORD_USER_AGENT = "Kometa-Logscan/1.0 (+https://github.com/Kometa-Team/Logscan)"
 SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
+
+
+def support_session_authorized() -> bool:
+    """Return whether the current request has a fresh Discord support session."""
+    return bool(
+        session.get("support_user")
+        and time.time() - session.get("support_authorized_at", 0) <= SESSION_MAX_AGE_SECONDS
+    )
+
+
 SUPPORT_CONFIG_KEYS = (
     "DISCORD_CLIENT_ID",
     "DISCORD_CLIENT_SECRET",
@@ -40,7 +50,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
                     ", ".join(missing),
                 )
                 abort(503, description="Support access is not configured.")
-            if not session.get("support_user") or time.time() - session.get("support_authorized_at", 0) > SESSION_MAX_AGE_SECONDS:
+            if not support_session_authorized():
                 session.clear()
                 return redirect(url_for("support.login", next=request.full_path.rstrip("?")))
             return view(*args, **kwargs)
