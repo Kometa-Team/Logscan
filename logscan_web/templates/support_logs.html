@@ -6,8 +6,8 @@
   <title>Active logs · Kometa Support</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-4') }}">
-  <script src="{{ url_for('static', filename='support_logs.js', v='20260926-3') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-5') }}">
+  <script src="{{ url_for('static', filename='support_logs.js', v='20260926-4') }}" defer></script>
 </head>
 <body>
   {% macro sort_link(key, label) -%}
@@ -18,7 +18,9 @@
   <main class="support-shell">
     <section class="support-heading"><div><p class="eyebrow">Support console</p><h1>Active logs</h1><p class="hero-copy">Review every scan currently retained on this server. Logs disappear automatically at their displayed deletion time.</p></div><div class="support-total"><strong>{{ total_logs }}</strong><span>on server</span></div></section>
 
-    <form class="support-filters" method="get">
+    <details class="support-filter-panel" open{% if query or source_filter != 'all' or severity_filter != 'all' or page_size != 25 %} data-active-filters{% endif %}>
+      <summary><span>Search and filters</span><span class="support-filter-status">{% if query or source_filter != 'all' or severity_filter != 'all' or page_size != 25 %}Active{% else %}All logs{% endif %}</span></summary>
+      <form class="support-filters" method="get">
       <label class="support-search"><span>Search</span><input type="search" name="q" value="{{ query }}" placeholder="Title, uploader, ID, version, platform…"></label>
       <label><span>Source</span><select name="source"><option value="all"{% if source_filter == 'all' %} selected{% endif %}>All sources</option><option value="discord"{% if source_filter == 'discord' %} selected{% endif %}>Discord</option><option value="web"{% if source_filter == 'web' %} selected{% endif %}>Web</option></select></label>
       <label><span>Severity</span><select name="severity"><option value="all"{% if severity_filter == 'all' %} selected{% endif %}>All findings</option>{% for severity in ('critical','error','warning','schema','advice') %}<option value="{{ severity }}"{% if severity_filter == severity %} selected{% endif %}>{{ severity|title }}</option>{% endfor %}<option value="none"{% if severity_filter == 'none' %} selected{% endif %}>No findings</option></select></label>
@@ -26,7 +28,8 @@
       <input type="hidden" name="sort" value="{{ sort_key }}"><input type="hidden" name="direction" value="{{ direction }}">
       <button class="primary-button support-apply" type="submit">Apply</button>
       <a class="secondary-button support-reset" href="{{ url_for('support.logs') }}">Reset</a>
-    </form>
+      </form>
+    </details>
 
     <div class="support-results-meta"><span>{{ filtered_logs }} matching log{% if filtered_logs != 1 %}s{% endif %}</span><span>Page {{ page }} of {{ page_count }}</span></div>
     <div class="support-table-wrap">

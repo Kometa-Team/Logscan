@@ -555,7 +555,9 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-total { display: flex; min-width: 120px; flex-direction: column; align-items: flex-end; }
 .support-total strong { font-size: 2rem; }
 .support-total span { color: var(--muted); font-size: .75rem; }
-.support-filters { display: grid; grid-template-columns: minmax(260px, 2fr) repeat(3, minmax(120px, .65fr)) auto auto; align-items: end; gap: 10px; padding: 16px; border-block: 1px solid var(--border); background: var(--surface-soft); }
+.support-filter-panel { border-block: 1px solid var(--border); background: var(--surface-soft); }
+.support-filter-panel > summary { display: none; }
+.support-filters { display: grid; grid-template-columns: minmax(260px, 2fr) repeat(3, minmax(120px, .65fr)) auto auto; align-items: end; gap: 10px; padding: 16px; }
 .support-filters label { display: grid; gap: 6px; color: var(--muted); font-size: .7rem; font-weight: 650; }
 .support-filters input, .support-filters select { width: 100%; height: 42px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; outline: none; background: #080b18; color: var(--text); }
 .support-filters input:focus, .support-filters select:focus { border-color: var(--accent-bright); }
@@ -605,10 +607,15 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .support-heading .hero-copy { font-size: .85rem; }
   .support-total { min-width: auto; }
   .support-total strong { font-size: 1.5rem; }
-  .support-filters { grid-template-columns: 1fr; }
+  .support-filter-panel > summary { display: flex; min-height: 52px; padding: 0 16px; align-items: center; justify-content: space-between; gap: 16px; color: var(--text); cursor: pointer; font-size: .82rem; font-weight: 700; list-style: none; }
+  .support-filter-panel > summary::-webkit-details-marker { display: none; }
+  .support-filter-panel > summary::after { content: "+"; color: var(--accent-bright); font-size: 1.35rem; font-weight: 400; line-height: 1; }
+  .support-filter-panel[open] > summary::after { content: "-"; }
+  .support-filter-status { margin-left: auto; color: var(--muted); font-size: .7rem; font-weight: 600; }
+  .support-filters { grid-template-columns: 1fr; padding-top: 4px; border-top: 1px solid var(--border); }
   .support-search { grid-column: auto; }
   .support-apply, .support-reset { width: 100%; }
-  .support-table-wrap { max-height: calc(100vh - 520px); }
+  .support-table-wrap { max-height: calc(100dvh - 340px); }
 }
 
 .support-discord-login { display: inline-flex; min-height: 46px; align-items: center; text-decoration: none; }

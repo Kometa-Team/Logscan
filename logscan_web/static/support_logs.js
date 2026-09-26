@@ -2,6 +2,11 @@ const dialog = document.querySelector("#support-navigation-dialog");
 const closeButton = document.querySelector("#support-navigation-close");
 const links = document.querySelector("#support-navigation-links");
 const deleteForm = document.querySelector("#support-delete-form");
+const filterPanel = document.querySelector(".support-filter-panel");
+
+if (filterPanel && window.matchMedia("(max-width: 560px)").matches && !filterPanel.hasAttribute("data-active-filters")) {
+  filterPanel.open = false;
+}
 
 const fields = {
   title: document.querySelector("#support-navigation-title"),
