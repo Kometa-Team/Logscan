@@ -144,6 +144,14 @@ class SupportConsoleTests(unittest.TestCase):
         sent_request = mocked_urlopen.call_args.args[0]
         self.assertEqual(sent_request.get_header("User-agent"), DISCORD_USER_AGENT)
         self.assertEqual(sent_request.get_header("Authorization"), "Bearer token")
+    def test_navigation_menu_loads_positioning_script(self):
+        template = Path("logscan_web/templates/support_logs.html").read_text(encoding="utf-8")
+        script = Path("logscan_web/static/support_logs.js").read_text(encoding="utf-8")
+        self.assertIn("support_logs.js", template)
+        self.assertIn("positionDestinationMenu", script)
+        self.assertIn("getBoundingClientRect", script)
+        self.assertIn("menu.style.left", script)
+        self.assertIn("menu.style.top", script)
 
 if __name__ == "__main__":
     unittest.main()
