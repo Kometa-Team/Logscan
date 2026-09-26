@@ -612,7 +612,9 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-discord-login { display: inline-flex; min-height: 46px; align-items: center; text-decoration: none; }
 .support-identity { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: .78rem; }
 .support-identity img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
-.support-actions { position: relative; overflow: visible; }
+.support-actions-heading, .support-actions { position: sticky !important; z-index: 3; left: 0; width: 104px; min-width: 104px; background: #0d1122; }
+.support-actions-heading { z-index: 4 !important; background: #12162b !important; }
+.support-actions { overflow: visible; }
 .support-destinations { position: relative; }
 .support-destinations summary { min-width: 82px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 5px; color: #c7d2fe; cursor: pointer; list-style: none; text-align: center; }
 .support-destinations summary::-webkit-details-marker { display: none; }

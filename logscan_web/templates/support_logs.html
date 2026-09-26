@@ -6,7 +6,7 @@
   <title>Active logs · Kometa Support</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260925-2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260926-1') }}">
   <script src="{{ url_for('static', filename='support_logs.js', v='20260926-1') }}" defer></script>
 </head>
 <body>
@@ -31,10 +31,11 @@
     <div class="support-results-meta"><span>{{ filtered_logs }} matching log{% if filtered_logs != 1 %}s{% endif %}</span><span>Page {{ page }} of {{ page_count }}</span></div>
     <div class="support-table-wrap">
       <table class="support-table">
-        <thead><tr><th>{{ sort_link('title','Title') }}</th><th>{{ sort_link('uploader','Uploaded by') }}</th><th>{{ sort_link('source','Source') }}</th><th>{{ sort_link('created_at','Uploaded') }}</th><th>{{ sort_link('updated_at','Updated') }}</th><th>{{ sort_link('expires_at','Deletes') }}</th><th>{{ sort_link('findings','Findings') }}</th><th>{{ sort_link('version','Kometa') }}</th><th>Environment</th><th>{{ sort_link('lines','Lines') }}</th><th>{{ sort_link('size','Size') }}</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <thead><tr><th class="support-actions-heading"><span class="visually-hidden">Actions</span></th><th>{{ sort_link('title','Title') }}</th><th>{{ sort_link('uploader','Uploaded by') }}</th><th>{{ sort_link('source','Source') }}</th><th>{{ sort_link('created_at','Uploaded') }}</th><th>{{ sort_link('updated_at','Updated') }}</th><th>{{ sort_link('expires_at','Deletes') }}</th><th>{{ sort_link('findings','Findings') }}</th><th>{{ sort_link('version','Kometa') }}</th><th>Environment</th><th>{{ sort_link('lines','Lines') }}</th><th>{{ sort_link('size','Size') }}</th></tr></thead>
         <tbody>
           {% for row in rows %}
           <tr>
+            <td class="support-actions"><details class="support-destinations"><summary>Navigate</summary><div class="support-destination-menu"><a href="{{ url_for('result_page', scan_id=row.id) }}#section=overview">Overview</a>{% for severity in ('critical','error','warning','schema','advice') %}{% if row.counts[severity] %}<a href="{{ url_for('result_page', scan_id=row.id) }}#section={{ severity }}">{{ severity|title }} <span>{{ row.counts[severity] }}</span></a>{% endif %}{% endfor %}<a href="{{ url_for('result_page', scan_id=row.id) }}#viewer=config">Configuration</a><a href="{{ url_for('result_page', scan_id=row.id) }}#viewer=log">Raw log</a>{% if row.message_url %}<a href="{{ row.message_url }}" target="_blank" rel="noopener">Discord message</a>{% endif %}</div></details></td>
             <td class="support-title"><a href="{{ url_for('result_page', scan_id=row.id) }}">{{ row.filename }}</a><code>{{ row.id }}</code></td>
             <td><strong>{{ row.uploader }}</strong>{% if row.uploader_id %}<small>{{ row.uploader_id }}</small>{% endif %}</td>
             <td><span class="support-source {{ row.source }}">{{ row.source|title }}</span></td>
@@ -45,7 +46,6 @@
             <td><strong>{{ row.kometa_version }}</strong><small>{{ row.kometa_branch|title }} · {{ row.installation }}</small></td>
             <td>{{ '{:,}'.format(row.line_count) }}</td>
             <td>{% if row.size_bytes >= 1048576 %}{{ '%.1f'|format(row.size_bytes / 1048576) }} MB{% else %}{{ '%.1f'|format(row.size_bytes / 1024) }} KB{% endif %}</td>
-            <td class="support-actions"><details class="support-destinations"><summary>Navigate</summary><div class="support-destination-menu"><a href="{{ url_for('result_page', scan_id=row.id) }}#section=overview">Overview</a>{% for severity in ('critical','error','warning','schema','advice') %}{% if row.counts[severity] %}<a href="{{ url_for('result_page', scan_id=row.id) }}#section={{ severity }}">{{ severity|title }} <span>{{ row.counts[severity] }}</span></a>{% endif %}{% endfor %}<a href="{{ url_for('result_page', scan_id=row.id) }}#viewer=config">Configuration</a><a href="{{ url_for('result_page', scan_id=row.id) }}#viewer=log">Raw log</a>{% if row.message_url %}<a href="{{ row.message_url }}" target="_blank" rel="noopener">Discord message</a>{% endif %}</div></details></td>
           </tr>
           {% else %}<tr><td class="support-empty" colspan="12">No active logs match these filters.</td></tr>{% endfor %}
         </tbody>
