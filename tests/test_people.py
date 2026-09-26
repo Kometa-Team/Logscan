@@ -1327,6 +1327,10 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertNotIn('class="source-filter"', html)
         self.assertIn('class="tag-filter-examples"', html)
         self.assertIn("Missing Kometa", html)
+        script = Path("logscan_web/static/people.js").read_text(encoding="utf-8")
+        css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
+        self.assertIn('person.sources?.includes("missing")', script)
+        self.assertIn(".person-card.missing-kometa-person", css)
 
 
 if __name__ == "__main__":

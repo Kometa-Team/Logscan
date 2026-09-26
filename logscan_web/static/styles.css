@@ -70,6 +70,8 @@ button { cursor: pointer; }
 .people-gallery { display: grid; gap: 20px; }
 .person-card, .person-detail { padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .person-card { position: relative; content-visibility: auto; contain-intrinsic-size: auto 900px; }
+.person-card.missing-kometa-person { border-color: rgba(251,191,36,.38); background: color-mix(in srgb, var(--surface) 94%, var(--warning) 6%); box-shadow: inset 3px 0 0 rgba(251,191,36,.62), 0 0 24px rgba(251,191,36,.07); }
+.person-card.missing-kometa-person:hover { border-color: rgba(251,191,36,.55); box-shadow: inset 3px 0 0 rgba(251,191,36,.78), 0 0 30px rgba(251,191,36,.11); }
 .flagged-person { border-color: rgba(251, 146, 60, .7); box-shadow: 0 0 28px rgba(251, 146, 60, .2); }
 .person-card h2 { font-size: 1.3rem; }
 .person-card h2 a { color: var(--text); text-decoration: none; }

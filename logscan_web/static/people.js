@@ -114,6 +114,7 @@ async function runAction(person, action, card) {
 function addPerson(person) {
   const card = document.createElement("article");
   card.className = "person-card";
+  if (person.sources?.includes("missing")) card.classList.add("missing-kometa-person");
   if (person.flag_reason) card.classList.add("flagged-person");
 
   const controls = document.createElement("div");
