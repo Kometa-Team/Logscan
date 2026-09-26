@@ -740,6 +740,37 @@ def create_app() -> Flask:
         except (URLError, TimeoutError) as exc:
             app.logger.warning("Unable to send missing-person Discord webhook: %s", exc)
 
+    def backfill_schema_validation_counts():
+        records = [
+            record for record in store.list()
+            if not isinstance((record.get("metadata") or {}).get("schema_validation_count"), int)
+        ]
+        if not records:
+            return
+        app.logger.info("Backfilling schema validation counts for %d retained scan(s).", len(records))
+        schema_cache = {}
+        completed = 0
+        for record in records:
+            scan_id = record.get("id", "")
+            path = store.log_path(scan_id)
+            if path is None:
+                continue
+            try:
+                log_content = path.read_text(encoding="utf-8", errors="replace")
+                failures = validate_redacted_config(log_content, schema_cache=schema_cache)
+                count = len(failures)
+            except ValueError:
+                count = 0
+            except RuntimeError as exc:
+                app.logger.warning("Schema count backfill unavailable for scan %s: %s", scan_id, exc)
+                continue
+            store.update_metadata(
+                scan_id,
+                schema_validation_count=count,
+                schema_validation_branch=schema_branch_for_log(log_content),
+            )
+            completed += 1
+        app.logger.info("Backfilled schema validation counts for %d of %d retained scan(s).", completed, len(records))
     def cleanup_loop():
         while True:
             try:
@@ -755,6 +786,7 @@ def create_app() -> Flask:
     store.delete_expired(RETENTION_SECONDS)
     if not app.config.get("TESTING"):
         threading.Thread(target=cleanup_loop, name="logscan-cleanup", daemon=True).start()
+        threading.Thread(target=backfill_schema_validation_counts, name="schema-count-backfill", daemon=True).start()
 
     @app.context_processor
     def service_usage():
@@ -999,7 +1031,23 @@ def create_app() -> Flask:
                             continue
                         reason = "ZIP contains no valid Kometa logs" if suffix == ".zip" else "Not a valid Kometa log file"
                     unscanned_files.append({"filename": entry.filename, "reason": reason})
+        schema_cache = {}
         for filename, content, result in scans:
+            if not app.config.get("TESTING"):
+                try:
+                    log_content = (
+                        content.read_text(encoding="utf-8", errors="replace")
+                        if isinstance(content, Path)
+                        else content.decode("utf-8", errors="replace")
+                    )
+                    schema_failures = validate_redacted_config(log_content, schema_cache=schema_cache)
+                    result.metadata["schema_validation_count"] = len(schema_failures)
+                    result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
+                except ValueError:
+                    result.metadata["schema_validation_count"] = 0
+                    result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
+                except RuntimeError as exc:
+                    app.logger.warning("Upload-time config validation unavailable for %s: %s", filename, exc)
             if uploaded_by:
                 result.overview["uploaded_by"] = uploaded_by
                 result.overview["uploaded_by_id"] = uploaded_by_id
@@ -1242,6 +1290,11 @@ def create_app() -> Flask:
         try:
             log_content = path.read_text(encoding="utf-8", errors="replace")
             failures = validate_redacted_config(log_content)
+            store.update_metadata(
+                scan_id,
+                schema_validation_count=len(failures),
+                schema_validation_branch=schema_branch_for_log(log_content),
+            )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         except RuntimeError as exc:

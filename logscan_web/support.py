@@ -293,6 +293,10 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         severity: sum(item.get("severity") == severity for item in recommendations)
         for severity in ("critical", "error", "warning", "schema", "advice")
     }
+    persisted_schema_count = metadata.get("schema_validation_count")
+    schema_count_available = isinstance(persisted_schema_count, int)
+    if schema_count_available:
+        counts["schema"] = persisted_schema_count
     created = _parsed_datetime(record.get("created_at"))
     updated = _parsed_datetime(record.get("updated_at"), created)
     expires = created + timedelta(seconds=retention_seconds)
@@ -311,7 +315,8 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         "remaining_seconds": max(0, int((expires - now).total_seconds())),
         "size_bytes": int(metadata.get("size_bytes") or 0),
         "line_count": int(metadata.get("line_count") or 0),
-        "finding_count": len(recommendations),
+        "finding_count": sum(counts.values()),
+        "schema_count_available": schema_count_available,
         "counts": counts,
         "kometa_version": metadata.get("kometa_version") or "Unknown",
         "kometa_branch": metadata.get("kometa_branch") or "unknown",

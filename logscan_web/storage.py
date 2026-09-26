@@ -104,6 +104,18 @@ class ScanStore:
         path = self.root / scan_id / "log"
         return path if path.is_file() else None
 
+    def update_metadata(self, scan_id: str, **values) -> bool:
+        """Persist trusted derived metadata for an existing scan."""
+        record = self.get(scan_id)
+        if record is None:
+            return False
+        record.setdefault("metadata", {}).update(values)
+        result_path = self.root / scan_id / "result.json"
+        temporary = self.root / scan_id / "result.json.tmp"
+        temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(result_path)
+        return True
+
     def delete(self, scan_id: str, token: str) -> bool:
         record = self.get(scan_id)
         if record is None:

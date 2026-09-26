@@ -233,11 +233,13 @@ def _schema_failure_guidance(error: object, path: str, unexpected: str | None = 
         return {"title": f"Invalid value format at {location}", "location": location, "accepted": accepted, "explanation": f"The value at {location} is not in the format Kometa expects.", "action": f"Correct the format at {location} using the documented example."}
     return {"title": f"Invalid configuration at {location}", "location": location, "accepted": accepted, "explanation": error.message, "action": f"Correct the value or structure at {location} using the Kometa documentation."}
 
-def validate_redacted_config(log_content: str) -> list[dict[str, str | int]]:
+def validate_redacted_config(
+    log_content: str, *, schema_cache: dict[str, dict] | None = None
+) -> list[dict[str, str | int]]:
     """Validate a log's extracted config against its matching Kometa schema.
 
-    The schema is deliberately downloaded for every call so validation reflects
-    the current master or develop schema.
+    A caller may provide a short-lived cache to reuse each branch schema while
+    processing a batch. Independent calls still fetch the current schema.
     """
     config_text, log_lines = extract_redacted_config(log_content)
     if not config_text.strip():
@@ -249,14 +251,18 @@ def validate_redacted_config(log_content: str) -> list[dict[str, str | int]]:
         mark = getattr(exc, "problem_mark", None)
         line = log_lines[mark.line] if mark and mark.line < len(log_lines) else log_lines[0]
         return [{"line": line, "message": f"Invalid YAML: {getattr(exc, 'problem', str(exc))}", "path": ""}]
+    schema_branch = schema_branch_for_log(log_content)
     try:
-        schema_branch = schema_branch_for_log(log_content)
-        schema_request = Request(
-            KOMETA_CONFIG_SCHEMA_URL.format(branch=schema_branch),
-            headers={"Accept": "application/json", "Cache-Control": "no-cache", "User-Agent": "Kometa-Logscan/1.0"},
-        )
-        with urlopen(schema_request, timeout=15) as response:
-            schema = json.loads(response.read().decode("utf-8"))
+        schema = schema_cache.get(schema_branch) if schema_cache is not None else None
+        if schema is None:
+            schema_request = Request(
+                KOMETA_CONFIG_SCHEMA_URL.format(branch=schema_branch),
+                headers={"Accept": "application/json", "Cache-Control": "no-cache", "User-Agent": "Kometa-Logscan/1.0"},
+            )
+            with urlopen(schema_request, timeout=15) as response:
+                schema = json.loads(response.read().decode("utf-8"))
+            if schema_cache is not None:
+                schema_cache[schema_branch] = schema
     except (HTTPError, URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"The Kometa {schema_branch} configuration schema could not be fetched.") from exc
 

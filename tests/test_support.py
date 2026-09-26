@@ -30,6 +30,7 @@ class SupportConsoleTests(unittest.TestCase):
                 "runtime_platform": "Linux",
                 "installation_method": "Docker",
                 "complete": True,
+                "schema_validation_count": 3,
             },
             overview={
                 "uploaded_by": "Support Person",
@@ -133,12 +134,20 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("discord-example.log", body)
         self.assertIn("Navigate", body)
         self.assertIn(f"/scan/{self.scan_id}#viewer=config", body)
+        self.assertIn("Schema <span>3</span>", body)
+        self.assertIn('data-findings="5"', body)
         self.assertIn('<option value="all">All</option>', body)
         all_rows = self.client.get("/support/logs?page_size=all").get_data(as_text=True)
         self.assertIn('<option value="all" selected>All</option>', all_rows)
         self.assertNotIn(self.delete_token, body)
         self.assertNotIn("delete_token_hash", body)
 
+
+    def test_schema_count_is_backed_by_persisted_validation_metadata(self):
+        self.authorize_session()
+        body = self.client.get("/support/logs?severity=schema").get_data(as_text=True)
+        self.assertIn("discord-example.log", body)
+        self.assertIn('<span class="severity-chip schema" title="Schema">3</span>', body)
     @patch("logscan_web.support.urlopen")
     def test_discord_requests_send_explicit_user_agent(self, mocked_urlopen):
         response = mocked_urlopen.return_value.__enter__.return_value
@@ -162,7 +171,8 @@ class SupportConsoleTests(unittest.TestCase):
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
         self.assertIn(".support-actions-heading, .support-actions { position: sticky", css)
         self.assertIn("severity == 'schema' or row.counts[severity]", template)
-        self.assertIn("Live check", template)
+        self.assertIn("row.schema_count_available", template)
+        self.assertIn("Unavailable", template)
         self.assertIn("Expires in", template)
         self.assertIn("Kometa / Environment", template)
         self.assertNotIn("sort_link('updated_at','Updated')", template)
