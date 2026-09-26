@@ -22,7 +22,7 @@
       <label class="support-search"><span>Search</span><input type="search" name="q" value="{{ query }}" placeholder="Title, uploader, ID, version, platform…"></label>
       <label><span>Source</span><select name="source"><option value="all"{% if source_filter == 'all' %} selected{% endif %}>All sources</option><option value="discord"{% if source_filter == 'discord' %} selected{% endif %}>Discord</option><option value="web"{% if source_filter == 'web' %} selected{% endif %}>Web</option></select></label>
       <label><span>Severity</span><select name="severity"><option value="all"{% if severity_filter == 'all' %} selected{% endif %}>All findings</option>{% for severity in ('critical','error','warning','schema','advice') %}<option value="{{ severity }}"{% if severity_filter == severity %} selected{% endif %}>{{ severity|title }}</option>{% endfor %}<option value="none"{% if severity_filter == 'none' %} selected{% endif %}>No findings</option></select></label>
-      <label><span>Rows</span><select name="page_size">{% for size in (25,50,100) %}<option value="{{ size }}"{% if page_size == size %} selected{% endif %}>{{ size }}</option>{% endfor %}</select></label>
+      <label><span>Rows</span><select name="page_size">{% for size in (25,50,100) %}<option value="{{ size }}"{% if page_size == size %} selected{% endif %}>{{ size }}</option>{% endfor %}<option value="all"{% if page_size == 'all' %} selected{% endif %}>All</option></select></label>
       <input type="hidden" name="sort" value="{{ sort_key }}"><input type="hidden" name="direction" value="{{ direction }}">
       <button class="primary-button support-apply" type="submit">Apply</button>
       <a class="secondary-button support-reset" href="{{ url_for('support.logs') }}">Reset</a>

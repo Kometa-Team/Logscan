@@ -133,6 +133,9 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("discord-example.log", body)
         self.assertIn("Navigate", body)
         self.assertIn(f"/scan/{self.scan_id}#viewer=config", body)
+        self.assertIn('<option value="all">All</option>', body)
+        all_rows = self.client.get("/support/logs?page_size=all").get_data(as_text=True)
+        self.assertIn('<option value="all" selected>All</option>', all_rows)
         self.assertNotIn(self.delete_token, body)
         self.assertNotIn("delete_token_hash", body)
 

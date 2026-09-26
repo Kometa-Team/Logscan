@@ -159,8 +159,13 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         severity_filter = request.args.get("severity", "all").casefold()
         sort_key = request.args.get("sort", "created_at")
         direction = request.args.get("direction", "desc")
+        page_size_value = request.args.get("page_size", "25").casefold()
         try:
-            page_size = min(100, max(10, int(request.args.get("page_size", 25))))
+            page_size = (
+                None
+                if page_size_value == "all"
+                else min(100, max(10, int(page_size_value)))
+            )
             page = max(1, int(request.args.get("page", 1)))
         except ValueError:
             page_size, page = 25, 1
@@ -197,17 +202,22 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         rows.sort(key=sorters[sort_key], reverse=direction == "desc")
 
         filtered_logs = len(rows)
-        page_count = max(1, (filtered_logs + page_size - 1) // page_size)
+        page_count = (
+            1
+            if page_size is None
+            else max(1, (filtered_logs + page_size - 1) // page_size)
+        )
         page = min(page, page_count)
-        start = (page - 1) * page_size
+        start = 0 if page_size is None else (page - 1) * page_size
+        visible_rows = rows if page_size is None else rows[start : start + page_size]
         return render_template(
             "support_logs.html",
-            rows=rows[start : start + page_size],
+            rows=visible_rows,
             total_logs=total_logs,
             filtered_logs=filtered_logs,
             page=page,
             page_count=page_count,
-            page_size=page_size,
+            page_size="all" if page_size is None else page_size,
             query=query,
             source_filter=source_filter,
             severity_filter=severity_filter,
