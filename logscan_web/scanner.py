@@ -428,7 +428,12 @@ def _log_overview(
     recommendations: list[dict],
 ) -> dict:
     yaml_findings = [item for item in recommendations if item["severity"] == "schema"]
-    yaml_status = "Schema issues detected" if yaml_findings else "No YAML or schema issues detected"
+    yaml_status = (
+        f"{len(yaml_findings)} configuration validation issue"
+        f"{'' if len(yaml_findings) == 1 else 's'} detected in log"
+        if yaml_findings
+        else "Live schema validation pending"
+    )
     completed_run = re.search(
         r"Start Time:\s*(?P<start>.*?)\s+Finished:\s*(?P<end>.*?)\s+Run Time:\s*(?P<runtime>[^|\r\n]+)",
         content,

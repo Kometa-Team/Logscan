@@ -689,6 +689,26 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("schemaIssueRecommendations(updated.recommendations).length", script)
         self.assertNotIn('id: "live_schema_passed"', script)
 
+    def test_overview_validation_status_tracks_live_schema_results(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn("overview.yaml_issue_count = schemaIssueCount", script)
+        self.assertIn("schemaIssueCount.toLocaleString()", script)
+        self.assertIn("Live schema validation unavailable", script)
+        self.assertIn("No schema issues detected", script)
+        self.assertIn("Live schema validation pending", script)
+
+    def test_overview_validation_card_opens_first_config_issue(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('label === "Configuration validation"', script)
+        self.assertIn('item.classList.add("overview-validation-issue")', script)
+        self.assertIn('item.setAttribute("role", "button")', script)
+        self.assertIn("showConfigInViewer(Number(firstIssue?.config_line) || 0)", script)
+        self.assertIn(".overview-validation-issue:hover", css)
+        self.assertIn("box-shadow: inset 3px 0 0 var(--schema)", css)
+
     def test_yaml_schema_directive_detection_uses_extracted_config(self):
         prefix = "[config.py:1] [INFO] |"
         without_directive = "\n".join([

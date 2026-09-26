@@ -132,7 +132,7 @@ function showOverview(group, overview) {
     ["Start time", overview.start_time],
     ["End time", overview.finished],
     ["Run time", overview.run_time],
-    ["YAML validation", overview.yaml_validation],
+    ["Configuration validation", overview.yaml_validation],
     ["Log Auto-Delete", overview.auto_delete],
   ];
   const grid = document.createElement("dl");
@@ -156,6 +156,25 @@ function showOverview(group, overview) {
       definition.append("Discord Message: ", link);
     } else {
       definition.textContent = displayValue(value);
+    }
+    if (label === "Configuration validation" && Number(overview.yaml_issue_count) > 0) {
+      const openFirstIssue = () => {
+        const firstIssue = schemaIssueRecommendations()
+          .filter((candidate) => Number(candidate.config_line) > 0)
+          .sort((left, right) => Number(left.config_line) - Number(right.config_line))[0];
+        showConfigInViewer(Number(firstIssue?.config_line) || 0).catch((error) => alert(error.message));
+      };
+      item.classList.add("overview-validation-issue");
+      item.tabIndex = 0;
+      item.setAttribute("role", "button");
+      item.setAttribute("aria-label", `${value}. Review the first issue in config.yml`);
+      item.addEventListener("click", openFirstIssue);
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openFirstIssue();
+        }
+      });
     }
     item.append(term, definition);
     grid.append(item);
@@ -1097,6 +1116,16 @@ function renderResults(data, runSchemaValidation = true) {
   deleteToken = new URLSearchParams(location.hash.slice(1)).get("delete");
   updateRetentionCountdown(data);
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
+  const schemaIssueCount = Number(metadata.counts.schema) || 0;
+  const schemaUnavailable = recommendations.some((item) => item.id === "live_schema_unavailable");
+  overview.yaml_issue_count = schemaIssueCount;
+  overview.yaml_validation = schemaUnavailable
+    ? "Live schema validation unavailable"
+    : schemaIssueCount
+      ? `${schemaIssueCount.toLocaleString()} schema issue${schemaIssueCount === 1 ? "" : "s"} detected`
+      : data.schema_validation_loaded
+        ? "No schema issues detected"
+        : "Live schema validation pending";
   currentRecommendations = recommendations;
   currentSchemaBranch = metadata.kometa_branch === "master" ? "master" : "develop";
   currentOverview = overview;
