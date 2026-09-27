@@ -256,6 +256,11 @@ a.source-badge:hover { filter: brightness(1.2); }
 .upload-identity small, .support-login-note { margin-top: 5px; color: #7f89a8; font-size: .7rem; }
 .upload-identity a { flex: 0 0 auto; color: var(--accent-bright); font-size: .8rem; font-weight: 700; text-decoration: none; }
 .upload-identity a:hover { color: white; }
+.result-auth-state { display: flex; min-height: 30px; margin-top: 10px; align-items: center; gap: 8px; color: var(--muted); font-size: .75rem; }
+.result-auth-state img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+.result-auth-state strong { color: var(--text); }
+.result-auth-state a { color: var(--accent-bright); font-weight: 700; text-decoration: none; }
+.result-auth-state a:hover { color: white; }
 
 .upload-card {
   border: 1px solid var(--border);
