@@ -1229,6 +1229,27 @@ function stopScanStatus() {
   if (scanStatusTimer) clearInterval(scanStatusTimer);
   scanStatusTimer = null;
 }
+function renderCompletedJob(result) {
+  const scans = result.scans || [result];
+  scans.forEach((scan) => Object.assign(scan, {
+    batch_result_url: result.batch_result_url,
+    batch_admin_url: result.batch_admin_url,
+    unscanned_files: result.unscanned_files || [],
+  }));
+  batchScans = scans;
+  status.textContent = `${scans.length} scan${scans.length === 1 ? "" : "s"} complete`;
+  dropZone.classList.remove("loading");
+  scanButton.disabled = false;
+  if (scans.length > 1) {
+    renderBatchResults(scans);
+    return;
+  }
+  currentScanId = scans[0].id;
+  deleteToken = scans[0].delete_token;
+  history.replaceState({}, "", `/scan/${encodeURIComponent(scans[0].id)}#delete=${encodeURIComponent(deleteToken)}`);
+  renderResults(scans[0]);
+}
+
 async function refreshScanStatus(jobId, recover = false) {
   const response = await fetch(`/api/scan-jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
   if (!response.ok) return;
@@ -1250,7 +1271,11 @@ async function refreshScanStatus(jobId, recover = false) {
   } else if (job.phase === "complete") {
     sessionStorage.removeItem("activeScanJob");
     stopScanStatus();
-    if (recover && job.redirect_url) location.assign(job.redirect_url);
+    if (job.redirect_url) {
+      location.assign(job.redirect_url);
+    } else if (job.result) {
+      renderCompletedJob(job.result);
+    }
   }
 }
 function watchScanStatus(jobId, recover = false) {
