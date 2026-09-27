@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260927-8') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260927-9') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
   <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260927-2') }}" defer></script>
@@ -77,6 +77,16 @@
         <div class="batch-results-actions"><button class="secondary-button icon-action" id="share-batch-results" type="button" hidden aria-label="Share public batch page" title="Share public batch page"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i></button><button class="secondary-button icon-action" id="copy-batch-results" type="button" aria-label="Copy Markdown links" title="Copy Markdown links"><i class="fa-solid fa-copy" aria-hidden="true"></i></button><button class="danger-button icon-action" id="delete-batch" type="button" hidden aria-label="Delete all batch logs" title="Delete all batch logs"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button></div>
       </div>
       <p>Each file was scanned separately.</p>
+      <div class="result-auth-state batch-auth-state">
+        {% if discord_user %}
+          {% if discord_user.avatar %}<img src="{{ discord_user.avatar }}" alt="">{% endif %}
+          <span>Signed in as <strong>{{ discord_user.username }}</strong></span>
+          <a href="{{ url_for('support.logs', view='mine') }}">My uploads</a>
+        {% else %}
+          <span><strong>Viewing anonymously</strong></span>
+          <a href="{{ url_for('support.authorize', next=request.full_path.rstrip('?')) }}">Sign in with Discord</a>
+        {% endif %}
+      </div>
       <ul id="batch-result-links"></ul>
       <p id="batch-unscanned-title" class="batch-unscanned" hidden>These files were not scanned:</p>
       <ul id="batch-unscanned-files" class="batch-unscanned" hidden></ul>

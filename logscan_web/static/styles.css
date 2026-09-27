@@ -259,6 +259,7 @@ a.source-badge:hover { filter: brightness(1.2); }
 .result-auth-state strong { color: var(--text); }
 .result-auth-state a { color: var(--accent-bright); font-weight: 700; text-decoration: none; }
 .result-auth-state a:hover { color: white; }
+.batch-auth-state { margin: 14px 0 4px; }
 
 .upload-card {
   border: 1px solid var(--border);
