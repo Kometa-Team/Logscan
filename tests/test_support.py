@@ -29,6 +29,9 @@ class SupportConsoleTests(unittest.TestCase):
                 "kometa_branch": "develop",
                 "runtime_platform": "Linux",
                 "installation_method": "Docker",
+                "quickstart_run": True,
+                "quickstart_version": "0.10.6-build7",
+                "quickstart_branch": "develop",
                 "complete": True,
                 "schema_validation_count": 3,
             },
@@ -136,6 +139,9 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn('class="site-nav-account"', body)
         self.assertIn("Support Person", body)
         self.assertIn('class="site-nav-signout"', body)
+        self.assertIn('class="support-launcher"', body)
+        self.assertIn("QS 0.10.6-build7", body)
+        self.assertIn("Quickstart 0.10.6-build7", body)
         self.assertIn(f"/scan/{self.scan_id}#viewer=config", body)
         self.assertIn("Schema <span>3</span>", body)
         self.assertIn('data-findings="5"', body)

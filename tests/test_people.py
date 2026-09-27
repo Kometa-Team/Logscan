@@ -689,6 +689,14 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("schemaIssueRecommendations(updated.recommendations).length", script)
         self.assertNotIn('id: "live_schema_passed"', script)
 
+    def test_overview_identifies_quickstart_and_direct_launchers(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn('["Run launcher", overview.run_launcher]', script)
+        self.assertIn("metadata.quickstart_run", script)
+        self.assertIn('metadata.quickstart_version || "version unknown"', script)
+        self.assertIn('"Direct Kometa run"', script)
+
     def test_overview_validation_status_tracks_live_schema_results(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 

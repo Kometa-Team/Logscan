@@ -322,10 +322,16 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         "kometa_branch": metadata.get("kometa_branch") or "unknown",
         "platform": metadata.get("runtime_platform") or "Unknown",
         "installation": metadata.get("installation_method") or "Unknown",
+        "quickstart_run": bool(metadata.get("quickstart_run")),
+        "quickstart_version": metadata.get("quickstart_version"),
+        "quickstart_branch": metadata.get("quickstart_branch") or "unknown",
         "complete": bool(metadata.get("complete")),
         "message_url": overview.get("message_url"),
     }
     row["search_text"] = " ".join(
-        str(row[key]) for key in ("filename", "uploader", "uploader_id", "id", "kometa_version", "platform", "installation")
+        str(row[key]) for key in (
+            "filename", "uploader", "uploader_id", "id", "kometa_version", "platform",
+            "installation", "quickstart_version", "quickstart_branch",
+        )
     ).casefold()
     return row
