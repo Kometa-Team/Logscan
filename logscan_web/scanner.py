@@ -547,14 +547,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     kometa_version = version_match.group(1).strip() if version_match else None
     branch_match = re.search(r"\(Branch:\s*(master|develop|nightly)\)", sample_content, re.I)
     kometa_branch = branch_match.group(1).casefold() if branch_match else "unknown"
-    quickstart_marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", sample_content, re.I)
-    quickstart_fields = {
-        key.casefold(): value
-        for key, value in re.findall(r"\b(quickstart|branch)=([^\s|]+)", quickstart_marker.group(0), re.I)
-    } if quickstart_marker else {}
-    quickstart_branch = quickstart_fields.get("branch", "unknown").casefold()
-    if quickstart_branch not in {"master", "develop"}:
-        quickstart_branch = "unknown"
+    quickstart_metadata = extract_quickstart_metadata(sample_content)
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", sample_content)
     detected_run_time = run_match.group(1).strip() if run_match else None
     context = ScanContext.from_content(
@@ -570,9 +563,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         "kometa_version": kometa_version,
         "newest_version_at_run": _first_value(sample_content, "Newest Version"),
         "kometa_branch": kometa_branch,
-        "quickstart_run": bool(quickstart_marker),
-        "quickstart_version": quickstart_fields.get("quickstart"),
-        "quickstart_branch": quickstart_branch,
+        **quickstart_metadata,
         "runtime_platform": normalized_platform(runtime_platform),
         "installation_method": normalized_installation(kometa_version),
         "run_time": str(detected_run_time) if detected_run_time else None,
@@ -594,6 +585,23 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         missing_people=extract_missing_people("\n".join(missing_lines)),
     )
 
+def extract_quickstart_metadata(content: str) -> dict:
+    """Extract non-sensitive Quickstart launcher metadata from a Kometa log."""
+    marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", content, re.IGNORECASE)
+    fields = {
+        key.casefold(): value
+        for key, value in re.findall(r"\b(quickstart|branch)=([^\s|]+)", marker.group(0), re.IGNORECASE)
+    } if marker else {}
+    branch = fields.get("branch", "unknown").casefold()
+    if branch not in {"master", "develop"}:
+        branch = "unknown"
+    return {
+        "quickstart_run": bool(marker),
+        "quickstart_version": fields.get("quickstart"),
+        "quickstart_branch": branch,
+    }
+
+
 def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     filename, content_bytes = prepare_scan_input(filename, content_bytes)
     if not content_bytes:
@@ -609,14 +617,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     kometa_version = version_match.group(1).strip() if version_match else None
     kometa_branch_match = re.search(r"\(Branch:\s*(master|develop|nightly)\)", content, re.IGNORECASE)
     kometa_branch = kometa_branch_match.group(1).casefold() if kometa_branch_match else "unknown"
-    quickstart_marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", content, re.IGNORECASE)
-    quickstart_fields = {
-        key.casefold(): value
-        for key, value in re.findall(r"\b(quickstart|branch)=([^\s|]+)", quickstart_marker.group(0), re.IGNORECASE)
-    } if quickstart_marker else {}
-    quickstart_branch = quickstart_fields.get("branch", "unknown").casefold()
-    if quickstart_branch not in {"master", "develop"}:
-        quickstart_branch = "unknown"
+    quickstart_metadata = extract_quickstart_metadata(content)
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", content)
     detected_run_time = run_match.group(1).strip() if run_match else None
     context = ScanContext.from_content(
@@ -638,9 +639,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "kometa_version": kometa_version,
         "newest_version_at_run": _first_value(content, "Newest Version"),
         "kometa_branch": kometa_branch,
-        "quickstart_run": bool(quickstart_marker),
-        "quickstart_version": quickstart_fields.get("quickstart"),
-        "quickstart_branch": quickstart_branch,
+        **quickstart_metadata,
         "runtime_platform": normalized_platform(runtime_platform),
         "installation_method": normalized_installation(kometa_version),
         "run_time": str(detected_run_time) if detected_run_time else None,

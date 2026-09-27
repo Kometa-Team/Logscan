@@ -33,6 +33,7 @@ from logscan_web.scanner import (
     extract_section_run_times,
     normalized_platform,
     normalized_installation,
+    extract_quickstart_metadata,
     apply_documentation_branch,
     scan_archive_logs,
     scan_log,
@@ -689,6 +690,14 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("schemaIssueRecommendations(updated.recommendations).length", script)
         self.assertNotIn('id: "live_schema_passed"', script)
 
+    def test_overview_identifies_quickstart_and_direct_launchers(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn('["Run launcher", overview.run_launcher]', script)
+        self.assertIn("metadata.quickstart_run", script)
+        self.assertIn('metadata.quickstart_version || "version unknown"', script)
+        self.assertIn('"Direct Kometa run"', script)
+
     def test_overview_validation_status_tracks_live_schema_results(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 
@@ -948,6 +957,23 @@ class RuntimeMetadataTests(unittest.TestCase):
             "Plex Configuration - Show",
             "Plex Configuration - Section 3",
         ])
+
+    def test_quickstart_metadata_extractor_supports_backfill_and_direct_runs(self):
+        quickstart = extract_quickstart_metadata(
+            "[Quickstart] Run marker: quickstart=0.10.6-build7 branch=develop"
+        )
+        direct = extract_quickstart_metadata("[kometa.py:1] [INFO] | Version: 2.5.0 |")
+
+        self.assertEqual(quickstart, {
+            "quickstart_run": True,
+            "quickstart_version": "0.10.6-build7",
+            "quickstart_branch": "develop",
+        })
+        self.assertEqual(direct, {
+            "quickstart_run": False,
+            "quickstart_version": None,
+            "quickstart_branch": "unknown",
+        })
 
     def test_kometa_and_quickstart_channels_are_extracted_from_safe_markers(self):
         content = "\n".join([

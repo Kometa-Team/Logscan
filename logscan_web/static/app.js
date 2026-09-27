@@ -129,6 +129,7 @@ function showOverview(group, overview) {
     ["Total memory", overview.total_memory],
     ["Available memory", overview.available_memory],
     ["Run command", overview.run_command],
+    ["Run launcher", overview.run_launcher],
     ["Start time", overview.start_time],
     ["End time", overview.finished],
     ["Run time", overview.run_time],
@@ -1119,6 +1120,12 @@ function renderResults(data, runSchemaValidation = true) {
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
   const schemaIssueCount = Number(metadata.counts.schema) || 0;
   const schemaUnavailable = recommendations.some((item) => item.id === "live_schema_unavailable");
+  const quickstartBranch = metadata.quickstart_branch && metadata.quickstart_branch !== "unknown"
+    ? ` - ${metadata.quickstart_branch[0].toUpperCase()}${metadata.quickstart_branch.slice(1)}`
+    : "";
+  overview.run_launcher = metadata.quickstart_run
+    ? `Quickstart ${metadata.quickstart_version || "version unknown"}${quickstartBranch}`
+    : "Direct Kometa run";
   overview.yaml_issue_count = schemaIssueCount;
   overview.yaml_validation = schemaUnavailable
     ? "Live schema validation unavailable"

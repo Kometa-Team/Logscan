@@ -619,6 +619,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-source { display: inline-flex; padding: 4px 7px; border: 1px solid currentColor; border-radius: 5px; font-size: .65rem; font-weight: 700; }
 .support-source.discord { background: rgba(114,119,248,.12); color: #c7d2fe; }
 .support-source.web { background: rgba(34,211,238,.1); color: #a5f3fc; }
+.support-launcher { display: inline-flex; margin-left: 5px; padding: 2px 5px; align-items: center; border: 1px solid #a78bfa; border-radius: 4px; background: rgba(167,139,250,.12); color: #d8b4fe; font-size: .58rem; line-height: 1; vertical-align: 2px; }
 .support-severities { display: flex; gap: 4px; }
 .severity-chip { display: grid; min-width: 23px; height: 23px; padding: 0 5px; place-items: center; border: 1px solid currentColor; border-radius: 5px; font-size: .65rem; font-weight: 700; }
 .severity-chip.critical { color: #fda4af; background: rgba(244,63,94,.12); }
