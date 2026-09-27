@@ -23,7 +23,7 @@ from .models import Finding
 from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
-from .support import create_support_blueprint, support_session_authorized
+from .support import create_support_blueprint, discord_session_user, support_session_authorized
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
@@ -158,12 +158,12 @@ def create_app() -> Flask:
     missing_support_keys = [key for key in support_keys if not app.config.get(key)]
     if missing_support_keys:
         app.logger.warning(
-            "Discord support OAuth disabled; missing configuration: %s",
+            "Discord OAuth disabled; missing configuration: %s",
             ", ".join(missing_support_keys),
         )
     else:
         app.logger.warning(
-            "Discord support OAuth enabled: guild_id=%s roles=%d redirect_uri=%s secure_cookie=%s",
+            "Discord OAuth enabled: guild_id=%s roles=%d redirect_uri=%s secure_cookie=%s",
             app.config["DISCORD_GUILD_ID"],
             len(app.config["DISCORD_SUPPORT_ROLE_IDS"]),
             app.config["DISCORD_REDIRECT_URI"],
@@ -832,7 +832,8 @@ def create_app() -> Flask:
             stats["tracking_since"] = "tracking began"
         return {
             "usage_stats": stats,
-            "support_user": session.get("support_user") if support_session_authorized() else None,
+            "discord_user": discord_session_user(),
+            "support_access": support_session_authorized(),
         }
 
     @app.get("/")
@@ -971,9 +972,12 @@ def create_app() -> Flask:
             return jsonify(error="Choose a log file to scan."), 400
         upload = uploads[0]
         upload_filename = upload.filename
-        source_url = request.form.get("source_url") if is_bot else None
-        uploaded_by = request.form.get("uploaded_by") if is_bot else None
-        uploaded_by_id = request.form.get("uploaded_by_id") if is_bot else None
+        trusted_attribution = is_bot or is_background_scan
+        signed_in_user = discord_session_user() if not trusted_attribution else None
+        source_url = request.form.get("source_url") if trusted_attribution else None
+        uploaded_by = request.form.get("uploaded_by") if trusted_attribution else (signed_in_user or {}).get("username")
+        uploaded_by_id = request.form.get("uploaded_by_id") if trusted_attribution else (signed_in_user or {}).get("id")
+        upload_source = "discord" if is_bot else "web"
         try:
             if len(uploads) == 1:
                 content = upload.read()
@@ -1077,6 +1081,7 @@ def create_app() -> Flask:
                     result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
                 except RuntimeError as exc:
                     app.logger.warning("Upload-time config validation unavailable for %s: %s", filename, exc)
+            result.overview["upload_source"] = upload_source
             if uploaded_by:
                 result.overview["uploaded_by"] = uploaded_by
                 result.overview["uploaded_by_id"] = uploaded_by_id
