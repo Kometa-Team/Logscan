@@ -3,7 +3,7 @@
     <img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt="">
     <span>Kometa Utilities</span>
   </a>
-  {% if discord_user %}<a class="header-my-uploads" href="{{ url_for('support.logs', view='mine') }}"{% if active_page == 'support' and view_mode|default('mine') == 'mine' %} aria-current="page"{% endif %}>My uploads</a>{% endif %}
+  {% if discord_user %}<a class="header-my-uploads" href="{{ url_for('support.logs', view='mine') }}"{% if active_page == 'support' and view_mode|default('mine') == 'mine' %} aria-current="page"{% endif %}>My uploads</a>{% else %}<a class="header-my-uploads" href="{{ url_for('support.authorize', next=request.full_path.rstrip('?')) }}">Sign in with Discord</a>{% endif %}
   <details class="site-nav">
     <summary aria-label="Open navigation">
       <span class="site-nav-summary-label">
@@ -21,7 +21,7 @@
         <a class="site-nav-primary-item" href="/"{% if active_page == 'scanner' %} aria-current="page"{% endif %}>Log Scanner</a>
         <a class="site-nav-primary-item" href="/people"{% if active_page == 'people' %} aria-current="page"{% endif %}>People</a>
         <a class="site-nav-primary-item" href="/analytics"{% if active_page == 'analytics' %} aria-current="page"{% endif %}>Analytics</a>
-        {% if discord_user %}{% if support_access %}<a href="{{ url_for('support.logs', view='all') }}"{% if active_page == 'support' and view_mode|default('mine') == 'all' %} aria-current="page"{% endif %}>Support Console</a>{% endif %}{% else %}<a href="{{ url_for('support.authorize', next=request.full_path.rstrip('?')) }}">Sign in with Discord</a>{% endif %}
+        {% if discord_user and support_access %}<a href="{{ url_for('support.logs', view='all') }}"{% if active_page == 'support' and view_mode|default('mine') == 'all' %} aria-current="page"{% endif %}>Support Console</a>{% endif %}
       </nav>
       <nav class="site-nav-external" aria-label="Kometa website">
         <a href="https://utilities.kometa.wiki/" rel="external">Kometa Utilities Home <span aria-hidden="true">&#8599;</span></a>
