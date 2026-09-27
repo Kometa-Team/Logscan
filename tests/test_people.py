@@ -145,6 +145,39 @@ class StreamingScanTests(unittest.TestCase):
         self.assertGreaterEqual(payload["elapsed_seconds"], 0)
         self.assertIn("#delete=", payload["redirect_url"])
 
+    def test_signed_in_web_upload_preserves_verified_identity_through_background_scan(self):
+        client = app.test_client()
+        with client.session_transaction() as discord_session:
+            discord_session["support_authorized_at"] = 9999999999
+            discord_session["support_access"] = False
+            discord_session["discord_user"] = {
+                "id": "web-user-42",
+                "username": "Web User",
+                "avatar": "",
+            }
+        job_id = "signed-in-web-background-123456"
+        response = client.post(
+            "/api/scan",
+            data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "signed-in.log")},
+            content_type="multipart/form-data",
+            headers={"X-Scan-Job-ID": job_id},
+        )
+        self.assertEqual(response.status_code, 202)
+        deadline = time.monotonic() + 5
+        while True:
+            payload = client.get(f"/api/scan-jobs/{job_id}").get_json()
+            if payload["phase"] in {"complete", "failed"}:
+                break
+            if time.monotonic() >= deadline:
+                self.fail(f"Signed-in background scan did not finish: {payload}")
+            time.sleep(0.01)
+        self.assertEqual(payload["phase"], "complete", payload)
+        scan_id = payload["redirect_url"].split("/scan/", 1)[1].split("#", 1)[0]
+        record = json.loads(Path(STORE.name, scan_id, "result.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["overview"]["uploaded_by"], "Web User")
+        self.assertEqual(record["overview"]["uploaded_by_id"], "web-user-42")
+        self.assertEqual(record["overview"]["upload_source"], "web")
+
     def test_bot_upload_runs_in_background_and_preserves_requester(self):
         job_id = "discord-background-123456789012"
         previous_key = app.config["LOGSCAN_API_KEY"]

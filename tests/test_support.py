@@ -86,6 +86,26 @@ class SupportConsoleTests(unittest.TestCase):
             session["support_authorized_at"] = time.time() - (25 * 60 * 60)
             self.assertFalse(support_session_authorized())
 
+    def test_regular_user_console_only_lists_owned_uploads(self):
+        with self.client.session_transaction() as support_session:
+            support_session["support_authorized_at"] = 9999999999
+            support_session["support_access"] = False
+            support_session["discord_user"] = {"id": "someone-else", "username": "Other", "avatar": ""}
+        body = self.client.get("/support/logs").get_data(as_text=True)
+        self.assertIn("My uploads", body)
+        self.assertNotIn("discord-example.log", body)
+        self.assertEqual(self.client.post(f"/support/logs/{self.scan_id}/delete").status_code, 404)
+
+        with self.client.session_transaction() as support_session:
+            support_session["discord_user"] = {"id": "42", "username": "Support Person", "avatar": ""}
+        body = self.client.get("/support/logs").get_data(as_text=True)
+        self.assertIn("discord-example.log", body)
+        self.assertIn("My uploads", body)
+        self.assertNotIn(">Support Console</a>", body)
+        response = self.client.post(f"/support/logs/{self.scan_id}/delete")
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(self.store.get(self.scan_id))
+
     def test_inventory_requires_discord_sign_in(self):
         response = self.client.get("/support/logs")
         self.assertEqual(response.status_code, 302)
@@ -113,11 +133,12 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.location, "/support/logs")
         with self.client.session_transaction() as support_session:
-            self.assertEqual(support_session["support_user"]["id"], "42")
+            self.assertEqual(support_session["discord_user"]["id"], "42")
+            self.assertTrue(support_session["support_access"])
 
     @patch("logscan_web.support._discord_get")
     @patch("logscan_web.support._discord_token", return_value="access-token")
-    def test_callback_denies_member_without_configured_role(self, _token, discord_get):
+    def test_callback_allows_member_without_support_console_role(self, _token, discord_get):
         discord_get.side_effect = [
             {"id": "9", "username": "member", "avatar": None},
             {"roles": ["other-role"]},
@@ -125,8 +146,10 @@ class SupportConsoleTests(unittest.TestCase):
         with self.client.session_transaction() as support_session:
             support_session["oauth_state"] = "state"
         response = self.client.get("/support/callback?state=state&code=code")
-        self.assertEqual(response.status_code, 403)
-        self.assertIn("does not have a configured support role", response.get_data(as_text=True))
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as support_session:
+            self.assertEqual(support_session["discord_user"]["id"], "9")
+            self.assertFalse(support_session["support_access"])
 
     def test_missing_configuration_is_logged_without_secret_values(self):
         roles = self.app.config["DISCORD_SUPPORT_ROLE_IDS"]

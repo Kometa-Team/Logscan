@@ -11,11 +11,11 @@
   <details class="site-nav">
     <summary aria-label="Open navigation">
       <span class="site-nav-summary-label">
-        {% if support_user is defined and support_user %}
-          {% if support_user.avatar %}<img src="{{ support_user.avatar }}" alt="">{% endif %}
-          <span>{{ support_user.username }}</span>
+        {% if discord_user is defined and discord_user %}
+          {% if discord_user.avatar %}<img src="{{ discord_user.avatar }}" alt="">{% endif %}
+          <span>{{ discord_user.username }}</span>
         {% else %}
-          <span>Support</span>
+          <span>Account</span>
         {% endif %}
       </span>
       <span class="site-nav-icon" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -25,15 +25,15 @@
         <a class="site-nav-primary-item" href="/"{% if active_page == 'scanner' %} aria-current="page"{% endif %}>Log Scanner</a>
         <a class="site-nav-primary-item" href="/people"{% if active_page == 'people' %} aria-current="page"{% endif %}>People</a>
         <a class="site-nav-primary-item" href="/analytics"{% if active_page == 'analytics' %} aria-current="page"{% endif %}>Analytics</a>
-        <a href="/support/logs"{% if active_page == 'support' %} aria-current="page"{% endif %}>Support Console</a>
+        {% if discord_user %}<a href="/support/logs"{% if active_page == 'support' %} aria-current="page"{% endif %}>{{ 'Support Console' if support_access else 'My uploads' }}</a>{% else %}<a href="{{ url_for('support.authorize', next=request.full_path.rstrip('?')) }}">Sign in with Discord</a>{% endif %}
       </nav>
       <nav class="site-nav-external" aria-label="Kometa website">
         <a href="https://utilities.kometa.wiki/" rel="external">Kometa Utilities Home <span aria-hidden="true">&#8599;</span></a>
       </nav>
-      {% if support_user is defined and support_user %}
+      {% if discord_user is defined and discord_user %}
         <div class="site-nav-account">
-          {% if support_user.avatar %}<img src="{{ support_user.avatar }}" alt="">{% endif %}
-          <span><small>Signed in as</small><strong>{{ support_user.username }}</strong></span>
+          {% if discord_user.avatar %}<img src="{{ discord_user.avatar }}" alt="">{% endif %}
+          <span><small>Signed in as</small><strong>{{ discord_user.username }}</strong></span>
         </div>
         <form method="post" action="{{ url_for('support.logout') }}"><button class="site-nav-signout" type="submit">Sign out</button></form>
       {% endif %}

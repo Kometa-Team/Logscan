@@ -17,12 +17,18 @@ DISCORD_USER_AGENT = "Kometa-Logscan/1.0 (+https://github.com/Kometa-Team/Logsca
 SESSION_MAX_AGE_SECONDS = 24 * 60 * 60
 
 
+def discord_session_user() -> dict | None:
+    """Return the fresh, verified Discord identity for the current session."""
+    if time.time() - session.get("support_authorized_at", 0) > SESSION_MAX_AGE_SECONDS:
+        return None
+    return session.get("discord_user") or session.get("support_user")
+
+
 def support_session_authorized() -> bool:
-    """Return whether the current request has a fresh Discord support session."""
-    return bool(
-        session.get("support_user")
-        and time.time() - session.get("support_authorized_at", 0) <= SESSION_MAX_AGE_SECONDS
-    )
+    """Return whether the verified Discord identity has a support role."""
+    user = discord_session_user()
+    legacy_support_session = bool(session.get("support_user") and "support_access" not in session)
+    return bool(user and (session.get("support_access") or legacy_support_session))
 
 
 SUPPORT_CONFIG_KEYS = (
@@ -40,18 +46,17 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
     def oauth_configured() -> bool:
         return all(current_app.config.get(key) for key in SUPPORT_CONFIG_KEYS)
 
-    def login_required(view):
+    def discord_login_required(view):
         @wraps(view)
         def wrapped(*args, **kwargs):
             if not oauth_configured():
                 missing = [key for key in SUPPORT_CONFIG_KEYS if not current_app.config.get(key)]
                 current_app.logger.warning(
-                    "Discord support access unavailable: missing configuration: %s",
+                    "Discord sign-in unavailable: missing configuration: %s",
                     ", ".join(missing),
                 )
-                abort(503, description="Support access is not configured.")
-            if not support_session_authorized():
-                session.clear()
+                abort(503, description="Discord sign-in is not configured.")
+            if not discord_session_user():
                 return redirect(url_for("support.login", next=request.full_path.rstrip("?")))
             return view(*args, **kwargs)
 
@@ -60,13 +65,13 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
     @blueprint.get("/login")
     def login():
         if not oauth_configured():
-            abort(503, description="Support access is not configured.")
+            abort(503, description="Discord sign-in is not configured.")
         return render_template("support_login.html", error=request.args.get("error"), next=request.args.get("next", ""))
 
     @blueprint.get("/authorize")
     def authorize():
         if not oauth_configured():
-            abort(503, description="Support access is not configured.")
+            abort(503, description="Discord sign-in is not configured.")
         state = secrets.token_urlsafe(32)
         destination = request.args.get("next", "")
         session.clear()
@@ -79,21 +84,21 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             "scope": "identify guilds.members.read",
             "state": state,
         }
-        current_app.logger.warning("Discord support OAuth authorization started")
+        current_app.logger.warning("Discord OAuth authorization started")
         return redirect(f"{DISCORD_AUTHORIZE_URL}?{urlencode(params)}")
 
     @blueprint.get("/callback")
     def callback():
         if not oauth_configured():
-            abort(503, description="Support access is not configured.")
+            abort(503, description="Discord sign-in is not configured.")
         expected_state = session.pop("oauth_state", None)
         if not expected_state or not secrets.compare_digest(request.args.get("state", ""), expected_state):
-            current_app.logger.warning("Discord support OAuth rejected: invalid or expired state")
+            current_app.logger.warning("Discord OAuth rejected: invalid or expired state")
             abort(400, description="Discord sign-in state was invalid or expired.")
         code = request.args.get("code")
         if not code:
             current_app.logger.warning(
-                "Discord support OAuth cancelled: %s",
+                "Discord OAuth cancelled: %s",
                 request.args.get("error", "authorization code missing"),
             )
             return redirect(url_for("support.login", error="Discord sign-in was cancelled."))
@@ -121,25 +126,18 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         except (KeyError, ValueError):
             current_app.logger.exception("Discord support authorization failed: invalid Discord response")
             return redirect(url_for("support.login", error="Discord could not verify your server membership."))
-        if not current_app.config["DISCORD_SUPPORT_ROLE_IDS"].intersection(member.get("roles", [])):
-            current_app.logger.warning(
-                "Discord support access denied: user_id=%s guild_id=%s configured_roles=%d member_roles=%d",
-                user.get("id", "unknown"),
-                current_app.config["DISCORD_GUILD_ID"],
-                len(current_app.config["DISCORD_SUPPORT_ROLE_IDS"]),
-                len(member.get("roles", [])),
-            )
-            session.clear()
-            return render_template("support_login.html", error="Your Discord account does not have a configured support role.", next=""), 403
+        support_access = bool(current_app.config["DISCORD_SUPPORT_ROLE_IDS"].intersection(member.get("roles", [])))
         destination = session.pop("oauth_next", url_for("support.logs"))
         session.clear()
         session["support_authorized_at"] = int(time.time())
+        session["support_access"] = support_access
         current_app.logger.warning(
-            "Discord support access granted: user_id=%s guild_id=%s",
+            "Discord access granted: user_id=%s guild_id=%s support_access=%s",
             user["id"],
             current_app.config["DISCORD_GUILD_ID"],
+            support_access,
         )
-        session["support_user"] = {
+        session["discord_user"] = {
             "id": user["id"],
             "username": user.get("global_name") or user.get("username") or "Discord user",
             "avatar": _discord_avatar_url(user),
@@ -149,10 +147,10 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
     @blueprint.post("/logout")
     def logout():
         session.clear()
-        return redirect(url_for("support.login"))
+        return redirect(url_for("index"))
 
     @blueprint.get("/logs")
-    @login_required
+    @discord_login_required
     def logs():
         query = request.args.get("q", "").strip()
         source_filter = request.args.get("source", "all").casefold()
@@ -171,7 +169,15 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             page_size, page = 25, 1
 
         now = datetime.now(UTC)
-        rows = [_support_row(record, retention_seconds, now) for record in store.list()]
+        user = discord_session_user()
+        is_support_console = support_session_authorized()
+        records = store.list()
+        if not is_support_console:
+            records = [
+                record for record in records
+                if str((record.get("overview") or {}).get("uploaded_by_id") or "") == str(user["id"])
+            ]
+        rows = [_support_row(record, retention_seconds, now) for record in records]
         total_logs = len(rows)
         query_key = query.casefold()
         if query_key:
@@ -223,17 +229,23 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             severity_filter=severity_filter,
             sort_key=sort_key,
             direction=direction,
-            support_user=session["support_user"],
+            discord_user=user,
+            support_access=is_support_console,
+            is_support_console=is_support_console,
         )
 
     @blueprint.post("/logs/<scan_id>/delete")
-    @login_required
+    @discord_login_required
     def delete_log(scan_id):
+        user = discord_session_user()
+        record = store.get(scan_id)
+        owns_log = str(((record or {}).get("overview") or {}).get("uploaded_by_id") or "") == str(user["id"])
+        if not support_session_authorized() and not owns_log:
+            abort(404)
         if not store.delete_authorized(scan_id):
             abort(404)
-        user = session["support_user"]
         current_app.logger.warning(
-            "Support log deleted: scan_id=%s user_id=%s",
+            "Stored log deleted: scan_id=%s user_id=%s",
             scan_id,
             user.get("id", "unknown"),
         )
@@ -301,7 +313,7 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     updated = _parsed_datetime(record.get("updated_at"), created)
     expires = created + timedelta(seconds=retention_seconds)
     uploader = overview.get("uploaded_by") or "Web upload"
-    source = "discord" if overview.get("uploaded_by") or overview.get("message_url") else "web"
+    source = overview.get("upload_source") or ("discord" if overview.get("message_url") else "web")
     filename = record.get("filename") or "Untitled log"
     row = {
         "id": record.get("id", ""),

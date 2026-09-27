@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
-  <title>Support sign in � Kometa Utilities</title>
+  <title>Discord sign in � Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260927-3') }}">
@@ -12,9 +12,9 @@
   {% set active_page = 'support' %}{% include '_site_header.html' %}
   <main class="support-login-shell">
     <section class="support-login-panel">
-      <p class="eyebrow">Restricted utility</p>
-      <h1>Support console</h1>
-      <p>Sign in with Discord. Access is limited to members of the Kometa server who hold an approved support or administrator role.</p>
+      <p class="eyebrow">Optional account</p>
+      <h1>Sign in with Discord</h1>
+      <p>Signed-in web uploads are attached to your Discord identity so you can find and manage them later. Support tools appear only for approved roles.</p>
       {% if error %}<p class="support-login-error" role="alert">{{ error }}</p>{% endif %}
       <a class="primary-button support-discord-login" href="{{ url_for('support.authorize', next=next) }}">Continue with Discord</a>
     </section>
