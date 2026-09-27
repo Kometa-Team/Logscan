@@ -14,7 +14,7 @@ from flask import Blueprint, abort, current_app, redirect, render_template, requ
 DISCORD_API_URL = "https://discord.com/api/v10"
 DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 DISCORD_USER_AGENT = "Kometa-Logscan/1.0 (+https://github.com/Kometa-Team/Logscan)"
-SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
+SESSION_MAX_AGE_SECONDS = 24 * 60 * 60
 
 
 def support_session_authorized() -> bool:
