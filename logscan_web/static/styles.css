@@ -246,6 +246,13 @@ a.source-badge:hover { filter: brightness(1.2); }
 .popular-actions a.icon-button { border-color: rgba(34, 211, 238, .46); background: rgba(34, 211, 238, .13); color: #a5f3fc; }
 .popular-actions a.icon-button:hover { border-color: rgba(34, 211, 238, .76); background: rgba(34, 211, 238, .24); color: #cffafe; }
 
+.upload-identity { display: flex; min-height: 62px; margin-bottom: 12px; padding: 12px 16px; align-items: center; justify-content: space-between; gap: 18px; border-left: 3px solid var(--accent); background: rgba(114,119,248,.07); }
+.upload-identity div, .upload-identity strong, .upload-identity span { display: block; min-width: 0; }
+.upload-identity strong { font-size: .88rem; }
+.upload-identity span { margin-top: 3px; color: var(--muted); font-size: .76rem; }
+.upload-identity a { flex: 0 0 auto; color: var(--accent-bright); font-size: .8rem; font-weight: 700; text-decoration: none; }
+.upload-identity a:hover { color: white; }
+
 .upload-card {
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -562,6 +569,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .overview-grid { grid-template-columns: 1fr; }
   .site-header, .shell, footer { width: min(100% - 24px, 1040px); }
   .shell.people-shell { width: min(100% - 24px, 1180px); }
+  .upload-identity { align-items: flex-start; flex-direction: column; gap: 8px; }
   .form-footer, .results-heading, footer { align-items: stretch; flex-direction: column; }
   .results-actions, .viewer-actions { flex-direction: column; }
   .primary-button { width: 100%; }

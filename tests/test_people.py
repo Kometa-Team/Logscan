@@ -1322,6 +1322,9 @@ class PeopleUnionTests(unittest.TestCase):
             self.assertIn("Sign out", body)
             self.assertIn('class="header-my-uploads"', body)
             self.assertIn('view=mine', body)
+            if path == "/":
+                self.assertIn("Uploading as Support Person", body)
+                self.assertIn("New scans will appear in My uploads for 48 hours.", body)
 
     def test_people_actions_are_hidden_and_rejected_without_support_session(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
@@ -1357,6 +1360,14 @@ class PeopleUnionTests(unittest.TestCase):
             self.assertIn("People submitted", html)
             self.assertIn("People addressed", html)
             self.assertIn("Tracking since", html)
+
+    def test_anonymous_scanner_makes_upload_identity_and_sign_in_visible(self):
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn('class="upload-identity"', html)
+        self.assertIn("Anonymous upload", html)
+        self.assertIn("This scan will not appear in My uploads.", html)
+        self.assertIn('class="header-my-uploads"', html)
+        self.assertIn("Sign in with Discord", html)
 
     def test_log_scanner_header_links_to_people(self):
         html = self.client.get("/").get_data(as_text=True)
