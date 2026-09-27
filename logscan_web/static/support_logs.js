@@ -27,7 +27,10 @@ document.querySelectorAll(".support-navigate").forEach((button) => {
 
     const options = button.nextElementSibling;
     links.replaceChildren(...Array.from(options?.children || [], (link) => link.cloneNode(true)));
-    if (deleteForm) deleteForm.action = `/support/logs/${encodeURIComponent(button.dataset.scanId)}/delete`;
+    if (deleteForm) {
+      const view = encodeURIComponent(deleteForm.dataset.view || "mine");
+      deleteForm.action = `/support/logs/${encodeURIComponent(button.dataset.scanId)}/delete?view=${view}`;
+    }
     dialog.showModal();
   });
 });
