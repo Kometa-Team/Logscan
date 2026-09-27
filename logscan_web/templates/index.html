@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260927-6') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260927-7') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
   <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260927-1') }}" defer></script>
@@ -87,6 +87,16 @@
         <div>
           <p class="eyebrow">Scan complete</p>
           <h2 id="results-title">Recommendations</h2>
+          <div class="result-auth-state">
+            {% if discord_user %}
+              {% if discord_user.avatar %}<img src="{{ discord_user.avatar }}" alt="">{% endif %}
+              <span>Signed in as <strong>{{ discord_user.username }}</strong></span>
+              <a href="{{ url_for('support.logs', view='mine') }}">My uploads</a>
+            {% else %}
+              <span><strong>Viewing anonymously</strong></span>
+              <a href="{{ url_for('support.authorize', next=request.full_path.rstrip('?')) }}">Sign in with Discord</a>
+            {% endif %}
+          </div>
         </div>
         <div class="results-actions">
           <button class="secondary-button icon-action" id="view-log" type="button" aria-label="Open log viewer" title="Open log viewer"><i class="fa-solid fa-file-lines" aria-hidden="true"></i></button>

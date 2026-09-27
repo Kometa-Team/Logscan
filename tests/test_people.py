@@ -178,6 +178,32 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(record["overview"]["uploaded_by_id"], "web-user-42")
         self.assertEqual(record["overview"]["upload_source"], "web")
 
+    def test_direct_scan_link_shows_authentication_state_and_returns_after_sign_in(self):
+        client = app.test_client()
+        upload = client.post(
+            "/api/scan",
+            data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "direct-link.log")},
+            content_type="multipart/form-data",
+        ).get_json()
+        path = f"/scan/{upload['id']}"
+        anonymous = client.get(path).get_data(as_text=True)
+        self.assertIn("Viewing anonymously", anonymous)
+        self.assertIn(f"/support/authorize?next={path}", anonymous)
+
+        with client.session_transaction() as discord_session:
+            discord_session["support_authorized_at"] = 9999999999
+            discord_session["support_access"] = False
+            discord_session["discord_user"] = {
+                "id": "viewer-42",
+                "username": "Discord Viewer",
+                "avatar": "https://cdn.example/viewer.png",
+            }
+        authenticated = client.get(path).get_data(as_text=True)
+        self.assertIn("Signed in as", authenticated)
+        self.assertIn("Discord Viewer", authenticated)
+        self.assertIn('src="https://cdn.example/viewer.png"', authenticated)
+        self.assertIn("My uploads", authenticated)
+
     def test_bot_upload_runs_in_background_and_preserves_requester(self):
         job_id = "discord-background-123456789012"
         previous_key = app.config["LOGSCAN_API_KEY"]
