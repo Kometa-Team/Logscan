@@ -121,6 +121,12 @@ class UploadLimitTests(unittest.TestCase):
 
 
 class StreamingScanTests(unittest.TestCase):
+    def test_frontend_renders_anonymous_jobs_inline_and_follows_authenticated_redirects(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        self.assertIn("function renderCompletedJob(result)", script)
+        self.assertIn("renderCompletedJob(job.result)", script)
+        self.assertIn("location.assign(job.redirect_url)", script)
+
     def test_web_upload_reports_live_job_status_and_private_result(self):
         job_id = "12345678-1234-1234-1234-123456789abc"
         response = app.test_client().post(
@@ -143,7 +149,9 @@ class StreamingScanTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(payload["phase"], "complete")
         self.assertGreaterEqual(payload["elapsed_seconds"], 0)
-        self.assertIn("#delete=", payload["redirect_url"])
+        self.assertNotIn("redirect_url", payload)
+        self.assertEqual(payload["result"]["filename"], "meta.log")
+        self.assertIn("delete_token", payload["result"])
 
     def test_signed_in_web_upload_preserves_verified_identity_through_background_scan(self):
         client = app.test_client()
@@ -172,8 +180,13 @@ class StreamingScanTests(unittest.TestCase):
                 self.fail(f"Signed-in background scan did not finish: {payload}")
             time.sleep(0.01)
         self.assertEqual(payload["phase"], "complete", payload)
-        scan_id = payload["redirect_url"].split("/scan/", 1)[1].split("#", 1)[0]
-        record = json.loads(Path(STORE.name, scan_id, "result.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["redirect_url"], "/support/logs?view=mine")
+        self.assertNotIn("result", payload)
+        records = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in Path(STORE.name).glob("*/result.json")
+        ]
+        record = next(record for record in records if record["filename"] == "signed-in.log")
         self.assertEqual(record["overview"]["uploaded_by"], "Web User")
         self.assertEqual(record["overview"]["uploaded_by_id"], "web-user-42")
         self.assertEqual(record["overview"]["upload_source"], "web")

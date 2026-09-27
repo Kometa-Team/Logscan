@@ -1158,14 +1158,19 @@ def create_app() -> Flask:
                 "batch_admin_url": url_for("batch_admin_page", batch_id=batch_id, token=admin_token, _external=True),
                 "unscanned_files": unscanned_files,
             }
-            update_scan_job(job_id, "complete", redirect_url=response["batch_admin_url"], result=response if is_bot else None)
+            if uploaded_by_id and not is_bot:
+                update_scan_job(job_id, "complete", redirect_url=url_for("support.logs", view="mine"))
+            else:
+                update_scan_job(job_id, "complete", result=response)
             return jsonify(response)
         if request.path == "/api/bot/scan":
             response = {"scans": payloads}
             update_scan_job(job_id, "complete", result=response)
             return jsonify(response)
-        private_result_url = "{}#delete={}".format(payloads[0]["result_url"], payloads[0]["delete_token"])
-        update_scan_job(job_id, "complete", redirect_url=private_result_url)
+        if uploaded_by_id:
+            update_scan_job(job_id, "complete", redirect_url=url_for("support.logs", view="mine"))
+        else:
+            update_scan_job(job_id, "complete", result=payloads[0])
         return jsonify({"scans": payloads}) if len(payloads) > 1 else jsonify(payloads[0])
 
     @app.get("/api/kometa-versions")
