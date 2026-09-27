@@ -1300,6 +1300,8 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertIn('class="site-nav"', html)
         self.assertIn('aria-current="page">Log Scanner</a>', html)
         self.assertIn("site_nav.js", html)
+        self.assertIn('href="https://utilities.kometa.wiki/"', html)
+        self.assertIn("Kometa Utilities Home", html)
 
     def test_people_header_uses_official_kometa_icon(self):
         response = self.client.get("/people")

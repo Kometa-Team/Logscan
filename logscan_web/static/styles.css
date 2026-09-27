@@ -79,6 +79,7 @@ button { cursor: pointer; }
 .site-nav-menu a { padding: 10px 11px; border-radius: 5px; }
 .site-nav-menu a:hover, .site-nav-menu a[aria-current="page"] { background: rgba(114,119,248,.11); }
 .site-nav-primary-item { display: none; }
+.site-nav-menu .site-nav-parent-link { margin-top: 7px; padding-top: 12px; border-top: 1px solid var(--border); border-radius: 0 0 5px 5px; color: var(--accent-bright); }
 .site-nav-account { display: flex; min-width: 0; gap: 10px; align-items: center; margin-top: 8px; padding: 12px 11px; border-top: 1px solid var(--border); }
 .site-nav-account img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
 .site-nav-account span, .site-nav-account small, .site-nav-account strong { display: block; min-width: 0; }
