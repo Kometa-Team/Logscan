@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -73,6 +74,17 @@ class SupportConsoleTests(unittest.TestCase):
                 "username": "Support Person",
                 "avatar": "",
             }
+
+    def test_support_session_remains_authorized_for_24_hours(self):
+        with self.app.test_request_context("/"):
+            from flask import session
+            from logscan_web.support import support_session_authorized
+
+            session["support_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time() - (23 * 60 * 60)
+            self.assertTrue(support_session_authorized())
+            session["support_authorized_at"] = time.time() - (25 * 60 * 60)
+            self.assertFalse(support_session_authorized())
 
     def test_inventory_requires_discord_sign_in(self):
         response = self.client.get("/support/logs")
