@@ -21,7 +21,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
 from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
-from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
+from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 from .support import create_support_blueprint, support_session_authorized
 
@@ -771,6 +771,31 @@ def create_app() -> Flask:
             )
             completed += 1
         app.logger.info("Backfilled schema validation counts for %d of %d retained scan(s).", completed, len(records))
+    def backfill_quickstart_metadata():
+        records = [
+            record for record in store.list()
+            if "quickstart_run" not in (record.get("metadata") or {})
+        ]
+        if not records:
+            return
+        app.logger.info("Backfilling Quickstart metadata for %d retained scan(s).", len(records))
+        completed = 0
+        for record in records:
+            scan_id = record.get("id", "")
+            path = store.log_path(scan_id)
+            if path is None:
+                continue
+            try:
+                launcher_metadata = extract_quickstart_metadata(
+                    path.read_text(encoding="utf-8", errors="replace")
+                )
+            except OSError as exc:
+                app.logger.warning("Quickstart metadata backfill failed for scan %s: %s", scan_id, exc)
+                continue
+            if store.update_metadata(scan_id, **launcher_metadata):
+                completed += 1
+        app.logger.info("Backfilled Quickstart metadata for %d of %d retained scan(s).", completed, len(records))
+
     def cleanup_loop():
         while True:
             try:
@@ -787,6 +812,7 @@ def create_app() -> Flask:
     if not app.config.get("TESTING"):
         threading.Thread(target=cleanup_loop, name="logscan-cleanup", daemon=True).start()
         threading.Thread(target=backfill_schema_validation_counts, name="schema-count-backfill", daemon=True).start()
+        threading.Thread(target=backfill_quickstart_metadata, name="quickstart-metadata-backfill", daemon=True).start()
 
     @app.context_processor
     def service_usage():
