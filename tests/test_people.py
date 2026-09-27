@@ -1320,6 +1320,8 @@ class PeopleUnionTests(unittest.TestCase):
             self.assertIn("Signed in as", body)
             self.assertIn("Support Person", body)
             self.assertIn("Sign out", body)
+            self.assertIn('class="header-my-uploads"', body)
+            self.assertIn('view=mine', body)
 
     def test_people_actions_are_hidden_and_rejected_without_support_session(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
@@ -1359,11 +1361,11 @@ class PeopleUnionTests(unittest.TestCase):
     def test_log_scanner_header_links_to_people(self):
         html = self.client.get("/").get_data(as_text=True)
         self.assertIn('href="/people">People</a>', html)
-        self.assertIn('aria-label="Utilities"', html)
+        self.assertIn('aria-label="All utilities"', html)
 
-    def test_shared_navigation_has_desktop_and_mobile_controls(self):
+    def test_shared_navigation_uses_one_menu_on_desktop_and_mobile(self):
         html = self.client.get("/").get_data(as_text=True)
-        self.assertIn('class="header-primary-links"', html)
+        self.assertNotIn('class="header-primary-links"', html)
         self.assertIn('class="site-nav"', html)
         self.assertIn('aria-current="page">Log Scanner</a>', html)
         self.assertIn("site_nav.js", html)
