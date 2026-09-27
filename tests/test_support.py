@@ -106,6 +106,20 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIsNone(self.store.get(self.scan_id))
 
+    def test_support_member_defaults_to_personal_uploads_and_can_open_all_logs(self):
+        with self.client.session_transaction() as support_session:
+            support_session["support_authorized_at"] = 9999999999
+            support_session["support_access"] = True
+            support_session["discord_user"] = {"id": "support-99", "username": "Helper", "avatar": ""}
+        personal = self.client.get("/support/logs").get_data(as_text=True)
+        self.assertIn("My uploads", personal)
+        self.assertNotIn("discord-example.log", personal)
+        self.assertIn("view=all", personal)
+        all_logs = self.client.get("/support/logs?view=all").get_data(as_text=True)
+        self.assertIn("Support console", all_logs)
+        self.assertIn("discord-example.log", all_logs)
+        self.assertIn("view=mine", all_logs)
+
     def test_inventory_requires_discord_sign_in(self):
         response = self.client.get("/support/logs")
         self.assertEqual(response.status_code, 302)
@@ -116,7 +130,7 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("scope=identify+guilds.members.read", response.location)
         with self.client.session_transaction() as support_session:
-            self.assertEqual(support_session["oauth_next"], "/support/logs")
+            self.assertEqual(support_session["oauth_next"], "/support/logs?view=mine")
             self.assertTrue(support_session["oauth_state"])
 
     @patch("logscan_web.support._discord_get")
@@ -215,6 +229,8 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("dialog.showModal()", script)
         self.assertIn("event.target === dialog", script)
         self.assertIn("window.confirm", script)
+        self.assertIn('data-view="{{ view_mode }}"', template)
+        self.assertIn('deleteForm.dataset.view || "mine"', script)
         self.assertLess(template.index("support-actions-heading"), template.index("support-title"))
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
         self.assertIn(".support-actions-heading, .support-actions { position: sticky", css)
@@ -249,7 +265,7 @@ class SupportConsoleTests(unittest.TestCase):
         with self.assertLogs(self.app.logger, level="WARNING") as captured:
             response = self.client.post(f"/support/logs/{self.scan_id}/delete")
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.location, "/support/logs")
+        self.assertEqual(response.location, "/support/logs?view=mine")
         self.assertIsNone(self.store.get(self.scan_id))
         self.assertIn("user_id=42", "\n".join(captured.output))
 

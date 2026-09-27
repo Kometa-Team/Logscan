@@ -76,7 +76,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         destination = request.args.get("next", "")
         session.clear()
         session["oauth_state"] = state
-        session["oauth_next"] = destination if destination.startswith("/") and not destination.startswith("//") else url_for("support.logs")
+        session["oauth_next"] = destination if destination.startswith("/") and not destination.startswith("//") else url_for("support.logs", view="mine")
         params = {
             "client_id": current_app.config["DISCORD_CLIENT_ID"],
             "redirect_uri": current_app.config["DISCORD_REDIRECT_URI"],
@@ -127,7 +127,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             current_app.logger.exception("Discord support authorization failed: invalid Discord response")
             return redirect(url_for("support.login", error="Discord could not verify your server membership."))
         support_access = bool(current_app.config["DISCORD_SUPPORT_ROLE_IDS"].intersection(member.get("roles", [])))
-        destination = session.pop("oauth_next", url_for("support.logs"))
+        destination = session.pop("oauth_next", url_for("support.logs", view="mine"))
         session.clear()
         session["support_authorized_at"] = int(time.time())
         session["support_access"] = support_access
@@ -170,7 +170,9 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
 
         now = datetime.now(UTC)
         user = discord_session_user()
-        is_support_console = support_session_authorized()
+        support_access = support_session_authorized()
+        view_mode = "all" if request.args.get("view") == "all" and support_access else "mine"
+        is_support_console = view_mode == "all"
         records = store.list()
         if not is_support_console:
             records = [
@@ -230,8 +232,9 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             sort_key=sort_key,
             direction=direction,
             discord_user=user,
-            support_access=is_support_console,
+            support_access=support_access,
             is_support_console=is_support_console,
+            view_mode=view_mode,
         )
 
     @blueprint.post("/logs/<scan_id>/delete")
@@ -249,7 +252,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             scan_id,
             user.get("id", "unknown"),
         )
-        return redirect(url_for("support.logs"))
+        return redirect(url_for("support.logs", view="all" if request.args.get("view") == "all" and support_session_authorized() else "mine"))
 
     return blueprint
 
