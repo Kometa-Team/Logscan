@@ -16,7 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from flask import Flask, abort, jsonify, render_template, request, send_file, url_for
+from flask import Flask, abort, jsonify, render_template, request, send_file, url_for, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
@@ -830,7 +830,10 @@ def create_app() -> Flask:
             stats["tracking_since"] = started.strftime("%B %d, %Y").replace(" 0", " ")
         except (KeyError, TypeError, ValueError):
             stats["tracking_since"] = "tracking began"
-        return {"usage_stats": stats}
+        return {
+            "usage_stats": stats,
+            "support_user": session.get("support_user") if support_session_authorized() else None,
+        }
 
     @app.get("/")
     def index():

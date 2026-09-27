@@ -1280,6 +1280,14 @@ class PeopleUnionTests(unittest.TestCase):
             support_session["support_authorized_at"] = 9999999999
             support_session["support_user"] = {"id": "42", "username": "Support Person", "avatar": ""}
 
+    def test_support_identity_is_visible_in_shared_menu_on_every_public_page(self):
+        self.authorize_support()
+        for path in ("/", "/people", "/analytics"):
+            body = self.client.get(path).get_data(as_text=True)
+            self.assertIn("Signed in as", body)
+            self.assertIn("Support Person", body)
+            self.assertIn("Sign out", body)
+
     def test_people_actions_are_hidden_and_rejected_without_support_session(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
             payload = self.client.get("/api/people", query_string={"sources": "trending"}).get_json()
