@@ -62,7 +62,8 @@ button { cursor: pointer; }
   height: 31px;
   object-fit: contain;
 }
-.header-my-uploads { margin-left: auto; padding: 9px 11px; border-radius: 5px; color: #cbd2f2; font-size: .85rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.header-my-uploads { display: inline-flex; margin-left: auto; padding: 7px 10px; align-items: center; gap: 7px; border-radius: 5px; color: #cbd2f2; font-size: .85rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.header-my-uploads img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
 .header-my-uploads:hover, .header-my-uploads[aria-current="page"] { background: rgba(114,119,248,.11); color: white; }
 .site-nav-menu a { color: #cbd2f2; text-decoration: none; font-size: .85rem; }
 .site-nav-menu a:hover { color: white; }
@@ -247,9 +248,12 @@ a.source-badge:hover { filter: brightness(1.2); }
 .popular-actions a.icon-button:hover { border-color: rgba(34, 211, 238, .76); background: rgba(34, 211, 238, .24); color: #cffafe; }
 
 .upload-identity { display: flex; min-height: 62px; margin-bottom: 12px; padding: 12px 16px; align-items: center; justify-content: space-between; gap: 18px; border-left: 3px solid var(--accent); background: rgba(114,119,248,.07); }
-.upload-identity div, .upload-identity strong, .upload-identity span { display: block; min-width: 0; }
+.upload-identity div, .upload-identity strong, .upload-identity span, .upload-identity small { display: block; min-width: 0; }
+.upload-identity .upload-identity-person { display: flex; align-items: center; gap: 10px; }
+.upload-identity-avatar { width: 34px; height: 34px; flex: 0 0 auto; border-radius: 50%; object-fit: cover; }
 .upload-identity strong { font-size: .88rem; }
 .upload-identity span { margin-top: 3px; color: var(--muted); font-size: .76rem; }
+.upload-identity small, .support-login-note { margin-top: 5px; color: #7f89a8; font-size: .7rem; }
 .upload-identity a { flex: 0 0 auto; color: var(--accent-bright); font-size: .8rem; font-weight: 700; text-decoration: none; }
 .upload-identity a:hover { color: white; }
 

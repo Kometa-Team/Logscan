@@ -120,6 +120,13 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("discord-example.log", all_logs)
         self.assertIn("view=mine", all_logs)
 
+    def test_sign_in_page_explains_account_benefits_without_requiring_login(self):
+        body = self.client.get("/support/login").get_data(as_text=True)
+        self.assertIn("Keep your scans together", body)
+        self.assertIn("find, search, reopen, and delete your retained web and Discord uploads", body)
+        self.assertIn("Anonymous scanning remains available", body)
+        self.assertIn("expire automatically after 48 hours", body)
+
     def test_inventory_requires_discord_sign_in(self):
         response = self.client.get("/support/logs")
         self.assertEqual(response.status_code, 302)

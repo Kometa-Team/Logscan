@@ -1311,7 +1311,7 @@ class PeopleUnionTests(unittest.TestCase):
     def authorize_support(self):
         with self.client.session_transaction() as support_session:
             support_session["support_authorized_at"] = 9999999999
-            support_session["support_user"] = {"id": "42", "username": "Support Person", "avatar": ""}
+            support_session["support_user"] = {"id": "42", "username": "Support Person", "avatar": "https://cdn.example/avatar.png"}
 
     def test_support_identity_is_visible_in_shared_menu_on_every_public_page(self):
         self.authorize_support()
@@ -1321,6 +1321,7 @@ class PeopleUnionTests(unittest.TestCase):
             self.assertIn("Support Person", body)
             self.assertIn("Sign out", body)
             self.assertIn('class="header-my-uploads"', body)
+            self.assertIn('src="https://cdn.example/avatar.png"', body)
             self.assertIn('view=mine', body)
             if path == "/":
                 self.assertIn("Uploading as Support Person", body)
@@ -1364,8 +1365,10 @@ class PeopleUnionTests(unittest.TestCase):
     def test_anonymous_scanner_makes_upload_identity_and_sign_in_visible(self):
         html = self.client.get("/").get_data(as_text=True)
         self.assertIn('class="upload-identity"', html)
-        self.assertIn("Anonymous upload", html)
-        self.assertIn("This scan will not appear in My uploads.", html)
+        self.assertIn("Keep your scans together", html)
+        self.assertIn("find, search, reopen, and delete retained web and Discord uploads", html)
+        self.assertIn("helps support identify your scans faster", html)
+        self.assertIn("Optional. Anonymous scans still work and expire after 48 hours.", html)
         self.assertIn('class="header-my-uploads"', html)
         self.assertIn("Sign in with Discord", html)
 
