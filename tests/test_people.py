@@ -1407,6 +1407,8 @@ class PeopleUnionTests(unittest.TestCase):
         html = self.client.get("/").get_data(as_text=True)
         self.assertNotIn('class="header-primary-links"', html)
         self.assertIn('class="site-nav"', html)
+        self.assertIn('class="site-nav-icon"', html)
+        self.assertNotIn('>Account</span>', html)
         self.assertIn('aria-current="page">Log Scanner</a>', html)
         self.assertIn("site_nav.js", html)
         self.assertIn('href="https://utilities.kometa.wiki/"', html)
