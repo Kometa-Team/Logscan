@@ -724,6 +724,45 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(failures[0]["config_column"], 3)
         self.assertEqual(failures[0]["config_end_column"], 16)
 
+    def test_schema_validation_reuses_persistent_branch_cache(self):
+        schema = {"type": "object", "properties": {}}
+        log = "\n".join([
+            "Redacted Config",
+            "[config.py:1] [INFO] | {} |",
+            "Initializing cache database at /config/cache",
+        ])
+        with tempfile.TemporaryDirectory() as cache_dir:
+            with patch("logscan_web.recommendations.urlopen", return_value=Response(schema)) as fetch:
+                self.assertEqual(validate_redacted_config(log, schema_cache_dir=cache_dir), [])
+            self.assertEqual(fetch.call_count, 1)
+            self.assertTrue(Path(cache_dir, "master.json").is_file())
+
+            with patch("logscan_web.recommendations.urlopen") as fetch:
+                self.assertEqual(validate_redacted_config(log, schema_cache_dir=cache_dir), [])
+            fetch.assert_not_called()
+
+    def test_schema_validation_uses_stale_cache_when_refresh_fails(self):
+        schema = {"type": "object", "properties": {}}
+        log = "\n".join([
+            "Redacted Config",
+            "[config.py:1] [INFO] | {} |",
+            "Initializing cache database at /config/cache",
+        ])
+        with tempfile.TemporaryDirectory() as cache_dir:
+            cache_path = Path(cache_dir, "master.json")
+            cache_path.write_text(json.dumps(schema), encoding="utf-8")
+            stale = time.time() - 7200
+            os.utime(cache_path, (stale, stale))
+            with patch("logscan_web.recommendations.urlopen", side_effect=TimeoutError):
+                self.assertEqual(validate_redacted_config(log, schema_cache_dir=cache_dir), [])
+
+    def test_schema_results_are_persisted_and_drive_the_page_count(self):
+        source = Path("logscan_web/app.py").read_text(encoding="utf-8")
+
+        self.assertIn('result.metadata["schema_validation_failures"] = schema_failures', source)
+        self.assertIn('metadata.setdefault("counts", {})["schema"] = schema_count', source)
+        self.assertIn("if isinstance(cached_failures, list):", source)
+
     def test_config_viewer_marks_exact_schema_issue_ranges(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")

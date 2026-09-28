@@ -2,7 +2,9 @@
 from __future__ import annotations
 import json
 import re
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -11,6 +13,7 @@ from jsonschema import Draft7Validator
 
 
 KOMETA_CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/{branch}/json-schema/config-schema.json"
+SCHEMA_CACHE_SECONDS = 60 * 60
 
 
 def schema_branch_for_log(log_content: str) -> str:
@@ -233,13 +236,84 @@ def _schema_failure_guidance(error: object, path: str, unexpected: str | None = 
         return {"title": f"Invalid value format at {location}", "location": location, "accepted": accepted, "explanation": f"The value at {location} is not in the format Kometa expects.", "action": f"Correct the format at {location} using the documented example."}
     return {"title": f"Invalid configuration at {location}", "location": location, "accepted": accepted, "explanation": error.message, "action": f"Correct the value or structure at {location} using the Kometa documentation."}
 
+
+def _load_config_schema(
+    branch: str, *, memory_cache: dict[str, dict] | None, cache_dir: Path | None
+) -> dict:
+    """Load a branch schema locally and refresh it with a conditional request."""
+    schema_path = cache_dir / f"{branch}.json" if cache_dir is not None else None
+    metadata_path = cache_dir / f"{branch}.metadata.json" if cache_dir is not None else None
+    local_schema = memory_cache.get(branch) if memory_cache is not None else None
+    if local_schema is None and schema_path is not None:
+        try:
+            local_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            if memory_cache is not None:
+                memory_cache[branch] = local_schema
+        except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+            local_schema = None
+    if schema_path is not None and local_schema is not None:
+        try:
+            if time.time() - schema_path.stat().st_mtime < SCHEMA_CACHE_SECONDS:
+                return local_schema
+        except OSError:
+            pass
+
+    metadata = {}
+    if metadata_path is not None:
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+    headers = {
+        "Accept": "application/json",
+        "Cache-Control": "no-cache",
+        "User-Agent": "Kometa-Logscan/1.0",
+    }
+    if metadata.get("etag"):
+        headers["If-None-Match"] = metadata["etag"]
+    if metadata.get("last_modified"):
+        headers["If-Modified-Since"] = metadata["last_modified"]
+    request = Request(KOMETA_CONFIG_SCHEMA_URL.format(branch=branch), headers=headers)
+    try:
+        with urlopen(request, timeout=15) as response:
+            schema = json.loads(response.read().decode("utf-8"))
+            response_metadata = {
+                "etag": response.headers.get("ETag", ""),
+                "last_modified": response.headers.get("Last-Modified", ""),
+            }
+        if cache_dir is not None and schema_path is not None and metadata_path is not None:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            temporary = schema_path.with_suffix(".json.tmp")
+            temporary.write_text(json.dumps(schema), encoding="utf-8")
+            temporary.replace(schema_path)
+            metadata_path.write_text(json.dumps(response_metadata), encoding="utf-8")
+        if memory_cache is not None:
+            memory_cache[branch] = schema
+        return schema
+    except HTTPError as exc:
+        if exc.code == 304 and local_schema is not None:
+            if schema_path is not None:
+                schema_path.touch()
+            return local_schema
+        if local_schema is not None:
+            return local_schema
+        raise
+    except (URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        if local_schema is not None:
+            return local_schema
+        raise
+
+
 def validate_redacted_config(
-    log_content: str, *, schema_cache: dict[str, dict] | None = None
+    log_content: str,
+    *,
+    schema_cache: dict[str, dict] | None = None,
+    schema_cache_dir: str | Path | None = None,
 ) -> list[dict[str, str | int]]:
     """Validate a log's extracted config against its matching Kometa schema.
 
-    A caller may provide a short-lived cache to reuse each branch schema while
-    processing a batch. Independent calls still fetch the current schema.
+    A caller may provide an in-memory cache and a persistent cache directory.
+    Persistent schemas are refreshed conditionally and remain available offline.
     """
     config_text, log_lines = extract_redacted_config(log_content)
     if not config_text.strip():
@@ -253,17 +327,12 @@ def validate_redacted_config(
         return [{"line": line, "message": f"Invalid YAML: {getattr(exc, 'problem', str(exc))}", "path": ""}]
     schema_branch = schema_branch_for_log(log_content)
     try:
-        schema = schema_cache.get(schema_branch) if schema_cache is not None else None
-        if schema is None:
-            schema_request = Request(
-                KOMETA_CONFIG_SCHEMA_URL.format(branch=schema_branch),
-                headers={"Accept": "application/json", "Cache-Control": "no-cache", "User-Agent": "Kometa-Logscan/1.0"},
-            )
-            with urlopen(schema_request, timeout=15) as response:
-                schema = json.loads(response.read().decode("utf-8"))
-            if schema_cache is not None:
-                schema_cache[schema_branch] = schema
-    except (HTTPError, URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        schema = _load_config_schema(
+            schema_branch,
+            memory_cache=schema_cache,
+            cache_dir=Path(schema_cache_dir) if schema_cache_dir is not None else None,
+        )
+    except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"The Kometa {schema_branch} configuration schema could not be fetched.") from exc
 
     failures = []

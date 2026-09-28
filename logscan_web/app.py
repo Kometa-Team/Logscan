@@ -192,6 +192,16 @@ def create_app() -> Flask:
     scan_slot = threading.Semaphore(1)
     background_scan_token = secrets.token_urlsafe(32)
     background_scan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="logscan")
+    schema_cache = {}
+    schema_cache_dir = Path(app.config["SCAN_STORE"]) / ".schema-cache"
+    schema_cache_lock = threading.Lock()
+
+    def validate_config(log_content: str) -> list[dict]:
+        """Validate with one branch-schema cache shared by this app process."""
+        with schema_cache_lock:
+            return validate_redacted_config(
+                log_content, schema_cache=schema_cache, schema_cache_dir=schema_cache_dir
+            )
 
     def update_scan_job(job_id: str | None, phase: str, *, error: str | None = None, redirect_url: str | None = None, result: dict | None = None) -> None:
         if not job_id:
@@ -743,12 +753,11 @@ def create_app() -> Flask:
     def backfill_schema_validation_counts():
         records = [
             record for record in store.list()
-            if not isinstance((record.get("metadata") or {}).get("schema_validation_count"), int)
+            if not isinstance((record.get("metadata") or {}).get("schema_validation_failures"), list)
         ]
         if not records:
             return
         app.logger.info("Backfilling schema validation counts for %d retained scan(s).", len(records))
-        schema_cache = {}
         completed = 0
         for record in records:
             scan_id = record.get("id", "")
@@ -757,9 +766,10 @@ def create_app() -> Flask:
                 continue
             try:
                 log_content = path.read_text(encoding="utf-8", errors="replace")
-                failures = validate_redacted_config(log_content, schema_cache=schema_cache)
+                failures = validate_config(log_content)
                 count = len(failures)
             except ValueError:
+                failures = []
                 count = 0
             except RuntimeError as exc:
                 app.logger.warning("Schema count backfill unavailable for scan %s: %s", scan_id, exc)
@@ -768,6 +778,8 @@ def create_app() -> Flask:
                 scan_id,
                 schema_validation_count=count,
                 schema_validation_branch=schema_branch_for_log(log_content),
+                schema_validation_failures=failures,
+                schema_directive_missing=not has_yaml_language_server_directive(log_content),
             )
             completed += 1
         app.logger.info("Backfilled schema validation counts for %d of %d retained scan(s).", completed, len(records))
@@ -858,6 +870,10 @@ def create_app() -> Flask:
         if record is None:
             abort(404)
         public = {key: value for key, value in record.items() if key != "delete_token_hash"}
+        metadata = public.setdefault("metadata", {})
+        schema_count = metadata.get("schema_validation_count")
+        if isinstance(schema_count, int):
+            metadata.setdefault("counts", {})["schema"] = schema_count
         public["expires_at"] = int(datetime.fromisoformat(record["created_at"]).timestamp() + RETENTION_SECONDS)
         return render_template("index.html", initial_scan=public, initial_batch=None)
 
@@ -1064,7 +1080,6 @@ def create_app() -> Flask:
                             continue
                         reason = "ZIP contains no valid Kometa logs" if suffix == ".zip" else "Not a valid Kometa log file"
                     unscanned_files.append({"filename": entry.filename, "reason": reason})
-        schema_cache = {}
         for filename, content, result in scans:
             if not app.config.get("TESTING"):
                 try:
@@ -1073,13 +1088,19 @@ def create_app() -> Flask:
                         if isinstance(content, Path)
                         else content.decode("utf-8", errors="replace")
                     )
-                    schema_failures = validate_redacted_config(log_content, schema_cache=schema_cache)
+                    schema_failures = validate_config(log_content)
                     result.metadata["schema_validation_count"] = len(schema_failures)
                     result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
+                    result.metadata["schema_validation_failures"] = schema_failures
+                    result.metadata["schema_directive_missing"] = not has_yaml_language_server_directive(log_content)
+                    result.metadata["counts"]["schema"] = len(schema_failures)
                 except ValueError:
                     result.metadata["schema_validation_count"] = 0
                     result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
+                    result.metadata["counts"]["schema"] = 0
                 except RuntimeError as exc:
+                    result.metadata["schema_validation_count"] = 0
+                    result.metadata["counts"]["schema"] = 0
                     app.logger.warning("Upload-time config validation unavailable for %s: %s", filename, exc)
             result.overview["upload_source"] = upload_source
             if uploaded_by:
@@ -1323,16 +1344,31 @@ def create_app() -> Flask:
 
     @app.post("/api/scans/<scan_id>/validate-config")
     def validate_stored_config(scan_id):
+        record = store.get(scan_id)
+        if record is None:
+            abort(404)
+        metadata = record.get("metadata") or {}
+        cached_failures = metadata.get("schema_validation_failures")
+        if isinstance(cached_failures, list):
+            return jsonify(
+                branch=metadata.get("schema_validation_branch", "master"),
+                failures=cached_failures,
+                schema_directive_missing=bool(metadata.get("schema_directive_missing")),
+            )
         path = store.log_path(scan_id)
         if path is None:
             abort(404)
         try:
             log_content = path.read_text(encoding="utf-8", errors="replace")
-            failures = validate_redacted_config(log_content)
+            failures = validate_config(log_content)
+            branch = schema_branch_for_log(log_content)
+            directive_missing = not has_yaml_language_server_directive(log_content)
             store.update_metadata(
                 scan_id,
                 schema_validation_count=len(failures),
-                schema_validation_branch=schema_branch_for_log(log_content),
+                schema_validation_branch=branch,
+                schema_validation_failures=failures,
+                schema_directive_missing=directive_missing,
             )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
@@ -1340,9 +1376,9 @@ def create_app() -> Flask:
             app.logger.warning("Config validation failed: %s", exc)
             return jsonify(error=str(exc)), 502
         return jsonify(
-            branch=schema_branch_for_log(log_content),
+            branch=branch,
             failures=failures,
-            schema_directive_missing=not has_yaml_language_server_directive(log_content),
+            schema_directive_missing=directive_missing,
         )
 
     @app.delete("/api/scans/<scan_id>")
