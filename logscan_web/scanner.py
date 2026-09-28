@@ -545,7 +545,7 @@ def _log_overview(
     plex_configurations = extract_plex_configurations(content)
     return {
         "log_name": filename,
-        "recommendation_count": len(recommendations),
+        "finding_count": len(recommendations),
         "kometa_version": kometa_version,
         "newest_version_at_run": _first_value(content, "Newest Version"),
         "platform": _first_value(content, "Platform"),
@@ -677,7 +677,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         "size_bytes": len(content_bytes),
         "counts": {
             level: sum(item["severity"] == level for item in normalized)
-            for level in ("critical", "warning", "schema", "advice")
+            for level in ("critical", "error", "warning", "schema", "advice")
         },
     }
     return ScanResult(
@@ -753,7 +753,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "size_bytes": len(content_bytes),
         "counts": {
             level: sum(item["severity"] == level for item in normalized)
-            for level in ("critical", "warning", "schema", "advice")
+            for level in ("critical", "error", "warning", "schema", "advice")
         },
     }
     return ScanResult(

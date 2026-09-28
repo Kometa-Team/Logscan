@@ -35,7 +35,7 @@
     <div class="support-results-meta"><span>{{ filtered_logs }} matching log{% if filtered_logs != 1 %}s{% endif %}</span><span>Page {{ page }} of {{ page_count }}</span></div>
     <div class="support-table-wrap">
       <table class="support-table">
-        <thead><tr><th class="support-actions-heading"><span class="visually-hidden">Actions</span></th><th>{{ sort_link('title','Title') }}</th><th>{{ sort_link('uploader','Uploaded by') }}</th><th>{{ sort_link('source','Source') }}</th><th>{{ sort_link('created_at','Uploaded') }}</th><th>{{ sort_link('expires_at','Expires in') }}</th><th>{{ sort_link('findings','Findings') }}</th><th>{{ sort_link('version','Kometa / Environment') }}</th><th>{{ sort_link('lines','Lines') }}</th><th>{{ sort_link('size','Size') }}</th></tr></thead>
+        <thead><tr><th class="support-actions-heading"><span class="visually-hidden">Actions</span></th><th>{{ sort_link('title','Title') }}</th><th>{{ sort_link('uploader','Uploaded by') }}</th><th>{{ sort_link('source','Source') }}</th><th>{{ sort_link('created_at','Uploaded') }}</th><th>{{ sort_link('expires_at','Expires in') }}</th><th>{{ sort_link('findings','Findings') }}</th><th>{{ sort_link('version','Kometa / Environment') }}</th><th>{{ sort_link('lines','Lines') }}</th><th>{{ sort_link('size','Extracted size') }}</th><th>Archive</th></tr></thead>
         <tbody>
           {% for row in rows %}
           <tr>
@@ -48,9 +48,9 @@
             <td><div class="support-severities">{% for severity in ('critical','error','warning','schema','advice') %}{% if row.counts[severity] %}<span class="severity-chip {{ severity }}" title="{{ severity|title }}">{{ row.counts[severity] }}</span>{% endif %}{% endfor %}{% if not row.finding_count %}<span class="support-none">None</span>{% endif %}</div></td>
             <td><strong>{{ row.kometa_version }}{% if row.quickstart_run %} <span class="support-launcher" title="Launched by Quickstart">QS</span>{% endif %}</strong><small>{{ row.kometa_branch|title }} · {{ row.installation }}{% if row.quickstart_run and row.quickstart_version %} · QS {{ row.quickstart_version }}{% endif %}</small></td>
             <td>{{ '{:,}'.format(row.line_count) }}</td>
-            <td>{% if row.size_bytes >= 1048576 %}{{ '%.1f'|format(row.size_bytes / 1048576) }} MB{% else %}{{ '%.1f'|format(row.size_bytes / 1024) }} KB{% endif %}</td>
+            <td>{% if row.size_bytes >= 1048576 %}{{ '%.1f'|format(row.size_bytes / 1048576) }} MB{% else %}{{ '%.1f'|format(row.size_bytes / 1024) }} KB{% endif %}</td><td>{% if row.archive_compressed_size %}<strong>Compressed: {% if row.archive_compressed_size >= 1048576 %}{{ '%.1f'|format(row.archive_compressed_size / 1048576) }} MB{% else %}{{ '%.1f'|format(row.archive_compressed_size / 1024) }} KB{% endif %}</strong><small>Uncompressed: {% if row.archive_uncompressed_size >= 1048576 %}{{ '%.1f'|format(row.archive_uncompressed_size / 1048576) }} MB{% else %}{{ '%.1f'|format(row.archive_uncompressed_size / 1024) }} KB{% endif %} · {{ '%.2f'|format(row.archive_compression_ratio) }}:1 · {{ '%.1f'|format(row.archive_reduction_percent) }}% reduction</small>{% else %}<span class="support-none">Not archived</span>{% endif %}</td>
           </tr>
-          {% else %}<tr><td class="support-empty" colspan="12">No active logs match these filters.</td></tr>{% endfor %}
+          {% else %}<tr><td class="support-empty" colspan="11">No active logs match these filters.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>

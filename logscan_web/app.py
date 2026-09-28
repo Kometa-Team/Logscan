@@ -22,7 +22,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
 from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
-from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_log
+from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_content_size, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 from .support import create_support_blueprint, discord_session_user, support_session_authorized
 
@@ -31,6 +31,49 @@ LOG_VIEW_MAX_LINES = 2000
 _log_index_cache = {}
 _log_index_lock = threading.Lock()
 
+
+def _format_bytes(value: int) -> str:
+    size = float(max(0, value))
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def _is_archive_upload(filename: str) -> bool:
+    lowered = filename.casefold()
+    compound = (".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst")
+    return Path(lowered).suffix in ARCHIVE_SUFFIXES or lowered.endswith(compound)
+
+
+def _finalize_result_metrics(result, archive_compressed_size: int | None, archive_uncompressed_size: int | None) -> None:
+    counts = result.metadata.setdefault("counts", {})
+    for severity in ("critical", "error", "warning", "advice"):
+        counts[severity] = sum(item.get("severity") == severity for item in result.recommendations)
+    counts["schema"] = int(result.metadata.get("schema_validation_count") or counts.get("schema") or 0)
+    finding_count = sum(int(counts.get(severity) or 0) for severity in ("critical", "error", "warning", "schema", "advice"))
+    size_bytes = int(result.metadata.get("size_bytes") or 0)
+    overview = result.overview
+    overview["finding_count"] = finding_count
+    overview["line_count"] = int(result.metadata.get("line_count") or 0)
+    overview["size_display"] = _format_bytes(size_bytes)
+    if archive_compressed_size is None or archive_uncompressed_size is None:
+        return
+    ratio = archive_uncompressed_size / archive_compressed_size if archive_compressed_size else 0
+    reduction = (1 - (archive_compressed_size / archive_uncompressed_size)) * 100 if archive_uncompressed_size else 0
+    result.metadata.update({
+        "archive_compressed_size": archive_compressed_size,
+        "archive_uncompressed_size": archive_uncompressed_size,
+        "archive_compression_ratio": ratio,
+        "archive_reduction_percent": reduction,
+    })
+    overview.update({
+        "archive_compressed_size_display": _format_bytes(archive_compressed_size),
+        "archive_uncompressed_size_display": _format_bytes(archive_uncompressed_size),
+        "archive_compression_ratio": f"{ratio:.2f}:1",
+        "archive_reduction_percent": f"{reduction:.1f}%",
+    })
 
 def _stored_log_index(path: Path) -> dict:
     stat = path.stat()
@@ -158,7 +201,7 @@ def add_missing_people_recommendations(
     if found or pending:
         result.recommendations.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
         result.metadata["counts"]["advice"] = sum(item["severity"] == "advice" for item in result.recommendations)
-        result.overview["recommendation_count"] = len(result.recommendations)
+        result.overview["finding_count"] = len(result.recommendations)
 
 
 def _people_needing_repository_images(candidates: list[dict], repository_people: dict[str, str] | None) -> list[dict]:
@@ -945,6 +988,28 @@ def create_app() -> Flask:
         schema_count = metadata.get("schema_validation_count")
         if isinstance(schema_count, int):
             metadata.setdefault("counts", {})["schema"] = schema_count
+        recommendations = public.get("recommendations") or []
+        counts = {
+            severity: sum(item.get("severity") == severity for item in recommendations)
+            for severity in ("critical", "error", "warning", "schema", "advice")
+        }
+        if isinstance(schema_count, int):
+            counts["schema"] = schema_count
+        overview = public.setdefault("overview", {})
+        overview["finding_count"] = sum(counts.values())
+        overview["line_count"] = int(metadata.get("line_count") or 0)
+        overview["size_display"] = _format_bytes(int(metadata.get("size_bytes") or 0))
+        compressed_size = int(metadata.get("archive_compressed_size") or 0)
+        uncompressed_size = int(metadata.get("archive_uncompressed_size") or 0)
+        if compressed_size and uncompressed_size:
+            ratio = float(metadata.get("archive_compression_ratio") or (uncompressed_size / compressed_size))
+            reduction = float(metadata.get("archive_reduction_percent") or ((1 - compressed_size / uncompressed_size) * 100))
+            overview.update({
+                "archive_compressed_size_display": _format_bytes(compressed_size),
+                "archive_uncompressed_size_display": _format_bytes(uncompressed_size),
+                "archive_compression_ratio": f"{ratio:.2f}:1",
+                "archive_reduction_percent": f"{reduction:.1f}%",
+            })
         public["expires_at"] = int(datetime.fromisoformat(record["created_at"]).timestamp() + RETENTION_SECONDS)
         return render_template("index.html", initial_scan=public, initial_batch=None)
 
@@ -1185,6 +1250,11 @@ def create_app() -> Flask:
                             continue
                         reason = "ZIP contains no valid Kometa logs" if suffix == ".zip" else "Not a valid Kometa log file"
                     unscanned_files.append({"filename": entry.filename, "reason": reason})
+        archive_compressed_size = scan_content_size(content) if _is_archive_upload(upload_filename) else None
+        archive_uncompressed_size = (
+            sum(scan_content_size(scan_content) for _name, scan_content, _result in scans)
+            if archive_compressed_size is not None else None
+        )
         for filename, content, result in scans:
             if not app.config.get("TESTING"):
                 try:
@@ -1227,6 +1297,7 @@ def create_app() -> Flask:
                         repository_people,
                         url_for("people_page", tags=people_tags, _external=True),
                     )
+            _finalize_result_metrics(result, archive_compressed_size, archive_uncompressed_size)
             scan_id, delete_token = store.create(filename, content, result)
             if isinstance(content, Path) and content.name.startswith("logscan-"):
                 content.unlink(missing_ok=True)

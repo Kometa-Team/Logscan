@@ -118,7 +118,13 @@ function showOverview(group, overview) {
   const details = [
     ["Log name", overview.log_name],
     ...(overview.uploaded_by ? [["Log Info", { uploader: overview.uploaded_by, id: overview.uploaded_by_id, messageUrl: overview.message_url }]] : []),
-    ["Number of recommendations", overview.recommendation_count],
+    ["Findings", overview.finding_count ?? overview.recommendation_count],
+    ["Lines scanned", overview.line_count],
+    ["Log size", overview.size_display],
+    ["Compressed archive size", overview.archive_compressed_size_display],
+    ["Uncompressed archive size", overview.archive_uncompressed_size_display],
+    ["Compression ratio", overview.archive_compression_ratio],
+    ["Archive size reduction", overview.archive_reduction_percent],
     ["Version recorded in log", overview.kometa_version],
     ["Update target recorded in log", overview.newest_version_at_run],
     ["Current comparison branch", overview.current_comparison_branch],
@@ -1144,6 +1150,7 @@ async function loadSchemaValidation(data) {
   }
   updated.metadata.counts.schema = schemaIssueRecommendations(updated.recommendations).length;
   updated.metadata.counts.advice = updated.recommendations.filter((item) => item.severity === "advice").length;
+  updated.overview = { ...updated.overview, finding_count: updated.recommendations.length };
   renderResults(updated, false);
 }
 function applySupportDestination(data, groups, recommendations) {
