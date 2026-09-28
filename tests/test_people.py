@@ -1,3 +1,5 @@
+import gzip
+import py7zr
 import json
 from io import BytesIO
 from jsonschema import Draft7Validator
@@ -134,6 +136,33 @@ class StreamingScanTests(unittest.TestCase):
                     find_scannable_upload_path("meta.log", path),
                     [("meta.log", path.stat().st_size)],
                 )
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_spooled_validation_scans_gzip_upload(self):
+        content = b"[kometa.py:1] [INFO] | Version: 2.5.0 |\n"
+        with tempfile.NamedTemporaryFile(delete=False) as upload:
+            upload.write(gzip.compress(content))
+            path = Path(upload.name)
+        try:
+            self.assertEqual(
+                find_scannable_upload_path("meta.log.gz", path),
+                [("meta.log", len(content))],
+            )
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_spooled_validation_scans_7z_upload(self):
+        content = b"[kometa.py:1] [INFO] | Version: 2.5.0 |\n"
+        with tempfile.NamedTemporaryFile(suffix=".7z", delete=False) as upload:
+            path = Path(upload.name)
+        try:
+            with py7zr.SevenZipFile(path, mode="w") as archive:
+                archive.writestr(content, "meta.log")
+            self.assertEqual(
+                find_scannable_upload_path("meta.7z", path),
+                [("meta.log", len(content))],
+            )
         finally:
             path.unlink(missing_ok=True)
     def test_frontend_renders_anonymous_jobs_inline_and_follows_authenticated_redirects(self):

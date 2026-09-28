@@ -10,6 +10,8 @@ from io import BytesIO
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
+import py7zr
+
 from .models import ScanContext
 from .rules import RuleRegistry, migrated_rules
 from .rules.base import TextRule, evaluate_text_rules_bytes
@@ -20,7 +22,7 @@ MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_DEPTH = 3
 STREAM_SCAN_THRESHOLD = 64 * 1024 * 1024
 ALLOWED_SUFFIXES = {".txt", ".log", ".yml", ".yaml"}
-ARCHIVE_SUFFIXES = {".zip", ".tar", ".tgz", ".gz"}
+ARCHIVE_SUFFIXES = {".zip", ".7z", ".tar", ".tgz", ".gz"}
 
 
 class ScanError(ValueError):
@@ -162,6 +164,34 @@ def _extract_gzip(filename: str, content_bytes: bytes, archive_depth: int) -> tu
     return f"{Path(filename).stem}.log", extracted
 
 
+def _extract_7z(filename: str, content_bytes: bytes, archive_depth: int) -> tuple[str, bytes]:
+    try:
+        with tempfile.TemporaryDirectory(prefix="logscan-7z-") as directory:
+            archive_path = Path(directory, "upload.7z")
+            archive_path.write_bytes(content_bytes)
+            with py7zr.SevenZipFile(archive_path, mode="r") as archive:
+                entries = archive.list()
+                names = _validate_archive_names([entry.filename for entry in entries])
+                selected = [entry for entry in entries if entry.filename in names]
+                if sum(entry.uncompressed or 0 for entry in selected) > MAX_FILE_BYTES:
+                    raise ScanError("The extracted 7-Zip contents are larger than the 1 GB limit.")
+                archive.extract(path=directory, targets=names)
+            extracted_files = []
+            extracted_size = 0
+            for name in names:
+                extracted_path = Path(directory, *PurePosixPath(name.replace("\\", "/")).parts)
+                content = extracted_path.read_bytes()
+                extracted_size += len(content)
+                if extracted_size > MAX_FILE_BYTES:
+                    raise ScanError("The extracted 7-Zip contents are larger than the 1 GB limit.")
+                extracted_files.append(content)
+            extracted = _combine_nested_files(list(zip(names, extracted_files)), archive_depth)
+    except py7zr.Bad7zFile as exc:
+        raise ScanError("The selected 7-Zip file is invalid.") from exc
+    if not extracted:
+        raise ScanError("The 7-Zip archive does not contain any text to scan.")
+    return f"{Path(filename).stem}.log", extracted
+
 def prepare_scan_input(filename: str, content_bytes: bytes, archive_depth: int = 0) -> tuple[str, bytes]:
     """Validate an upload and return the text that should be stored and scanned."""
     suffix = Path(filename).suffix.lower()
@@ -170,12 +200,14 @@ def prepare_scan_input(filename: str, content_bytes: bytes, archive_depth: int =
             raise ScanError("Archives may be nested no more than three levels deep.")
     if suffix == ".zip":
         return _extract_zip(filename, content_bytes, archive_depth + 1)
+    if suffix == ".7z":
+        return _extract_7z(filename, content_bytes, archive_depth + 1)
     if filename.lower().endswith((".tar.gz", ".tgz", ".tar")):
         return _extract_tar(filename, content_bytes, archive_depth + 1)
     if suffix == ".gz":
         return _extract_gzip(filename, content_bytes, archive_depth + 1)
     if suffix not in ALLOWED_SUFFIXES and not suffix.lstrip(".").isdigit():
-        raise ScanError("Choose a Kometa log, text, YAML, ZIP, TAR, or GZIP file.")
+        raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, TGZ, or GZIP file.")
     return filename, content_bytes
 
 
@@ -724,14 +756,22 @@ def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, by
     return scans
 
 
-def _stream_contains_kometa_marker(source) -> bool:
+def _stream_kometa_marker_and_size(source) -> tuple[bool, int]:
     carry = b""
+    size = 0
+    marker_found = False
     while chunk := source.read(1024 * 1024):
+        size += len(chunk)
+        if size > MAX_FILE_BYTES:
+            raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
         lowered = (carry + chunk).lower()
-        if b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered:
-            return True
+        marker_found = marker_found or b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered
         carry = chunk[-32:]
-    return False
+    return marker_found, size
+
+
+def _stream_contains_kometa_marker(source) -> bool:
+    return _stream_kometa_marker_and_size(source)[0]
 
 
 def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int]]:
@@ -741,9 +781,42 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
         raise ScanError("The selected file is empty.")
     if size > MAX_FILE_BYTES:
         raise ScanError("The selected file is larger than the 1 GB limit.")
-    if Path(filename).suffix.lower() != ".zip":
-        if Path(filename).suffix.lower() not in ALLOWED_SUFFIXES:
-            raise ScanError("Choose a Kometa log, text, YAML, or ZIP file.")
+    lowered_filename = filename.lower()
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".gz" and not lowered_filename.endswith((".tar.gz", ".tgz")):
+        try:
+            with path.open("rb") as compressed, gzip.GzipFile(fileobj=compressed, mode="rb") as source:
+                found, extracted_size = _stream_kometa_marker_and_size(source)
+        except (gzip.BadGzipFile, EOFError, OSError) as exc:
+            raise ScanError("The selected GZIP file is invalid.") from exc
+        if found:
+            return [(Path(filename).stem, extracted_size)]
+        raise ScanError("The archive does not contain a complete Kometa log file.")
+    if lowered_filename.endswith((".tar", ".tar.gz", ".tgz")):
+        try:
+            with tarfile.open(path, mode="r:*") as archive:
+                found = []
+                for entry in archive.getmembers():
+                    if not entry.isfile() or Path(entry.name).suffix.lower() not in ALLOWED_SUFFIXES:
+                        continue
+                    member = archive.extractfile(entry)
+                    if member is not None:
+                        with member:
+                            if _stream_contains_kometa_marker(member):
+                                found.append((entry.name, entry.size))
+                if found:
+                    return found
+        except (tarfile.TarError, OSError) as exc:
+            raise ScanError("The selected TAR file is invalid.") from exc
+        raise ScanError("The archive does not contain a complete Kometa log file.")
+    if suffix == ".7z":
+        prepared_name, prepared_content = _extract_7z(filename, path.read_bytes(), 1)
+        if _stream_contains_kometa_marker(BytesIO(prepared_content)):
+            return [(prepared_name, len(prepared_content))]
+        raise ScanError("The archive does not contain a complete Kometa log file.")
+    if suffix != ".zip":
+        if suffix not in ALLOWED_SUFFIXES:
+            raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, TGZ, or GZIP file.")
         with path.open("rb") as source:
             if _stream_contains_kometa_marker(source):
                 return [(filename, size)]
