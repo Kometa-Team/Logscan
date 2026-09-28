@@ -190,6 +190,10 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(record["overview"]["uploaded_by"], "Web User")
         self.assertEqual(record["overview"]["uploaded_by_id"], "web-user-42")
         self.assertEqual(record["overview"]["upload_source"], "web")
+        self.assertIsNone(record["overview"]["message_url"])
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        self.assertIn("if (value.messageUrl)", script)
+        self.assertIn('["discord.com", "www.discord.com"].includes(messageUrl.hostname)', script)
 
     def test_direct_scan_link_shows_authentication_state_and_returns_after_sign_in(self):
         client = app.test_client()
