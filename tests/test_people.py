@@ -165,6 +165,31 @@ class StreamingScanTests(unittest.TestCase):
             )
         finally:
             path.unlink(missing_ok=True)
+    def test_stored_log_viewer_returns_bounded_line_windows(self):
+        lines = [
+            "[kometa.py:1] [INFO] | Version: 2.5.0 |",
+            *[f"[kometa.py:{number}] [INFO] | line {number} |" for number in range(2, 2502)],
+        ]
+        content = "\n".join(lines).encode()
+        response = app.test_client().post(
+            "/api/scan",
+            data={"log": (BytesIO(content), "large-meta.log")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 200)
+        scan_id = response.get_json()["id"]
+
+        page = app.test_client().get(f"/api/scans/{scan_id}/log?start=1200&count=25")
+        self.assertEqual(page.status_code, 200)
+        payload = page.get_json()
+        self.assertEqual(payload["start"], 1200)
+        self.assertEqual(payload["total"], len(lines))
+        self.assertEqual(len(payload["lines"]), 25)
+        self.assertIn("line 1200", payload["lines"][0])
+
+        download = app.test_client().get(f"/api/scans/{scan_id}/log")
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.data, content)
     def test_frontend_renders_anonymous_jobs_inline_and_follows_authenticated_redirects(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
         self.assertIn("function renderCompletedJob(result)", script)

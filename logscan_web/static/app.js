@@ -36,6 +36,7 @@ let currentScanId = null;
 let deleteToken = null;
 let currentLogLines = null;
 let currentLogSections = [];
+let currentLogTotal = 0;
 let highlightedRange = { start: 1, end: 1 };
 let viewerNavigationLines = null;
 let viewerFirstLine = 1;
@@ -444,20 +445,55 @@ function recommendationBody(message, evidenceLines = [], configLine = 0) {
   return body;
 }
 
+async function fetchLogWindow(start, count = VIEWER_CHUNK_SIZE) {
+  const url = "/api/scans/" + encodeURIComponent(currentScanId) + "/log?start=" + start + "&count=" + count;
+  const response = await fetch(url);
+  if (response.status === 404) throw new Error("This stored log has expired or was deleted, so its source lines are no longer available.");
+  if (!response.ok) throw new Error("The stored log could not be loaded (HTTP " + response.status + ").");
+  const payload = await response.json();
+  if (!currentLogLines) currentLogLines = new Array(payload.total);
+  currentLogTotal = payload.total;
+  currentLogLines.length = payload.total;
+  payload.lines.forEach((line, index) => { currentLogLines[payload.start - 1 + index] = line; });
+  currentLogSections = payload.sections || currentLogSections;
+  if (!extractedConfig && payload.config) extractedConfig = payload.config;
+  populateSectionJump();
+  return payload;
+}
+
 async function loadLogLines() {
   if (!currentFile && !currentScanId) throw new Error("Select and scan a log before opening the viewer.");
   if (!currentLogLines) {
-    const response = currentScanId
-      ? await fetch(`/api/scans/${encodeURIComponent(currentScanId)}/log`)
-      : null;
-    if (response && response.status === 404) throw new Error("This stored log has expired or was deleted, so its source lines are no longer available.");
-    if (response && !response.ok) throw new Error(`The stored log could not be loaded (HTTP ${response.status}).`);
-    const text = response ? await response.text() : await currentFile.text();
-    currentLogLines = text.split(/\r?\n/);
-    currentLogSections = findLogSections(currentLogLines);
-    populateSectionJump();
+    if (currentScanId) {
+      await fetchLogWindow(1);
+    } else {
+      const text = await currentFile.text();
+      currentLogLines = text.split(/\r?\n/);
+      currentLogTotal = currentLogLines.length;
+      currentLogSections = findLogSections(currentLogLines);
+      populateSectionJump();
+    }
   }
   return currentLogLines;
+}
+
+async function ensureLogWindow(first, last) {
+  await loadLogLines();
+  if (!currentScanId) return;
+  let missingStart = null;
+  for (let line = first; line <= last; line += 1) {
+    if (!(line - 1 in currentLogLines)) {
+      missingStart = line;
+      break;
+    }
+  }
+  if (missingStart !== null) await fetchLogWindow(missingStart, Math.max(VIEWER_CHUNK_SIZE, last - missingStart + 1));
+  const keepFirst = Math.max(1, first - (VIEWER_CHUNK_SIZE * 2));
+  const keepLast = Math.min(currentLogTotal, last + (VIEWER_CHUNK_SIZE * 2));
+  Object.keys(currentLogLines).forEach((key) => {
+    const line = Number(key) + 1;
+    if (line < keepFirst || line > keepLast) delete currentLogLines[key];
+  });
 }
 
 function isSectionDivider(line) {
@@ -615,7 +651,7 @@ function updateViewerMode(mode) {
 async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
   viewerNavigationLines = null;
   const lines = await loadLogLines();
-  extractedConfig = extractConfig(lines);
+  if (!extractedConfig && !currentScanId) extractedConfig = extractConfig(lines);
   updateViewerMode("config");
   logCode.replaceChildren(
     extractedConfig
@@ -803,7 +839,7 @@ function updateViewerPosition() {
   viewerPosition.textContent = `Lines ${viewerFirstLine.toLocaleString()}–${viewerLastLine.toLocaleString()} of ${currentLogLines.length.toLocaleString()}`;
 }
 
-function renderLogWindow(targetStart, targetEnd = targetStart) {
+async function renderLogWindow(targetStart, targetEnd = targetStart) {
   const total = currentLogLines.length;
   const startTarget = Math.max(1, Math.min(total, Number(targetStart) || 1));
   const endTarget = Math.max(startTarget, Math.min(total, Number(targetEnd) || startTarget));
@@ -814,6 +850,7 @@ function renderLogWindow(targetStart, targetEnd = targetStart) {
     Math.max(viewerFirstLine + VIEWER_CHUNK_SIZE - 1, endTarget + Math.floor(VIEWER_CHUNK_SIZE / 2)),
   );
   if (viewerLastLine === total) viewerFirstLine = Math.max(1, viewerLastLine - VIEWER_CHUNK_SIZE + 1);
+  await ensureLogWindow(viewerFirstLine, viewerLastLine);
   const fragment = createLogRows(viewerFirstLine, viewerLastLine);
   logCode.replaceChildren(fragment);
   updateViewerPosition();
@@ -823,7 +860,7 @@ function renderLogWindow(targetStart, targetEnd = targetStart) {
   });
 }
 
-function loadAdjacentLogChunk(direction) {
+async function loadAdjacentLogChunk(direction) {
   if (loadingViewerChunk || !currentLogLines) return;
   const total = currentLogLines.length;
   if (direction === "next" && viewerLastLine >= total) return;
@@ -833,15 +870,19 @@ function loadAdjacentLogChunk(direction) {
   if (direction === "next") {
     const first = viewerLastLine + 1;
     const last = Math.min(total, first + VIEWER_CHUNK_SIZE - 1);
-    logCode.append(createLogRows(first, last));
+    await ensureLogWindow(first, last);
+    logCode.replaceChildren(createLogRows(first, last));
+    viewerFirstLine = first;
     viewerLastLine = last;
+    logCode.scrollTop = 300;
   } else {
-    const previousHeight = logCode.scrollHeight;
     const last = viewerFirstLine - 1;
     const first = Math.max(1, last - VIEWER_CHUNK_SIZE + 1);
-    logCode.prepend(createLogRows(first, last));
+    await ensureLogWindow(first, last);
+    logCode.replaceChildren(createLogRows(first, last));
     viewerFirstLine = first;
-    logCode.scrollTop += logCode.scrollHeight - previousHeight;
+    viewerLastLine = last;
+    logCode.scrollTop = Math.max(0, logCode.scrollHeight - logCode.clientHeight - 300);
   }
   updateViewerPosition();
   requestAnimationFrame(() => { loadingViewerChunk = false; });
@@ -853,7 +894,7 @@ async function openLogViewer(targetStart = 1, targetEnd = targetStart) {
     if (!logViewer.open) logViewer.showModal();
     updateViewerMode("log");
     viewerNavigationLines = null;
-    renderLogWindow(targetStart, targetEnd);
+    await renderLogWindow(targetStart, targetEnd);
   } catch (error) {
     alert(error.message);
   }
@@ -892,7 +933,7 @@ async function openRuntimeLine(runtime, rankedRunTimes = [runtime]) {
     const targetLine = runtimeTargetLine(lines, runtime);
     if (!logViewer.open) logViewer.showModal();
     updateViewerMode("log");
-    renderLogWindow(targetLine);
+    await renderLogWindow(targetLine);
   } catch (error) {
     alert(error.message);
   }
@@ -1463,12 +1504,16 @@ function downloadFilename(kind = "log") {
 }
 
 async function downloadLog() {
-  const lines = await loadLogLines();
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" }));
+  if (currentScanId) {
+    link.href = "/api/scans/" + encodeURIComponent(currentScanId) + "/log";
+  } else {
+    const lines = await loadLogLines();
+    link.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" }));
+  }
   link.download = downloadFilename();
   link.click();
-  URL.revokeObjectURL(link.href);
+  if (!currentScanId) URL.revokeObjectURL(link.href);
 }
 const downloadDialog = document.querySelector("#download-dialog");
 document.querySelector("#open-download").addEventListener("click", () => downloadDialog.showModal());
@@ -1478,14 +1523,14 @@ document.querySelector("#download-log-option").addEventListener("click", async (
 });
 document.querySelector("#download-config-option").addEventListener("click", async () => {
   try {
-    if (!extractedConfig) extractedConfig = extractConfig(await loadLogLines());
+    if (!extractedConfig && !currentScanId) extractedConfig = extractConfig(await loadLogLines());
     if (!downloadConfig()) alert("No redacted config block was found in this log.");
     else document.querySelector("#download-dialog").close();
   } catch (error) { alert(error.message); }
 });
 document.querySelector("#download-both-option").addEventListener("click", async () => {
   try {
-    if (!extractedConfig) extractedConfig = extractConfig(await loadLogLines());
+    if (!extractedConfig && !currentScanId) extractedConfig = extractConfig(await loadLogLines());
     await downloadLog();
     if (!downloadConfig()) alert("The log was downloaded, but it contains no redacted config block.");
     document.querySelector("#download-dialog").close();

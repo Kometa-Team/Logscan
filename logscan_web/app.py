@@ -26,6 +26,71 @@ from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanErr
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 from .support import create_support_blueprint, discord_session_user, support_session_authorized
 
+LOG_INDEX_STRIDE = 1000
+LOG_VIEW_MAX_LINES = 2000
+_log_index_cache = {}
+_log_index_lock = threading.Lock()
+
+
+def _stored_log_index(path: Path) -> dict:
+    stat = path.stat()
+    cache_key = (str(path), stat.st_mtime_ns, stat.st_size)
+    with _log_index_lock:
+        cached = _log_index_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        offsets = [0]
+        sections = []
+        recent = []
+        config_lines = []
+        in_config = False
+        with path.open("rb") as source:
+            line_number = 0
+            while raw_line := source.readline():
+                line_number += 1
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if line_number > 1 and (line_number - 1) % LOG_INDEX_STRIDE == 0:
+                    offsets.append(source.tell() - len(raw_line))
+                recent.append(line)
+                if len(recent) > 3:
+                    recent.pop(0)
+                if len(recent) == 3 and re.search(r"\|={10,}\|\s*$", recent[0]) and re.search(r"\|={10,}\|\s*$", recent[2]):
+                    match = re.search(r"\|\s*([^|=][^|]*?)\s*\|\s*$", recent[1])
+                    if match:
+                        sections.append({"title": match.group(1).strip(), "line": line_number - 1})
+                if not in_config:
+                    in_config = "Redacted Config" in line
+                elif "Config Warning:" in line or "Initializing cache database at" in line:
+                    in_config = False
+                elif in_config:
+                    match = re.search(r"\[config\.py:\d+\]\s+\[([A-Z]+)\]\s*\|(.*)$", line)
+                    if not match or match.group(1) in {"CRITICAL", "ERROR", "WARNING"}:
+                        in_config = False
+                    else:
+                        value = match.group(2).rstrip(" |")
+                        config_lines.append(value[1:] if value.startswith(" ") else value)
+        if len(config_lines) > 1:
+            config_lines.pop()
+        index = {"offsets": offsets, "total": line_number, "sections": sections, "config": "\n".join(config_lines)}
+        if len(_log_index_cache) >= 8:
+            _log_index_cache.pop(next(iter(_log_index_cache)))
+        _log_index_cache[cache_key] = index
+        return index
+
+
+def _stored_log_lines(path: Path, index: dict, start: int, count: int) -> list[str]:
+    block = (start - 1) // LOG_INDEX_STRIDE
+    first_line = block * LOG_INDEX_STRIDE + 1
+    lines = []
+    with path.open("rb") as source:
+        source.seek(index["offsets"][block])
+        current = first_line
+        while current < start and source.readline():
+            current += 1
+        while len(lines) < count and (raw_line := source.readline()):
+            lines.append(raw_line.decode("utf-8", errors="replace").rstrip("\r\n"))
+    return lines
+
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
 SCHEMA_VALIDATION_VERSION = 2
@@ -1381,6 +1446,21 @@ def create_app() -> Flask:
         path = store.log_path(scan_id)
         if path is None:
             abort(404)
+        if "start" in request.args:
+            index = _stored_log_index(path)
+            try:
+                start = max(1, int(request.args.get("start", 1)))
+                count = min(LOG_VIEW_MAX_LINES, max(1, int(request.args.get("count", 1000))))
+            except ValueError:
+                return jsonify(error="Invalid line range."), 400
+            start = min(start, max(1, index["total"]))
+            return jsonify(
+                start=start,
+                lines=_stored_log_lines(path, index, start, count),
+                total=index["total"],
+                sections=index["sections"],
+                config=index["config"],
+            )
         return send_file(path.resolve(), mimetype="text/plain; charset=utf-8", conditional=True)
 
     @app.post("/api/scans/<scan_id>/validate-config")
