@@ -144,17 +144,27 @@ function showOverview(group, overview) {
     const definition = document.createElement("dd");
     term.textContent = label;
     if (label === "Log Info") {
-      const uploader = document.createElement("a");
-      uploader.href = `discord://-/users/${value.id}`;
+      const uploader = value.id ? document.createElement("a") : document.createElement("span");
+      if (value.id) {
+        uploader.href = `discord://-/users/${value.id}`;
+        uploader.title = "Open Discord profile";
+      }
       uploader.textContent = value.uploader;
-      uploader.title = "Open Discord profile";
-      definition.append("Uploader: ", uploader, document.createElement("br"));
-      const link = document.createElement("a");
-      const messageUrl = new URL(value.messageUrl);
-      link.href = `discord://-${messageUrl.pathname}`;
-      link.textContent = "Click Here";
-      link.title = "Open Discord message";
-      definition.append("Discord Message: ", link);
+      definition.append("Uploader: ", uploader);
+      if (value.messageUrl) {
+        try {
+          const messageUrl = new URL(value.messageUrl);
+          if (messageUrl.protocol === "https:" && ["discord.com", "www.discord.com"].includes(messageUrl.hostname)) {
+            const link = document.createElement("a");
+            link.href = `discord://-${messageUrl.pathname}`;
+            link.textContent = "Click Here";
+            link.title = "Open Discord message";
+            definition.append(document.createElement("br"), "Discord Message: ", link);
+          }
+        } catch (_error) {
+          // Uploader attribution is still useful when a legacy message URL is malformed.
+        }
+      }
     } else {
       definition.textContent = displayValue(value);
     }
