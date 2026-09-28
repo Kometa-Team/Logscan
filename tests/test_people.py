@@ -1490,6 +1490,8 @@ class PeopleUnionTests(unittest.TestCase):
         html = self.client.get("/").get_data(as_text=True)
         self.assertIn('href="/people">People</a>', html)
         self.assertIn('aria-label="All utilities"', html)
+        self.assertIn('>Kometa Logscan</span>', html)
+        self.assertIn('aria-label="Kometa Logscan home"', html)
 
     def test_shared_navigation_uses_one_menu_on_desktop_and_mobile(self):
         html = self.client.get("/").get_data(as_text=True)
@@ -1561,7 +1563,7 @@ class PeopleUnionTests(unittest.TestCase):
             app.config.update(previous)
         html = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 503)
-        self.assertIn("Kometa Utilities", html)
+        self.assertIn("Kometa Logscan", html)
         self.assertIn("Discord access needs to be configured", html)
         self.assertNotIn("<h1>Service Unavailable</h1>", html)
 

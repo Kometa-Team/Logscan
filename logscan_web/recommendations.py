@@ -309,6 +309,7 @@ def validate_redacted_config(
     *,
     schema_cache: dict[str, dict] | None = None,
     schema_cache_dir: str | Path | None = None,
+    schema_cache_lock=None,
 ) -> list[dict[str, str | int]]:
     """Validate a log's extracted config against its matching Kometa schema.
 
@@ -327,11 +328,17 @@ def validate_redacted_config(
         return [{"line": line, "message": f"Invalid YAML: {getattr(exc, 'problem', str(exc))}", "path": ""}]
     schema_branch = schema_branch_for_log(log_content)
     try:
-        schema = _load_config_schema(
-            schema_branch,
-            memory_cache=schema_cache,
-            cache_dir=Path(schema_cache_dir) if schema_cache_dir is not None else None,
-        )
+        def load_schema():
+            return _load_config_schema(
+                schema_branch,
+                memory_cache=schema_cache,
+                cache_dir=Path(schema_cache_dir) if schema_cache_dir is not None else None,
+            )
+        if schema_cache_lock is None:
+            schema = load_schema()
+        else:
+            with schema_cache_lock:
+                schema = load_schema()
     except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"The Kometa {schema_branch} configuration schema could not be fetched.") from exc
 

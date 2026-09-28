@@ -197,11 +197,13 @@ def create_app() -> Flask:
     schema_cache_lock = threading.Lock()
 
     def validate_config(log_content: str) -> list[dict]:
-        """Validate with one branch-schema cache shared by this app process."""
-        with schema_cache_lock:
-            return validate_redacted_config(
-                log_content, schema_cache=schema_cache, schema_cache_dir=schema_cache_dir
-            )
+        """Validate using the process cache without serializing validation work."""
+        return validate_redacted_config(
+            log_content,
+            schema_cache=schema_cache,
+            schema_cache_dir=schema_cache_dir,
+            schema_cache_lock=schema_cache_lock,
+        )
 
     def update_scan_job(job_id: str | None, phase: str, *, error: str | None = None, redirect_url: str | None = None, result: dict | None = None) -> None:
         if not job_id:
@@ -782,6 +784,7 @@ def create_app() -> Flask:
                 schema_directive_missing=not has_yaml_language_server_directive(log_content),
             )
             completed += 1
+            time.sleep(0.5)
         app.logger.info("Backfilled schema validation counts for %d of %d retained scan(s).", completed, len(records))
     def backfill_quickstart_metadata():
         records = [
