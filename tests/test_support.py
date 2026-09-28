@@ -241,6 +241,8 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn('deleteForm.dataset.view || "mine"', script)
         self.assertLess(template.index("support-actions-heading"), template.index("support-title"))
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
+        self.assertNotIn(".support-filter-panel > summary { display: none; }", css)
+        self.assertIn(".support-filter-panel > summary { display: flex;", css)
         self.assertIn(".support-actions-heading, .support-actions { position: sticky", css)
         self.assertIn("severity == 'schema' or row.counts[severity]", template)
         self.assertIn("row.schema_count_available", template)
