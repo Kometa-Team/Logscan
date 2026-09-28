@@ -27,6 +27,7 @@ from .support import create_support_blueprint, discord_session_user, support_ses
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
+SCHEMA_VALIDATION_VERSION = 2
 POPULAR_PEOPLE_PAGE_SIZE = 25
 TMDB_POPULAR_PAGE_SIZE = 20
 KOMETA_IMAGE_SOURCES = (
@@ -755,7 +756,7 @@ def create_app() -> Flask:
     def backfill_schema_validation_counts():
         records = [
             record for record in store.list()
-            if not isinstance((record.get("metadata") or {}).get("schema_validation_failures"), list)
+            if (record.get("metadata") or {}).get("schema_validation_version") != SCHEMA_VALIDATION_VERSION
         ]
         if not records:
             return
@@ -782,6 +783,7 @@ def create_app() -> Flask:
                 schema_validation_branch=schema_branch_for_log(log_content),
                 schema_validation_failures=failures,
                 schema_directive_missing=not has_yaml_language_server_directive(log_content),
+                schema_validation_version=SCHEMA_VALIDATION_VERSION,
             )
             completed += 1
             time.sleep(0.5)
@@ -1096,6 +1098,7 @@ def create_app() -> Flask:
                     result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
                     result.metadata["schema_validation_failures"] = schema_failures
                     result.metadata["schema_directive_missing"] = not has_yaml_language_server_directive(log_content)
+                    result.metadata["schema_validation_version"] = SCHEMA_VALIDATION_VERSION
                     result.metadata["counts"]["schema"] = len(schema_failures)
                 except ValueError:
                     result.metadata["schema_validation_count"] = 0
@@ -1352,7 +1355,10 @@ def create_app() -> Flask:
             abort(404)
         metadata = record.get("metadata") or {}
         cached_failures = metadata.get("schema_validation_failures")
-        if isinstance(cached_failures, list):
+        if (
+            isinstance(cached_failures, list)
+            and metadata.get("schema_validation_version") == SCHEMA_VALIDATION_VERSION
+        ):
             return jsonify(
                 branch=metadata.get("schema_validation_branch", "master"),
                 failures=cached_failures,
@@ -1372,6 +1378,7 @@ def create_app() -> Flask:
                 schema_validation_branch=branch,
                 schema_validation_failures=failures,
                 schema_directive_missing=directive_missing,
+                schema_validation_version=SCHEMA_VALIDATION_VERSION,
             )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

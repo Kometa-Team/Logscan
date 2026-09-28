@@ -724,6 +724,41 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(failures[0]["config_column"], 3)
         self.assertEqual(failures[0]["config_end_column"], 16)
 
+    def test_schema_validation_stops_before_post_config_error(self):
+        schema = {"type": "object", "properties": {"plex": {"type": "object"}}}
+        log = "\n".join([
+            "Redacted Config",
+            "[config.py:309] [DEBUG] | plex: |",
+            "[config.py:309] [DEBUG] |   timeout: 60 |",
+            "[config.py:316] [DEBUG] | |",
+            "[config.py:509] [ERROR] | Trakt is no longer supported, please see Announcements |",
+            "[cache.py:52] [INFO] | Initializing cache database at /config/config.cache |",
+        ])
+
+        with patch("logscan_web.recommendations.urlopen", return_value=Response(schema)):
+            self.assertEqual(validate_redacted_config(log), [])
+
+    def test_yaml_parser_failure_has_navigable_config_position(self):
+        log = "\n".join([
+            "Redacted Config",
+            "[config.py:1] [INFO] | plex: |",
+            "[config.py:2] [INFO] |   timeout: \"unterminated |",
+            "[config.py:3] [INFO] | end |",
+            "Initializing cache database at /config/cache",
+        ])
+
+        failure = validate_redacted_config(log)[0]
+
+        self.assertGreaterEqual(failure["config_line"], 2)
+        self.assertGreaterEqual(failure["config_column"], 1)
+        self.assertTrue(failure["title"].startswith("Invalid YAML at line "))
+        self.assertIn("Correct the highlighted YAML", failure["action"])
+
+    def test_browser_config_extraction_stops_at_post_config_errors(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn('["CRITICAL", "ERROR", "WARNING"].includes(match[1])', script)
+        self.assertIn("match[2].replace", script)
     def test_schema_validation_reuses_persistent_branch_cache(self):
         schema = {"type": "object", "properties": {}}
         log = "\n".join([
@@ -761,7 +796,7 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn('result.metadata["schema_validation_failures"] = schema_failures', source)
         self.assertIn('metadata.setdefault("counts", {})["schema"] = schema_count', source)
-        self.assertIn("if isinstance(cached_failures, list):", source)
+        self.assertIn('metadata.get("schema_validation_version") == SCHEMA_VALIDATION_VERSION', source)
 
     def test_config_viewer_marks_exact_schema_issue_ranges(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")

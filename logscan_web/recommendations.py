@@ -44,7 +44,7 @@ def extract_redacted_config(log_content: str) -> tuple[str, list[int]]:
     """Return Kometa's redacted config block and its source log-line numbers."""
     started = False
     extracted: list[tuple[str, int]] = []
-    tagged_config = re.compile(r"\[config\.py:\d+\]\s+\[[A-Z]+\]\s*\|(.*)$")
+    tagged_config = re.compile(r"\[config\.py:\d+\]\s+\[([A-Z]+)\]\s*\|(.*)$")
     for line_number, line in enumerate(log_content.splitlines(), start=1):
         if not started:
             if "Redacted Config" in line:
@@ -55,7 +55,9 @@ def extract_redacted_config(log_content: str) -> tuple[str, list[int]]:
         match = tagged_config.search(line)
         if not match:
             break
-        extracted.append((match.group(1).rstrip(" |"), line_number))
+        if match.group(1) in {"CRITICAL", "ERROR", "WARNING"}:
+            break
+        extracted.append((match.group(2).rstrip(" |"), line_number))
     if len(extracted) > 1:
         extracted.pop()
     return "\n".join(line[1:] if line.startswith(" ") else line for line, _number in extracted), [
@@ -324,8 +326,24 @@ def validate_redacted_config(
         config_node = yaml.compose(config_text)
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
-        line = log_lines[mark.line] if mark and mark.line < len(log_lines) else log_lines[0]
-        return [{"line": line, "message": f"Invalid YAML: {getattr(exc, 'problem', str(exc))}", "path": ""}]
+        config_line = mark.line + 1 if mark else 1
+        config_column = mark.column + 1 if mark else 1
+        line = log_lines[config_line - 1] if config_line <= len(log_lines) else log_lines[0]
+        problem = getattr(exc, "problem", str(exc))
+        return [{
+            "line": line,
+            "config_line": config_line,
+            "config_column": config_column,
+            "config_end_column": config_column + 1,
+            "message": f"Invalid YAML: {problem}",
+            "path": "config root",
+            "urgency": "Action required",
+            "title": f"Invalid YAML at line {config_line}",
+            "location": f"config.yml line {config_line}, column {config_column}",
+            "accepted": "Valid YAML syntax and indentation.",
+            "explanation": f"Kometa could not parse config.yml: {problem}.",
+            "action": "Correct the highlighted YAML syntax or indentation.",
+        }]
     schema_branch = schema_branch_for_log(log_content)
     try:
         def load_schema():

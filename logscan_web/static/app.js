@@ -482,7 +482,7 @@ function findLogSections(lines) {
 function extractConfig(lines) {
   let started = false;
   const extracted = [];
-  const taggedConfig = /\[config\.py:\d+\]\s+\[[A-Z]+\]\s*\|(.*)$/;
+  const taggedConfig = /\[config\.py:\d+\]\s+\[([A-Z]+)\]\s*\|(.*)$/;
   for (const line of lines) {
     if (!started) {
       if (line.includes("Redacted Config")) started = true;
@@ -491,7 +491,8 @@ function extractConfig(lines) {
     if (line.includes("Config Warning:") || line.includes("Initializing cache database at")) break;
     const match = taggedConfig.exec(line);
     if (!match) break;
-    extracted.push(match[1].replace(/[ |]+$/, ""));
+    if (["CRITICAL", "ERROR", "WARNING"].includes(match[1])) break;
+    extracted.push(match[2].replace(/[ |]+$/, ""));
   }
   if (extracted.length > 1) extracted.pop();
   return extracted.map((line) => line.startsWith(" ") ? line.slice(1) : line).join("\n");
