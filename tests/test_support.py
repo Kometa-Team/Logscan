@@ -226,6 +226,7 @@ class SupportConsoleTests(unittest.TestCase):
         script = Path("logscan_web/static/support_logs.js").read_text(encoding="utf-8")
         self.assertIn("support_logs.js", template)
         self.assertIn('class="support-filter-panel"', template)
+        self.assertNotIn('class="support-filter-panel" open', template)
         self.assertIn("Search and filters", template)
         self.assertIn("data-active-filters", template)
         self.assertIn('window.matchMedia("(max-width: 560px)")', script)
