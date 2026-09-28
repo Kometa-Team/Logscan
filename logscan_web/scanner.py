@@ -1,4 +1,6 @@
+import bz2
 import gzip
+import lzma
 import mmap
 import shutil
 import tempfile
@@ -11,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 import py7zr
+import zstandard as zstd
 
 from .models import ScanContext
 from .rules import RuleRegistry, migrated_rules
@@ -22,7 +25,9 @@ MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_DEPTH = 3
 STREAM_SCAN_THRESHOLD = 64 * 1024 * 1024
 ALLOWED_SUFFIXES = {".txt", ".log", ".yml", ".yaml"}
-ARCHIVE_SUFFIXES = {".zip", ".7z", ".tar", ".tgz", ".gz"}
+ARCHIVE_SUFFIXES = {
+    ".zip", ".7z", ".tar", ".tgz", ".gz", ".bz2", ".tbz2", ".xz", ".txz", ".zst",
+}
 
 
 class ScanError(ValueError):
@@ -81,7 +86,7 @@ def _combine_nested_files(files: list[tuple[str, bytes]], archive_depth: int) ->
         try:
             _filename, prepared = prepare_scan_input(filename, content, archive_depth)
         except ScanError as exc:
-            is_nested_archive = Path(filename).suffix.lower() in ARCHIVE_SUFFIXES or filename.lower().endswith((".tar.gz", ".tgz"))
+            is_nested_archive = Path(filename).suffix.lower() in ARCHIVE_SUFFIXES or filename.lower().endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst"))
             if is_nested_archive and str(exc) == "The archive does not contain any files to scan.":
                 continue
             raise
@@ -164,6 +169,64 @@ def _extract_gzip(filename: str, content_bytes: bytes, archive_depth: int) -> tu
     return f"{Path(filename).stem}.log", extracted
 
 
+def _extract_bzip2(
+    filename: str, content_bytes: bytes, archive_depth: int,
+) -> tuple[str, bytes]:
+    try:
+        with bz2.BZ2File(BytesIO(content_bytes), mode="rb") as archive:
+            extracted = archive.read(MAX_FILE_BYTES + 1)
+    except (EOFError, OSError) as exc:
+        raise ScanError("The selected BZIP2 file is invalid.") from exc
+    return _prepare_decompressed_log(filename, extracted, archive_depth, "BZIP2")
+
+
+def _extract_xz(
+    filename: str, content_bytes: bytes, archive_depth: int,
+) -> tuple[str, bytes]:
+    try:
+        with lzma.LZMAFile(BytesIO(content_bytes), mode="rb") as archive:
+            extracted = archive.read(MAX_FILE_BYTES + 1)
+    except (EOFError, lzma.LZMAError, OSError) as exc:
+        raise ScanError("The selected XZ file is invalid.") from exc
+    return _prepare_decompressed_log(filename, extracted, archive_depth, "XZ")
+
+
+def _decompress_zstandard(content_bytes: bytes) -> bytes:
+    try:
+        with zstd.ZstdDecompressor().stream_reader(BytesIO(content_bytes)) as archive:
+            extracted = archive.read(MAX_FILE_BYTES + 1)
+        if len(extracted) > MAX_FILE_BYTES:
+            raise ScanError("The extracted Zstandard contents are larger than the 1 GB limit.")
+        return extracted
+    except zstd.ZstdError as exc:
+        raise ScanError("The selected Zstandard file is invalid.") from exc
+
+
+def _extract_zstandard(
+    filename: str, content_bytes: bytes, archive_depth: int,
+) -> tuple[str, bytes]:
+    return _prepare_decompressed_log(
+        filename,
+        _decompress_zstandard(content_bytes),
+        archive_depth,
+        "Zstandard",
+    )
+
+
+def _prepare_decompressed_log(
+    filename: str,
+    extracted: bytes,
+    archive_depth: int,
+    format_name: str,
+) -> tuple[str, bytes]:
+    if not extracted:
+        raise ScanError(f"The {format_name} file does not contain any text to scan.")
+    if len(extracted) > MAX_FILE_BYTES:
+        raise ScanError(f"The extracted {format_name} contents are larger than the 1 GB limit.")
+    inner_filename = Path(filename).stem
+    _inner_filename, extracted = prepare_scan_input(inner_filename, extracted, archive_depth)
+    return f"{inner_filename}.log", extracted
+
 def _extract_7z(filename: str, content_bytes: bytes, archive_depth: int) -> tuple[str, bytes]:
     try:
         with tempfile.TemporaryDirectory(prefix="logscan-7z-") as directory:
@@ -195,19 +258,28 @@ def _extract_7z(filename: str, content_bytes: bytes, archive_depth: int) -> tupl
 def prepare_scan_input(filename: str, content_bytes: bytes, archive_depth: int = 0) -> tuple[str, bytes]:
     """Validate an upload and return the text that should be stored and scanned."""
     suffix = Path(filename).suffix.lower()
-    if suffix in ARCHIVE_SUFFIXES or filename.lower().endswith((".tar.gz", ".tgz")):
+    if suffix in ARCHIVE_SUFFIXES or filename.lower().endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst")):
         if archive_depth >= MAX_ARCHIVE_DEPTH:
             raise ScanError("Archives may be nested no more than three levels deep.")
     if suffix == ".zip":
         return _extract_zip(filename, content_bytes, archive_depth + 1)
     if suffix == ".7z":
         return _extract_7z(filename, content_bytes, archive_depth + 1)
-    if filename.lower().endswith((".tar.gz", ".tgz", ".tar")):
+    if filename.lower().endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar")):
         return _extract_tar(filename, content_bytes, archive_depth + 1)
+    if filename.lower().endswith(".tar.zst"):
+        tar_content = _decompress_zstandard(content_bytes)
+        return _extract_tar(Path(filename).stem, tar_content, archive_depth + 1)
     if suffix == ".gz":
         return _extract_gzip(filename, content_bytes, archive_depth + 1)
+    if suffix == ".bz2":
+        return _extract_bzip2(filename, content_bytes, archive_depth + 1)
+    if suffix == ".xz":
+        return _extract_xz(filename, content_bytes, archive_depth + 1)
+    if suffix == ".zst":
+        return _extract_zstandard(filename, content_bytes, archive_depth + 1)
     if suffix not in ALLOWED_SUFFIXES and not suffix.lstrip(".").isdigit():
-        raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, TGZ, or GZIP file.")
+        raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")
     return filename, content_bytes
 
 
@@ -774,6 +846,69 @@ def _stream_contains_kometa_marker(source) -> bool:
     return _stream_kometa_marker_and_size(source)[0]
 
 
+def _find_scannable_tar_path(path: Path) -> list[tuple[str, int]]:
+    try:
+        with tarfile.open(path, mode="r:*") as archive:
+            found = []
+            for entry in archive.getmembers():
+                if not entry.isfile() or Path(entry.name).suffix.lower() not in ALLOWED_SUFFIXES:
+                    continue
+                member = archive.extractfile(entry)
+                if member is not None:
+                    with member:
+                        if _stream_contains_kometa_marker(member):
+                            found.append((entry.name, entry.size))
+            if found:
+                return found
+    except (tarfile.TarError, OSError) as exc:
+        raise ScanError("The selected TAR file is invalid.") from exc
+    raise ScanError("The archive does not contain a complete Kometa log file.")
+
+
+def _find_scannable_zstandard_tar(path: Path) -> list[tuple[str, int]]:
+    temporary = tempfile.NamedTemporaryFile(prefix="logscan-zstd-", suffix=".tar", delete=False)
+    temporary_path = Path(temporary.name)
+    try:
+        extracted_size = 0
+        with path.open("rb") as compressed, zstd.ZstdDecompressor().stream_reader(compressed) as source, temporary:
+            while chunk := source.read(1024 * 1024):
+                extracted_size += len(chunk)
+                if extracted_size > MAX_FILE_BYTES:
+                    raise ScanError("The extracted Zstandard contents are larger than the 1 GB limit.")
+                temporary.write(chunk)
+        return _find_scannable_tar_path(temporary_path)
+    except zstd.ZstdError as exc:
+        raise ScanError("The selected Zstandard file is invalid.") from exc
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _find_scannable_compressed_log(
+    filename: str, path: Path, suffix: str,
+) -> list[tuple[str, int]]:
+    compressed = None
+    try:
+        if suffix == ".gz":
+            source = gzip.GzipFile(filename=path, mode="rb")
+        elif suffix == ".bz2":
+            source = bz2.BZ2File(path, mode="rb")
+        elif suffix == ".xz":
+            source = lzma.LZMAFile(path, mode="rb")
+        else:
+            compressed = path.open("rb")
+            source = zstd.ZstdDecompressor().stream_reader(compressed)
+        with source:
+            found, extracted_size = _stream_kometa_marker_and_size(source)
+    except (gzip.BadGzipFile, EOFError, lzma.LZMAError, OSError, zstd.ZstdError) as exc:
+        names = {".gz": "GZIP", ".bz2": "BZIP2", ".xz": "XZ", ".zst": "Zstandard"}
+        raise ScanError(f"The selected {names[suffix]} file is invalid.") from exc
+    finally:
+        if compressed is not None:
+            compressed.close()
+    if found:
+        return [(Path(filename).stem, extracted_size)]
+    raise ScanError("The archive does not contain a complete Kometa log file.")
+
 def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int]]:
     """Identify logs in a spooled upload without retaining the upload in memory."""
     size = path.stat().st_size
@@ -783,32 +918,13 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
         raise ScanError("The selected file is larger than the 1 GB limit.")
     lowered_filename = filename.lower()
     suffix = Path(filename).suffix.lower()
-    if suffix == ".gz" and not lowered_filename.endswith((".tar.gz", ".tgz")):
-        try:
-            with path.open("rb") as compressed, gzip.GzipFile(fileobj=compressed, mode="rb") as source:
-                found, extracted_size = _stream_kometa_marker_and_size(source)
-        except (gzip.BadGzipFile, EOFError, OSError) as exc:
-            raise ScanError("The selected GZIP file is invalid.") from exc
-        if found:
-            return [(Path(filename).stem, extracted_size)]
-        raise ScanError("The archive does not contain a complete Kometa log file.")
-    if lowered_filename.endswith((".tar", ".tar.gz", ".tgz")):
-        try:
-            with tarfile.open(path, mode="r:*") as archive:
-                found = []
-                for entry in archive.getmembers():
-                    if not entry.isfile() or Path(entry.name).suffix.lower() not in ALLOWED_SUFFIXES:
-                        continue
-                    member = archive.extractfile(entry)
-                    if member is not None:
-                        with member:
-                            if _stream_contains_kometa_marker(member):
-                                found.append((entry.name, entry.size))
-                if found:
-                    return found
-        except (tarfile.TarError, OSError) as exc:
-            raise ScanError("The selected TAR file is invalid.") from exc
-        raise ScanError("The archive does not contain a complete Kometa log file.")
+    tar_suffixes = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+    if lowered_filename.endswith(tar_suffixes):
+        return _find_scannable_tar_path(path)
+    if lowered_filename.endswith(".tar.zst"):
+        return _find_scannable_zstandard_tar(path)
+    if suffix in {".gz", ".bz2", ".xz", ".zst"}:
+        return _find_scannable_compressed_log(filename, path, suffix)
     if suffix == ".7z":
         prepared_name, prepared_content = _extract_7z(filename, path.read_bytes(), 1)
         if _stream_contains_kometa_marker(BytesIO(prepared_content)):
@@ -816,7 +932,7 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
         raise ScanError("The archive does not contain a complete Kometa log file.")
     if suffix != ".zip":
         if suffix not in ALLOWED_SUFFIXES:
-            raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, TGZ, or GZIP file.")
+            raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")
         with path.open("rb") as source:
             if _stream_contains_kometa_marker(source):
                 return [(filename, size)]

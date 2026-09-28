@@ -8,6 +8,7 @@ People Poster processing queue. Each scan result has a separate deletion token.
 
 - Python 3.13
 - Large archive members are extracted to disk and scanned with bounded memory; allow enough disk space for the 1 GiB extracted limit
+- Supported archives: .zip, .7z, .tar, .tar.gz, .tgz, .gz, .tar.bz2, .tbz2, .bz2, .tar.xz, .txz, .xz, .tar.zst, and .zst
 - Windows, Linux, or macOS
 
 ## Windows installation

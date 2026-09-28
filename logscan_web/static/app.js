@@ -65,7 +65,7 @@ function displayValue(value) {
 }
 
 function uploadFailureType(message) {
-  if (message.startsWith("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, TGZ, or GZIP file.")) {
+  if (message.startsWith("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")) {
     return "bad-filetype";
   }
   if (message.includes("does not appear to be a complete Kometa log file")
@@ -298,7 +298,7 @@ function selectedFiles(files) {
   scanButton.disabled = !chosenFiles.length;
   filePill.textContent = chosenFiles.length === 1
     ? `${chosen.name} · ${formatBytes(chosen.size)}`
-    : chosenFiles.length ? `${chosenFiles.length} files selected · ${formatBytes(chosenFiles.reduce((total, file) => total + file.size, 0))}` : "LOG, TXT, or YAML · ZIP, 7Z, TAR, TGZ, or GZIP · up to 1 GB each";
+    : chosenFiles.length ? `${chosenFiles.length} files selected · ${formatBytes(chosenFiles.reduce((total, file) => total + file.size, 0))}` : "LOG, TXT, or YAML · ZIP, 7Z, TAR, GZIP, BZIP2, XZ, or Zstandard · up to 1 GB each";
   status.textContent = chosenFiles.length ? `${chosenFiles.length} file${chosenFiles.length === 1 ? "" : "s"} selected` : "Ready to scan";
   status.classList.remove("error");
   uploadErrorDetails.hidden = true;

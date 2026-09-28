@@ -1,11 +1,15 @@
+import bz2
 import gzip
 import py7zr
 import json
+import lzma
 from io import BytesIO
 from jsonschema import Draft7Validator
 import zipfile
+import zstandard as zstd
 import os
 import tempfile
+import tarfile
 import threading
 import time
 import unittest
@@ -151,6 +155,64 @@ class StreamingScanTests(unittest.TestCase):
             )
         finally:
             path.unlink(missing_ok=True)
+
+    def test_spooled_validation_scans_standalone_compression_formats(self):
+        content = b"[kometa.py:1] [INFO] | Version: 2.5.0 |\n"
+        formats = {
+            "meta.log.bz2": bz2.compress(content),
+            "meta.log.xz": lzma.compress(content),
+            "meta.log.zst": zstd.ZstdCompressor().compress(content),
+        }
+        for filename, compressed in formats.items():
+            with (
+                self.subTest(filename=filename),
+                tempfile.NamedTemporaryFile(delete=False) as upload,
+            ):
+                upload.write(compressed)
+                path = Path(upload.name)
+            try:
+                self.assertEqual(
+                    find_scannable_upload_path(filename, path),
+                    [("meta.log", len(content))],
+                )
+                self.assertEqual(scan_log(filename, compressed).filename, "meta.log.log")
+            finally:
+                path.unlink(missing_ok=True)
+
+    def test_spooled_validation_scans_all_compressed_tar_formats(self):
+        content = b"[kometa.py:1] [INFO] | Version: 2.5.0 |\n"
+        raw_tar = BytesIO()
+        with tarfile.open(fileobj=raw_tar, mode="w") as archive:
+            entry = tarfile.TarInfo("meta.log")
+            entry.size = len(content)
+            archive.addfile(entry, BytesIO(content))
+        tar_content = raw_tar.getvalue()
+        formats = {
+            "logs.tar.gz": gzip.compress(tar_content),
+            "logs.tgz": gzip.compress(tar_content),
+            "logs.tar.bz2": bz2.compress(tar_content),
+            "logs.tbz2": bz2.compress(tar_content),
+            "logs.tar.xz": lzma.compress(tar_content),
+            "logs.txz": lzma.compress(tar_content),
+            "logs.tar.zst": zstd.ZstdCompressor().compress(tar_content),
+        }
+        for filename, compressed in formats.items():
+            with (
+                self.subTest(filename=filename),
+                tempfile.NamedTemporaryFile(delete=False) as upload,
+            ):
+                upload.write(compressed)
+                path = Path(upload.name)
+            try:
+                self.assertEqual(
+                    find_scannable_upload_path(filename, path),
+                    [("meta.log", len(content))],
+                )
+                self.assertTrue(
+                    scan_log(filename, compressed).filename.endswith(".log")
+                )
+            finally:
+                path.unlink(missing_ok=True)
 
     def test_spooled_validation_scans_7z_upload(self):
         content = b"[kometa.py:1] [INFO] | Version: 2.5.0 |\n"
