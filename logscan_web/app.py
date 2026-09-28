@@ -6,6 +6,7 @@ import re
 import secrets
 import threading
 import time
+import tempfile
 import unicodedata
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -21,7 +22,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
 from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
-from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, prepare_scan_input, scan_archive_logs, scan_log
+from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 from .support import create_support_blueprint, discord_session_user, support_session_authorized
 
@@ -926,24 +927,34 @@ def create_app() -> Flask:
         if upload is None or not upload.filename:
             return jsonify(error="Choose a log file to scan."), 400
         upload_filename = upload.filename
-        content = upload.read()
         supplied_job_id = request.headers.get("X-Scan-Job-ID", "")
         job_id = supplied_job_id if re.fullmatch(r"[A-Za-z0-9_-]{20,80}", supplied_job_id) else None
         if job_id:
+            temporary = tempfile.NamedTemporaryFile(prefix="logscan-validation-", delete=False)
+            temporary_path = Path(temporary.name)
+            try:
+                with temporary:
+                    upload.save(temporary)
+            except Exception:
+                temporary_path.unlink(missing_ok=True)
+                raise
             update_scan_job(job_id, "queued")
 
             def run_background_validation():
                 update_scan_job(job_id, "validating")
                 try:
-                    files = find_scannable_archive_logs(upload_filename, content)
+                    files = find_scannable_upload_path(upload_filename, temporary_path)
                 except ScanError as exc:
                     update_scan_job(job_id, "failed", error=str(exc))
                     return
+                finally:
+                    temporary_path.unlink(missing_ok=True)
                 result = {"files": [{"filename": filename, "content_size": size} for filename, size in files]}
                 update_scan_job(job_id, "complete", result=result)
 
             background_scan_executor.submit(run_background_validation)
             return jsonify(job_id=job_id, phase="queued"), 202
+        content = upload.read()
         try:
             files = find_scannable_archive_logs(upload_filename, content)
         except ScanError as exc:
@@ -1000,7 +1011,18 @@ def create_app() -> Flask:
         uploaded_by_id = request.form.get("uploaded_by_id") if trusted_attribution else (signed_in_user or {}).get("id")
         upload_source = "discord" if is_bot else "web"
         try:
-            if len(uploads) == 1:
+            queued_upload_path = None
+            if len(uploads) == 1 and job_id and not is_background_scan:
+                temporary = tempfile.NamedTemporaryFile(prefix="logscan-scan-", delete=False)
+                queued_upload_path = Path(temporary.name)
+                try:
+                    with temporary:
+                        upload.save(temporary)
+                except Exception:
+                    queued_upload_path.unlink(missing_ok=True)
+                    raise
+                content = None
+            elif len(uploads) == 1:
                 content = upload.read()
             else:
                 bundled_uploads = BytesIO()
@@ -1010,6 +1032,12 @@ def create_app() -> Flask:
                 content = bundled_uploads.getvalue()
                 upload_filename = "website-log-batch.zip"
             if job_id and not is_background_scan:
+                if queued_upload_path is None:
+                    temporary = tempfile.NamedTemporaryFile(prefix="logscan-scan-", delete=False)
+                    queued_upload_path = Path(temporary.name)
+                    with temporary:
+                        temporary.write(content)
+                    content = None
                 origin = request.url_root
                 scan_endpoint = request.path
                 background_headers = {
@@ -1018,30 +1046,37 @@ def create_app() -> Flask:
                 }
                 if is_bot:
                     background_headers["Authorization"] = f"Bearer {app.config['LOGSCAN_API_KEY']}"
-                background_form = {"log": (BytesIO(content), upload_filename)}
+                background_values = {}
                 if source_url:
-                    background_form["source_url"] = source_url
+                    background_values["source_url"] = source_url
                 if uploaded_by:
-                    background_form["uploaded_by"] = uploaded_by
+                    background_values["uploaded_by"] = uploaded_by
                 if uploaded_by_id is not None:
-                    background_form["uploaded_by_id"] = uploaded_by_id
+                    background_values["uploaded_by_id"] = uploaded_by_id
                 update_scan_job(job_id, "queued")
 
                 def run_background_scan():
                     try:
-                        response = app.test_client().post(
-                            scan_endpoint,
-                            data=background_form,
-                            content_type="multipart/form-data",
-                            headers=background_headers,
-                            base_url=origin,
-                        )
+                        with queued_upload_path.open("rb") as queued_upload:
+                            background_form = {
+                                **background_values,
+                                "log": (queued_upload, upload_filename),
+                            }
+                            response = app.test_client().post(
+                                scan_endpoint,
+                                data=background_form,
+                                content_type="multipart/form-data",
+                                headers=background_headers,
+                                base_url=origin,
+                            )
                         if response.status_code >= 400:
                             payload = response.get_json(silent=True) or {}
                             update_scan_job(job_id, "failed", error=payload.get("error", "The scan could not be completed."))
                     except Exception:
                         app.logger.exception("Background scan %s failed", job_id)
                         update_scan_job(job_id, "failed", error="The scan could not be completed.")
+                    finally:
+                        queued_upload_path.unlink(missing_ok=True)
 
                 background_scan_executor.submit(run_background_scan)
                 return jsonify(job_id=job_id, phase="queued"), 202

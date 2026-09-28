@@ -724,6 +724,45 @@ def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, by
     return scans
 
 
+def _stream_contains_kometa_marker(source) -> bool:
+    carry = b""
+    while chunk := source.read(1024 * 1024):
+        lowered = (carry + chunk).lower()
+        if b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered:
+            return True
+        carry = chunk[-32:]
+    return False
+
+
+def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int]]:
+    """Identify logs in a spooled upload without retaining the upload in memory."""
+    size = path.stat().st_size
+    if not size:
+        raise ScanError("The selected file is empty.")
+    if size > MAX_FILE_BYTES:
+        raise ScanError("The selected file is larger than the 1 GB limit.")
+    if Path(filename).suffix.lower() != ".zip":
+        if Path(filename).suffix.lower() not in ALLOWED_SUFFIXES:
+            raise ScanError("Choose a Kometa log, text, YAML, or ZIP file.")
+        with path.open("rb") as source:
+            if _stream_contains_kometa_marker(source):
+                return [(filename, size)]
+        raise ScanError("This does not appear to be a complete Kometa log file.")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            found = []
+            for entry in archive.infolist():
+                if entry.is_dir() or Path(entry.filename).suffix.lower() not in ALLOWED_SUFFIXES:
+                    continue
+                with archive.open(entry) as member:
+                    if _stream_contains_kometa_marker(member):
+                        found.append((entry.filename, entry.file_size))
+            if found:
+                return found
+    except zipfile.BadZipFile as exc:
+        raise ScanError("The selected ZIP file is invalid.") from exc
+    raise ScanError("The archive does not contain a complete Kometa log file.")
+
 def find_scannable_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, int]]:
     """Permissively identify Kometa logs before the strict scan validates every entry."""
     if Path(filename).suffix.lower() != ".zip":

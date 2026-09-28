@@ -31,6 +31,7 @@ from logscan_web.scanner import (
     extract_missing_people,
     extract_plex_configurations,
     extract_section_run_times,
+    find_scannable_upload_path,
     normalized_platform,
     normalized_installation,
     extract_quickstart_metadata,
@@ -121,6 +122,20 @@ class UploadLimitTests(unittest.TestCase):
 
 
 class StreamingScanTests(unittest.TestCase):
+    def test_spooled_validation_streams_identity_without_running_full_scan(self):
+        marker = b"[kometa.py:1] [INFO] | Version: 2.5.0 |\n"
+        with tempfile.NamedTemporaryFile(delete=False) as upload:
+            upload.write(b"x" * (1024 * 1024 - 8))
+            upload.write(marker)
+            path = Path(upload.name)
+        try:
+            with patch("logscan_web.scanner.scan_log", side_effect=AssertionError("full scan should not run")):
+                self.assertEqual(
+                    find_scannable_upload_path("meta.log", path),
+                    [("meta.log", path.stat().st_size)],
+                )
+        finally:
+            path.unlink(missing_ok=True)
     def test_frontend_renders_anonymous_jobs_inline_and_follows_authenticated_redirects(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
         self.assertIn("function renderCompletedJob(result)", script)
