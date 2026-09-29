@@ -43,6 +43,7 @@ from logscan_web.scanner import (
     extract_quickstart_metadata,
     apply_documentation_branch,
     scan_archive_logs,
+    scan_archive_path,
     scan_log,
 )
 from logscan_web.recommendations import (
@@ -562,6 +563,28 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(Path(STORE.name, payload["id"], "log").is_file())
+    def test_disk_backed_gzip_scan_matches_regular_scan(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
+            "[kometa.py:2] [WARNING] | timed out.",
+        ]).encode()
+        expected = scan_log("meta.log.log", content)
+        with tempfile.NamedTemporaryFile(suffix=".gz", delete=False) as upload:
+            upload.write(gzip.compress(content))
+            upload_path = Path(upload.name)
+        scans = []
+        try:
+            with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+                scans = scan_archive_path("meta.log.gz", upload_path)
+            self.assertEqual(len(scans), 1)
+            self.assertIsInstance(scans[0][1], Path)
+            self.assertEqual(scans[0][2].recommendations, expected.recommendations)
+            self.assertEqual(scans[0][2].metadata["line_count"], 2)
+        finally:
+            upload_path.unlink(missing_ok=True)
+            for _name, scan_content, _result in scans:
+                if isinstance(scan_content, Path):
+                    scan_content.unlink(missing_ok=True)
     def test_disk_backed_zip_scan_matches_regular_scan(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",

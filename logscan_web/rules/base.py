@@ -116,70 +116,94 @@ def evaluate_text_rules(rules: list[TextRule], context: ScanContext) -> list[Fin
     return findings
 
 def evaluate_text_rules_bytes(rules: list[TextRule], content: bytes) -> list[Finding]:
-    """Evaluate text rules against bytes without decoding or copying a large log."""
-    states = []
-    term_uses: dict[bytes, list[tuple[int, str]]] = {}
-    for index, rule in enumerate(rules):
-        values = {
-            "any": tuple(value.lower().encode() for value in rule.any_of),
-            "word": tuple(value.lower().encode() for value in rule.word_bounded_any_of),
-            "all": tuple(value.lower().encode() for value in rule.all_of),
-            "same": tuple(value.lower().encode() for value in rule.all_on_same_line),
-        }
-        states.append({"rule": rule, "values": values, "found": set(), "evidence": set()})
-        for kind, terms in values.items():
-            for term in terms:
-                term_uses.setdefault(term, []).append((index, kind))
+    """Evaluate large logs with bounded literal searches and first-hit evidence."""
+    newline = bytes((10,))
 
-    pattern = re.compile(b"|".join(re.escape(term) for term in sorted(term_uses, key=len, reverse=True)), re.I)
-    same_line_hits: dict[tuple[int, int], set[bytes]] = {}
-    line_number = 1
-    newline_cursor = 0
-    chunk_start = 0
-    chunk_size = 4 * 1024 * 1024
-    overlap = max(map(len, term_uses), default=1)
-    content_length = len(content)
-    while chunk_start < content_length:
-        chunk_end = min(content_length, chunk_start + chunk_size)
-        scan_end = min(content_length, chunk_end + overlap)
-        for match in pattern.finditer(content, chunk_start, scan_end):
-            if match.start() >= chunk_end:
-                break
-            while True:
-                newline = content.find(b"\n", newline_cursor, match.start())
-                if newline < 0:
-                    break
-                line_number += 1
-                newline_cursor = newline + 1
-            term = match.group(0).lower()
-            for index, kind in term_uses[term]:
-                if kind == "word":
-                    before = content[match.start() - 1] if match.start() else None
-                    after = content[match.end()] if match.end() < content_length else None
-                    if (before is not None and (chr(before).isalnum() or before == 95)) or (after is not None and (chr(after).isalnum() or after == 95)):
-                        continue
-                states[index]["found"].add((kind, term))
-                states[index]["evidence"].add(line_number)
-                if kind == "same":
-                    same_line_hits.setdefault((index, line_number), set()).add(term)
-        chunk_start = chunk_end
-    for (index, _line_number), hits in same_line_hits.items():
-        if all(term in hits for term in states[index]["values"]["same"]):
-            states[index]["found"].add(("same_line", b"complete"))
+    def variants(value: str) -> tuple[bytes, ...]:
+        encoded = value.encode()
+        return tuple(dict.fromkeys((encoded, encoded.lower(), encoded.upper())))
+
+    def first_position(value: str, word_bounded: bool = False) -> int:
+        for candidate in variants(value):
+            position = content.find(candidate)
+            while position >= 0:
+                if not word_bounded:
+                    return position
+                before = content[position - 1] if position else None
+                end = position + len(candidate)
+                after = content[end] if end < len(content) else None
+                if not (
+                    (before is not None and (chr(before).isalnum() or before == 95))
+                    or (after is not None and (chr(after).isalnum() or after == 95))
+                ):
+                    return position
+                position = content.find(candidate, position + 1)
+        return -1
+
     findings = []
-    for state in states:
-        values, found = state["values"], state["found"]
-        if values["any"] and not any(("any", term) in found for term in values["any"]):
-            continue
-        if values["word"] and not any(("word", term) in found for term in values["word"]):
-            continue
-        if values["all"] and not all(("all", term) in found for term in values["all"]):
-            continue
-        if values["same"] and ("same_line", b"complete") not in found:
-            continue
-        definition = state["rule"].definition
+    line_cache: dict[int, int] = {0: 1}
+
+    def line_number(position: int) -> int:
+        if position in line_cache:
+            return line_cache[position]
+        start = max(candidate for candidate in line_cache if candidate <= position)
+        number = line_cache[start]
+        cursor = start
+        while True:
+            cursor = content.find(newline, cursor, position)
+            if cursor < 0:
+                break
+            number += 1
+            cursor += 1
+        line_cache[position] = number
+        return number
+
+    for rule in rules:
+        evidence_positions = []
+        if rule.any_of:
+            positions = [first_position(value) for value in rule.any_of]
+            positions = [position for position in positions if position >= 0]
+            if not positions:
+                continue
+            evidence_positions.extend(positions)
+        if rule.word_bounded_any_of:
+            positions = [first_position(value, True) for value in rule.word_bounded_any_of]
+            positions = [position for position in positions if position >= 0]
+            if not positions:
+                continue
+            evidence_positions.extend(positions)
+        if rule.all_of:
+            positions = [first_position(value) for value in rule.all_of]
+            if any(position < 0 for position in positions):
+                continue
+            evidence_positions.extend(positions)
+        if rule.all_on_same_line:
+            anchor = max(rule.all_on_same_line, key=len)
+            matched_position = -1
+            for candidate in variants(anchor):
+                position = content.find(candidate)
+                while position >= 0:
+                    line_start = content.rfind(newline, 0, position) + 1
+                    line_end = content.find(newline, position)
+                    if line_end < 0:
+                        line_end = len(content)
+                    line = content[line_start:line_end].lower()
+                    if all(value.lower().encode() in line for value in rule.all_on_same_line):
+                        matched_position = position
+                        break
+                    position = content.find(candidate, position + 1)
+                if matched_position >= 0:
+                    break
+            if matched_position < 0:
+                continue
+            evidence_positions.append(matched_position)
+        definition = rule.definition
         findings.append(Finding(
-            definition.id, definition.category, definition.title, definition.description,
-            definition.solution, tuple(sorted(state["evidence"])),
+            definition.id,
+            definition.category,
+            definition.title,
+            definition.description,
+            definition.solution,
+            tuple(sorted({line_number(position) for position in evidence_positions})),
         ))
     return findings

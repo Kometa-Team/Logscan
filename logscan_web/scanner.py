@@ -574,7 +574,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     findings = evaluate_text_rules_bytes(text_rules, content_bytes)
 
     sample_terms = (
-        b"[kometa.py:", b"[plex_meta_manager.py:", b"version:", b"branch:",
+        b"version:", b"branch:",
         b"[quickstart]", b"finished:", b"finished ", b"run time:", b"start time:", b"started:",
         b"platform:", b"memory:", b"available memory:", b"run command:",
         b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
@@ -586,7 +586,6 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         b"- operations", b"mass_user_rating_update", b"mass_episode_user_ratings_update",
     )
     missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found")
-    sparse_pattern = re.compile(b"|".join(re.escape(term) for term in sample_terms + missing_terms), re.I)
     sampled_lines: dict[int, str] = {}
     missing_lines: list[str] = []
     marker_found = False
@@ -596,6 +595,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     overlap = 64 * 1024
     chunk_start = 0
     lines_before_chunk = 0
+    sample_hits = {term: 0 for term in sample_terms}
 
     def decoded_line(start: int) -> tuple[str, int]:
         end = content_bytes.find(b"\n", start)
@@ -607,26 +607,36 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         chunk_end = min(content_length, chunk_start + chunk_size)
         scan_end = min(content_length, chunk_end + overlap)
         chunk = content_bytes[chunk_start:scan_end]
+        lowered_chunk = chunk.lower()
+        marker_found = marker_found or b"[kometa.py:" in lowered_chunk or b"[plex_meta_manager.py:" in lowered_chunk
         core_length = chunk_end - chunk_start
+        matches = []
+        for term in sample_terms + missing_terms:
+            if term in sample_hits and sample_hits[term] >= 200:
+                continue
+            position = lowered_chunk.find(term)
+            while 0 <= position < core_length:
+                matches.append((position, term))
+                if term in sample_hits:
+                    sample_hits[term] += 1
+                    if sample_hits[term] >= 200:
+                        break
+                position = lowered_chunk.find(term, position + len(term))
         newline_cursor = 0
         current_line = lines_before_chunk + 1
-        for match in sparse_pattern.finditer(chunk):
-            if match.start() >= core_length:
-                break
-            current_line += chunk.count(b"\n", newline_cursor, match.start())
-            newline_cursor = match.start()
-            global_match = chunk_start + match.start()
+        for position, lowered_term in sorted(matches):
+            current_line += chunk.count(b"\n", newline_cursor, position)
+            newline_cursor = position
+            global_match = chunk_start + position
             line_start = content_bytes.rfind(b"\n", 0, global_match) + 1
             line, line_end = decoded_line(line_start)
-            lowered_term = match.group(0).lower()
-            if lowered_term in (b"[kometa.py:", b"[plex_meta_manager.py:"):
-                marker_found = True
             if lowered_term in sample_terms:
                 sampled_lines.setdefault(current_line, line)
                 if lowered_term == b"run_order:" and line_end < content_length:
                     next_line, _next_end = decoded_line(line_end + 1)
                     sampled_lines.setdefault(current_line + 1, next_line)
-                complete_log |= b"finished:" in line.lower().encode() and b"run time:" in line.lower().encode()
+                encoded_line = line.lower().encode()
+                complete_log |= b"finished:" in encoded_line and b"run time:" in encoded_line
             if lowered_term in missing_terms:
                 block_end = line_end
                 for _ in range(4 if lowered_term == b"tmdb_person updated poster" else 0):
@@ -775,6 +785,76 @@ def _scan_large_path(filename: str, path: Path) -> ScanResult:
 def scan_content_size(content: bytes | Path) -> int:
     return content.stat().st_size if isinstance(content, Path) else len(content)
 
+
+def _scan_temporary_log(filename: str, source) -> tuple[str, bytes | Path, ScanResult]:
+    temporary = tempfile.NamedTemporaryFile(prefix="logscan-", suffix=".log", delete=False)
+    temporary_path = Path(temporary.name)
+    try:
+        size = 0
+        with temporary:
+            while chunk := source.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_FILE_BYTES:
+                    raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
+                temporary.write(chunk)
+        if not size:
+            raise ScanError("The archive does not contain any files to scan.")
+        if size >= STREAM_SCAN_THRESHOLD:
+            return filename, temporary_path, _scan_large_path(filename, temporary_path)
+        content = temporary_path.read_bytes()
+        temporary_path.unlink(missing_ok=True)
+        return filename, content, scan_log(filename, content)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def scan_archive_path(filename: str, path: Path) -> list[tuple[str, bytes | Path, ScanResult]]:
+    """Scan a spooled upload while keeping large extracted logs off the heap."""
+    lowered = filename.casefold()
+    suffix = Path(filename).suffix.casefold()
+    if lowered.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")):
+        try:
+            results = []
+            with tarfile.open(path, mode="r:*") as archive:
+                for entry in archive.getmembers():
+                    if not entry.isfile() or Path(entry.name).suffix.casefold() not in ALLOWED_SUFFIXES:
+                        continue
+                    source = archive.extractfile(entry)
+                    if source is not None:
+                        with source:
+                            try:
+                                results.append(_scan_temporary_log(entry.name, source))
+                            except ScanError:
+                                continue
+            if results:
+                return results
+        except (tarfile.TarError, OSError) as exc:
+            raise ScanError("The selected TAR file is invalid.") from exc
+        raise ScanError("The archive does not contain a complete Kometa log file.")
+    if suffix in {".gz", ".bz2", ".xz", ".zst"} and not lowered.endswith(".tar.zst"):
+        compressed = None
+        try:
+            if suffix == ".gz":
+                source = gzip.GzipFile(filename=path, mode="rb")
+            elif suffix == ".bz2":
+                source = bz2.BZ2File(path, mode="rb")
+            elif suffix == ".xz":
+                source = lzma.LZMAFile(path, mode="rb")
+            else:
+                compressed = path.open("rb")
+                source = zstd.ZstdDecompressor().stream_reader(compressed)
+            with source:
+                return [_scan_temporary_log(f"{Path(filename).stem}.log", source)]
+        except (gzip.BadGzipFile, EOFError, lzma.LZMAError, OSError, zstd.ZstdError) as exc:
+            names = {".gz": "GZIP", ".bz2": "BZIP2", ".xz": "XZ", ".zst": "Zstandard"}
+            raise ScanError(f"The selected {names[suffix]} file is invalid.") from exc
+        finally:
+            if compressed is not None:
+                compressed.close()
+    if suffix in ALLOWED_SUFFIXES and path.stat().st_size >= STREAM_SCAN_THRESHOLD:
+        return [(filename, path, _scan_large_path(filename, path))]
+    return scan_archive_logs(filename, path.read_bytes())
 
 def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, bytes | Path, ScanResult]]:
     """Return one scan input and result for every valid Kometa log in a ZIP."""

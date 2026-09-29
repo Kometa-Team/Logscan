@@ -22,7 +22,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
 from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
-from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_content_size, scan_log
+from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_archive_path, scan_content_size, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 from .support import create_support_blueprint, discord_session_user, support_session_authorized
 
@@ -1152,6 +1152,11 @@ def create_app() -> Flask:
                     queued_upload_path.unlink(missing_ok=True)
                     raise
                 content = None
+            elif len(uploads) == 1 and is_background_scan:
+                temporary = tempfile.NamedTemporaryFile(prefix="logscan-upload-", delete=False)
+                content = Path(temporary.name)
+                with temporary:
+                    upload.save(temporary)
             elif len(uploads) == 1:
                 content = upload.read()
             else:
@@ -1216,10 +1221,16 @@ def create_app() -> Flask:
                 scan_slot.acquire()
             update_scan_job(job_id, "scanning")
             try:
-                scans = scan_archive_logs(upload_filename, content)
+                scans = (
+                    scan_archive_path(upload_filename, content)
+                    if isinstance(content, Path) and (_is_archive_upload(upload_filename) or content.stat().st_size >= 64 * 1024 * 1024)
+                    else scan_archive_logs(upload_filename, content.read_bytes() if isinstance(content, Path) else content)
+                )
             finally:
                 scan_slot.release()
             if not scans:
+                if isinstance(content, Path):
+                    raise ScanError("The archive does not contain a complete Kometa log file.")
                 filename, content = prepare_scan_input(upload_filename, content)
                 scans = [(filename, content, scan_log(filename, content))]
         except ScanError as exc:
@@ -1231,7 +1242,7 @@ def create_app() -> Flask:
         payloads = []
         unscanned_files = []
         if Path(upload_filename).suffix.lower() == ".zip":
-            with zipfile.ZipFile(BytesIO(content)) as archive:
+            with zipfile.ZipFile(content if isinstance(content, Path) else BytesIO(content)) as archive:
                 scanned_names = {filename for filename, _content, _result in scans}
                 for entry in archive.infolist():
                     if entry.is_dir() or entry.filename in scanned_names:
