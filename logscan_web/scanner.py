@@ -21,21 +21,13 @@ from .rules import RuleRegistry, migrated_rules
 from .rules.base import TextRule, evaluate_text_rules_bytes
 from .categories import category_configuration
 
+
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_DEPTH = 3
 STREAM_SCAN_THRESHOLD = 64 * 1024 * 1024
 ALLOWED_SUFFIXES = {".txt", ".log", ".yml", ".yaml"}
 ARCHIVE_SUFFIXES = {
-    ".zip",
-    ".7z",
-    ".tar",
-    ".tgz",
-    ".gz",
-    ".bz2",
-    ".tbz2",
-    ".xz",
-    ".txz",
-    ".zst",
+    ".zip", ".7z", ".tar", ".tgz", ".gz", ".bz2", ".tbz2", ".xz", ".txz", ".zst",
 }
 
 
@@ -57,9 +49,7 @@ def extract_missing_people(content: str) -> list[dict[str, str | bool]]:
         content,
         re.IGNORECASE,
     ):
-        name = re.sub(
-            r" \((?:Director|Producer|Writer)\)$", "", match.group("name").strip()
-        )
+        name = re.sub(r" \((?:Director|Producer|Writer)\)$", "", match.group("name").strip())
         if name:
             people[name] = True
     for match in re.finditer(
@@ -83,11 +73,7 @@ def _validate_archive_names(names: list[str]) -> list[str]:
     for name in names:
         path = PurePosixPath(name.replace("\\", "/"))
         if not name.endswith(("/", "\\")):
-            if (
-                not path.is_absolute()
-                and ".." not in path.parts
-                and path.suffix.lower() in ALLOWED_SUFFIXES | ARCHIVE_SUFFIXES
-            ):
+            if not path.is_absolute() and ".." not in path.parts and path.suffix.lower() in ALLOWED_SUFFIXES | ARCHIVE_SUFFIXES:
                 files.append(name)
     if not files:
         raise ScanError("The archive does not contain any files to scan.")
@@ -101,43 +87,26 @@ def _combine_nested_files(files: list[tuple[str, bytes]], archive_depth: int) ->
         try:
             _filename, prepared = prepare_scan_input(filename, content, archive_depth)
         except ScanError as exc:
-            is_nested_archive = Path(
-                filename
-            ).suffix.lower() in ARCHIVE_SUFFIXES or filename.lower().endswith(
-                (".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst")
-            )
-            if (
-                is_nested_archive
-                and str(exc) == "The archive does not contain any files to scan."
-            ):
+            is_nested_archive = Path(filename).suffix.lower() in ARCHIVE_SUFFIXES or filename.lower().endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst"))
+            if is_nested_archive and str(exc) == "The archive does not contain any files to scan.":
                 continue
             raise
         extracted_size += len(prepared)
         if extracted_size > MAX_FILE_BYTES:
-            raise ScanError(
-                "The extracted archive contents are larger than the 1 GB limit."
-            )
+            raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
         prepared_files.append(prepared)
     return b"\n\n".join(prepared_files)
 
 
-def _extract_zip(
-    filename: str, content_bytes: bytes, archive_depth: int
-) -> tuple[str, bytes]:
+def _extract_zip(filename: str, content_bytes: bytes, archive_depth: int) -> tuple[str, bytes]:
     try:
         with zipfile.ZipFile(BytesIO(content_bytes)) as archive:
-            files = _validate_archive_names(
-                [entry.filename for entry in archive.infolist()]
-            )
+            files = _validate_archive_names([entry.filename for entry in archive.infolist()])
             entries = [archive.getinfo(name) for name in files]
             if any(entry.flag_bits & 0x1 for entry in entries):
-                raise ScanError(
-                    "The ZIP contains encrypted files and cannot be scanned."
-                )
+                raise ScanError("The ZIP contains encrypted files and cannot be scanned.")
             if sum(entry.file_size for entry in entries) > MAX_FILE_BYTES:
-                raise ScanError(
-                    "The extracted ZIP contents are larger than the 1 GB limit."
-                )
+                raise ScanError("The extracted ZIP contents are larger than the 1 GB limit.")
             extracted_files = []
             extracted_size = 0
             for entry in entries:
@@ -145,13 +114,9 @@ def _extract_zip(
                     extracted_file = member.read(MAX_FILE_BYTES - extracted_size + 1)
                 extracted_size += len(extracted_file)
                 if extracted_size > MAX_FILE_BYTES:
-                    raise ScanError(
-                        "The extracted ZIP contents are larger than the 1 GB limit."
-                    )
+                    raise ScanError("The extracted ZIP contents are larger than the 1 GB limit.")
                 extracted_files.append(extracted_file)
-            extracted = _combine_nested_files(
-                list(zip(files, extracted_files)), archive_depth
-            )
+            extracted = _combine_nested_files(list(zip(files, extracted_files)), archive_depth)
     except zipfile.BadZipFile as exc:
         raise ScanError("The selected ZIP file is invalid.") from exc
 
@@ -160,9 +125,7 @@ def _extract_zip(
     return f"{Path(filename).stem}.log", extracted
 
 
-def _extract_tar(
-    filename: str, content_bytes: bytes, archive_depth: int
-) -> tuple[str, bytes]:
+def _extract_tar(filename: str, content_bytes: bytes, archive_depth: int) -> tuple[str, bytes]:
     try:
         with tarfile.open(fileobj=BytesIO(content_bytes), mode="r:*") as archive:
             members = archive.getmembers()
@@ -171,9 +134,7 @@ def _extract_tar(
             members_by_name = {member.name: member for member in files}
             scannable_members = [members_by_name[name] for name in names]
             if sum(member.size for member in scannable_members) > MAX_FILE_BYTES:
-                raise ScanError(
-                    "The extracted TAR contents are larger than the 1 GB limit."
-                )
+                raise ScanError("The extracted TAR contents are larger than the 1 GB limit.")
             extracted_files = []
             extracted_size = 0
             for name in names:
@@ -185,13 +146,9 @@ def _extract_tar(
                     extracted_file = source.read(MAX_FILE_BYTES - extracted_size + 1)
                 extracted_size += len(extracted_file)
                 if extracted_size > MAX_FILE_BYTES:
-                    raise ScanError(
-                        "The extracted TAR contents are larger than the 1 GB limit."
-                    )
+                    raise ScanError("The extracted TAR contents are larger than the 1 GB limit.")
                 extracted_files.append(extracted_file)
-            extracted = _combine_nested_files(
-                list(zip(names, extracted_files)), archive_depth
-            )
+            extracted = _combine_nested_files(list(zip(names, extracted_files)), archive_depth)
     except tarfile.TarError as exc:
         raise ScanError("The selected TAR file is invalid.") from exc
     if not extracted:
@@ -199,9 +156,7 @@ def _extract_tar(
     return f"{Path(filename).stem}.log", extracted
 
 
-def _extract_gzip(
-    filename: str, content_bytes: bytes, archive_depth: int
-) -> tuple[str, bytes]:
+def _extract_gzip(filename: str, content_bytes: bytes, archive_depth: int) -> tuple[str, bytes]:
     try:
         with gzip.GzipFile(fileobj=BytesIO(content_bytes), mode="rb") as archive:
             extracted = archive.read(MAX_FILE_BYTES + 1)
@@ -211,16 +166,12 @@ def _extract_gzip(
         raise ScanError("The GZIP file does not contain any text to scan.")
     if len(extracted) > MAX_FILE_BYTES:
         raise ScanError("The extracted GZIP contents are larger than the 1 GB limit.")
-    _inner_filename, extracted = prepare_scan_input(
-        Path(filename).stem, extracted, archive_depth
-    )
+    _inner_filename, extracted = prepare_scan_input(Path(filename).stem, extracted, archive_depth)
     return f"{Path(filename).stem}.log", extracted
 
 
 def _extract_bzip2(
-    filename: str,
-    content_bytes: bytes,
-    archive_depth: int,
+    filename: str, content_bytes: bytes, archive_depth: int,
 ) -> tuple[str, bytes]:
     try:
         with bz2.BZ2File(BytesIO(content_bytes), mode="rb") as archive:
@@ -231,9 +182,7 @@ def _extract_bzip2(
 
 
 def _extract_xz(
-    filename: str,
-    content_bytes: bytes,
-    archive_depth: int,
+    filename: str, content_bytes: bytes, archive_depth: int,
 ) -> tuple[str, bytes]:
     try:
         with lzma.LZMAFile(BytesIO(content_bytes), mode="rb") as archive:
@@ -248,18 +197,14 @@ def _decompress_zstandard(content_bytes: bytes) -> bytes:
         with zstd.ZstdDecompressor().stream_reader(BytesIO(content_bytes)) as archive:
             extracted = archive.read(MAX_FILE_BYTES + 1)
         if len(extracted) > MAX_FILE_BYTES:
-            raise ScanError(
-                "The extracted Zstandard contents are larger than the 1 GB limit."
-            )
+            raise ScanError("The extracted Zstandard contents are larger than the 1 GB limit.")
         return extracted
     except zstd.ZstdError as exc:
         raise ScanError("The selected Zstandard file is invalid.") from exc
 
 
 def _extract_zstandard(
-    filename: str,
-    content_bytes: bytes,
-    archive_depth: int,
+    filename: str, content_bytes: bytes, archive_depth: int,
 ) -> tuple[str, bytes]:
     return _prepare_decompressed_log(
         filename,
@@ -278,19 +223,12 @@ def _prepare_decompressed_log(
     if not extracted:
         raise ScanError(f"The {format_name} file does not contain any text to scan.")
     if len(extracted) > MAX_FILE_BYTES:
-        raise ScanError(
-            f"The extracted {format_name} contents are larger than the 1 GB limit."
-        )
+        raise ScanError(f"The extracted {format_name} contents are larger than the 1 GB limit.")
     inner_filename = Path(filename).stem
-    _inner_filename, extracted = prepare_scan_input(
-        inner_filename, extracted, archive_depth
-    )
+    _inner_filename, extracted = prepare_scan_input(inner_filename, extracted, archive_depth)
     return f"{inner_filename}.log", extracted
 
-
-def _extract_7z(
-    filename: str, content_bytes: bytes, archive_depth: int
-) -> tuple[str, bytes]:
+def _extract_7z(filename: str, content_bytes: bytes, archive_depth: int) -> tuple[str, bytes]:
     try:
         with tempfile.TemporaryDirectory(prefix="logscan-7z-") as directory:
             archive_path = Path(directory, "upload.7z")
@@ -300,50 +238,35 @@ def _extract_7z(
                 names = _validate_archive_names([entry.filename for entry in entries])
                 selected = [entry for entry in entries if entry.filename in names]
                 if sum(entry.uncompressed or 0 for entry in selected) > MAX_FILE_BYTES:
-                    raise ScanError(
-                        "The extracted 7-Zip contents are larger than the 1 GB limit."
-                    )
+                    raise ScanError("The extracted 7-Zip contents are larger than the 1 GB limit.")
                 archive.extract(path=directory, targets=names)
             extracted_files = []
             extracted_size = 0
             for name in names:
-                extracted_path = Path(
-                    directory, *PurePosixPath(name.replace("\\", "/")).parts
-                )
+                extracted_path = Path(directory, *PurePosixPath(name.replace("\\", "/")).parts)
                 content = extracted_path.read_bytes()
                 extracted_size += len(content)
                 if extracted_size > MAX_FILE_BYTES:
-                    raise ScanError(
-                        "The extracted 7-Zip contents are larger than the 1 GB limit."
-                    )
+                    raise ScanError("The extracted 7-Zip contents are larger than the 1 GB limit.")
                 extracted_files.append(content)
-            extracted = _combine_nested_files(
-                list(zip(names, extracted_files)), archive_depth
-            )
+            extracted = _combine_nested_files(list(zip(names, extracted_files)), archive_depth)
     except py7zr.Bad7zFile as exc:
         raise ScanError("The selected 7-Zip file is invalid.") from exc
     if not extracted:
         raise ScanError("The 7-Zip archive does not contain any text to scan.")
     return f"{Path(filename).stem}.log", extracted
 
-
-def prepare_scan_input(
-    filename: str, content_bytes: bytes, archive_depth: int = 0
-) -> tuple[str, bytes]:
+def prepare_scan_input(filename: str, content_bytes: bytes, archive_depth: int = 0) -> tuple[str, bytes]:
     """Validate an upload and return the text that should be stored and scanned."""
     suffix = Path(filename).suffix.lower()
-    if suffix in ARCHIVE_SUFFIXES or filename.lower().endswith(
-        (".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst")
-    ):
+    if suffix in ARCHIVE_SUFFIXES or filename.lower().endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst")):
         if archive_depth >= MAX_ARCHIVE_DEPTH:
             raise ScanError("Archives may be nested no more than three levels deep.")
     if suffix == ".zip":
         return _extract_zip(filename, content_bytes, archive_depth + 1)
     if suffix == ".7z":
         return _extract_7z(filename, content_bytes, archive_depth + 1)
-    if filename.lower().endswith(
-        (".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar")
-    ):
+    if filename.lower().endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar")):
         return _extract_tar(filename, content_bytes, archive_depth + 1)
     if filename.lower().endswith(".tar.zst"):
         tar_content = _decompress_zstandard(content_bytes)
@@ -357,9 +280,7 @@ def prepare_scan_input(
     if suffix == ".zst":
         return _extract_zstandard(filename, content_bytes, archive_depth + 1)
     if suffix not in ALLOWED_SUFFIXES and not suffix.lstrip(".").isdigit():
-        raise ScanError(
-            "Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file."
-        )
+        raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")
     return filename, content_bytes
 
 
@@ -389,15 +310,15 @@ def _strip_emojis(value: str) -> str:
     """Remove emoji glyphs and selectors while preserving ordinary punctuation."""
     value = re.sub(
         "["
-        "\U0001f1e6-\U0001f1ff"
-        "\U0001f300-\U0001faff"
-        "\u2300-\u23ff"
-        "\u2600-\u27bf"
+        "\U0001F1E6-\U0001F1FF"
+        "\U0001F300-\U0001FAFF"
+        "\u2300-\u23FF"
+        "\u2600-\u27BF"
         "]+",
         "",
         value or "",
     )
-    return value.replace("\ufe0f", "").replace("\u200d", "")
+    return value.replace("\uFE0F", "").replace("\u200D", "")
 
 
 def _severity(first_line: str) -> str:
@@ -406,58 +327,26 @@ def _severity(first_line: str) -> str:
     if first_line.startswith("⚠"):
         return "warning"
     title = _plain_title(first_line).lower()
-    if any(
-        term in title
-        for term in (
-            "failed",
-            "invalid",
-            "error",
-            "vulnerable",
-            "exceeds available",
-            "required api key",
-            "required service",
-            "unhandled",
-            "incomplete",
-            "unreadable",
-            "subscription",
-            "prerequisite",
-            "api limit",
-            "request limit",
-            "could not be parsed",
-            "already contains",
-            "image file is missing",
-            "font file is missing",
-            "unknown plex library",
-            "plex library was not found",
-            "connection timed out",
-        )
-    ):
+    if any(term in title for term in (
+        "failed", "invalid", "error", "vulnerable", "exceeds available",
+        "required api key", "required service", "unhandled", "incomplete",
+        "unreadable", "subscription", "prerequisite", "api limit",
+        "request limit", "could not be parsed", "already contains",
+        "image file is missing", "font file is missing", "unknown plex library",
+        "plex library was not found", "connection timed out",
+    )):
         return "critical"
-    if any(
-        term in title
-        for term in (
-            "warning",
-            "legacy",
-            "detected",
-            "matched no items",
-            "no matching",
-            "low memory",
-            "memory below",
-            "insufficient memory",
-            "run order",
-            "maintenance",
-            "run exceeds",
-            "rounding issue",
-        )
-    ):
+    if any(term in title for term in (
+        "warning", "legacy", "detected", "matched no items", "no matching",
+        "low memory", "memory below", "insufficient memory", "run order",
+        "maintenance", "run exceeds", "rounding issue",
+    )):
         return "warning"
     return "advice"
 
 
 def _first_value(content: str, label: str) -> str | None:
-    match = re.search(
-        rf"\b{re.escape(label)}:\s*(.+?)(?:\s*\|)?\s*$", content, re.MULTILINE
-    )
+    match = re.search(rf"\b{re.escape(label)}:\s*(.+?)(?:\s*\|)?\s*$", content, re.MULTILINE)
     return match.group(1).strip() if match else None
 
 
@@ -495,7 +384,6 @@ def normalized_installation(version: str | None) -> str:
         return "Native Python"
     return "Unknown"
 
-
 def apply_documentation_branch(recommendations: list[dict], branch: str) -> None:
     """Point Kometa Wiki links at the scanned release channel's documentation."""
     documentation_branch = "develop" if branch in {"develop", "nightly"} else "latest"
@@ -520,19 +408,11 @@ def _log_message(line: str) -> str:
 def _plex_configuration_section(lines: list[str], number: int) -> dict[str, object]:
     """Build a Plex configuration section with a useful library label."""
     name = next(
-        (
-            match.group(1).strip()
-            for line in lines
-            if (match := re.fullmatch(r"Connected to library\s+(.+)", line, re.I))
-        ),
+        (match.group(1).strip() for line in lines if (match := re.fullmatch(r"Connected to library\s+(.+)", line, re.I))),
         None,
     )
     library_type = next(
-        (
-            match.group(1).title()
-            for line in lines
-            if (match := re.fullmatch(r"Type:\s*(Movie|Show|Music)", line, re.I))
-        ),
+        (match.group(1).title() for line in lines if (match := re.fullmatch(r"Type:\s*(Movie|Show|Music)", line, re.I))),
         None,
     )
     if library_type and name:
@@ -555,10 +435,7 @@ def extract_plex_configurations(content: str) -> list[dict[str, object]]:
             continue
         if current is None:
             continue
-        if (
-            re.search(r"\bScanning\b", message)
-            or "Library Connection Failed" in message
-        ):
+        if re.search(r"\bScanning\b", message) or "Library Connection Failed" in message:
             if current:
                 sections.append(_plex_configuration_section(current, len(sections) + 1))
             current = None
@@ -573,29 +450,19 @@ def extract_plex_configurations(content: str) -> list[dict[str, object]]:
 def plex_analytics(sections: list[dict[str, object]]) -> dict[str, list[str]]:
     """Return bounded Plex categories that are safe to persist as aggregates."""
     values = {
-        "versions": [],
-        "platforms": [],
-        "update_channels": [],
-        "library_types": [],
-        "agents": [],
-        "scanners": [],
+        "versions": [], "platforms": [], "update_channels": [],
+        "library_types": [], "agents": [], "scanners": [],
     }
     for section in sections:
         lines = [str(line) for line in section.get("lines", [])]
         for line in lines:
-            version = re.search(
-                r"\bversion\s+(\d+\.\d+\.\d+\.\d+(?:-[A-Za-z0-9]+)?)\b", line, re.I
-            )
+            version = re.search(r"\bversion\s+(\d+\.\d+\.\d+\.\d+(?:-[A-Za-z0-9]+)?)\b", line, re.I)
             if version:
                 values["versions"].append(version.group(1))
-            platform = re.search(
-                r"\bRunning on\s+(Windows|Linux|macOS|Darwin|FreeBSD)\b", line, re.I
-            )
+            platform = re.search(r"\bRunning on\s+(Windows|Linux|macOS|Darwin|FreeBSD)\b", line, re.I)
             if platform:
                 family = platform.group(1).casefold()
-                values["platforms"].append(
-                    "macOS" if family in {"macos", "darwin"} else family.title()
-                )
+                values["platforms"].append("macOS" if family in {"macos", "darwin"} else family.title())
             channel = re.search(r"\bon\s+(Public|Beta)\s+update channel\b", line, re.I)
             if channel:
                 values["update_channels"].append(channel.group(1).title())
@@ -680,9 +547,7 @@ def _maintenance_overlap_seconds(
 def extract_section_run_times(content: str) -> list[dict[str, object]]:
     """Return the longest non-zero Kometa section runtimes."""
     raw_lines = content.splitlines()
-    messages = [
-        (_log_message(line), number) for number, line in enumerate(raw_lines, 1)
-    ]
+    messages = [(_log_message(line), number) for number, line in enumerate(raw_lines, 1)]
     windows: list[tuple[time, time]] = []
     for match in re.finditer(
         r"Scheduled maintenance running between\s+(\d{1,2}:\d{2})\s+and\s+(\d{1,2}:\d{2})",
@@ -690,11 +555,10 @@ def extract_section_run_times(content: str) -> list[dict[str, object]]:
         re.I,
     ):
         try:
-            window = tuple(
-                datetime.strptime(value, "%H:%M").time() for value in match.groups()
-            )
+            start_value, end_value = (datetime.strptime(value, "%H:%M").time() for value in match.groups())
         except ValueError:
             continue
+        window = (start_value, end_value)
         if window not in windows:
             windows.append(window)
     maintenance_events = [
@@ -706,20 +570,14 @@ def extract_section_run_times(content: str) -> list[dict[str, object]]:
     ]
     runtimes: list[dict[str, object]] = []
     for index, (message, line_number) in enumerate(messages):
-        finished_with_runtime = re.match(
-            r"^Finished\s+(?!:)(.+?)\s+Run Time:\s*(.+)$", message, re.I
-        )
-        finished = finished_with_runtime or re.match(
-            r"^Finished\s+(?!:)(.+)$", message, re.I
-        )
+        finished_with_runtime = re.match(r"^Finished\s+(?!:)(.+?)\s+Run Time:\s*(.+)$", message, re.I)
+        finished = finished_with_runtime or re.match(r"^Finished\s+(?!:)(.+)$", message, re.I)
         if not finished:
             continue
         name = finished.group(1).strip().rstrip("|").strip()
         duration = finished_with_runtime.group(2) if finished_with_runtime else None
         if not duration and index + 1 < len(messages):
-            runtime_match = re.search(
-                r"\bRun Time:\s*([^|]+)", messages[index + 1][0], re.I
-            )
+            runtime_match = re.search(r"\bRun Time:\s*([^|]+)", messages[index + 1][0], re.I)
             duration = runtime_match.group(1).strip() if runtime_match else None
         seconds = _runtime_seconds(duration or "")
         if not name or not seconds:
@@ -728,25 +586,16 @@ def extract_section_run_times(content: str) -> list[dict[str, object]]:
         finished_at = _log_timestamp(raw_lines[line_number - 1])
         if finished_at and windows and maintenance_events:
             started_at = finished_at - timedelta(seconds=seconds)
-            seconds -= _maintenance_overlap_seconds(
-                started_at, finished_at, windows, maintenance_events
-            )
+            seconds -= _maintenance_overlap_seconds(started_at, finished_at, windows, maintenance_events)
             if seconds <= 0:
                 continue
             if seconds != _runtime_seconds(reported_duration or ""):
                 duration = _format_runtime(seconds)
-        runtime = {
-            "name": name,
-            "duration": duration,
-            "seconds": seconds,
-            "line": line_number,
-        }
+        runtime = {"name": name, "duration": duration, "seconds": seconds, "line": line_number}
         if duration != reported_duration:
             runtime["reported_duration"] = reported_duration
         runtimes.append(runtime)
     return sorted(runtimes, key=lambda item: int(item["seconds"]), reverse=True)
-
-
 def _log_overview(
     filename: str,
     content: str,
@@ -775,18 +624,11 @@ def _log_overview(
         "total_memory": _first_value(content, "Memory"),
         "available_memory": _first_value(content, "Available Memory"),
         "run_command": _first_value(content, "Run Command"),
-        "start_time": (
-            _date_first(completed_run.group("start").strip())
-            if completed_run
-            else _first_value(content, "Started")
-        ),
-        "finished": (
-            _date_first(completed_run.group("end").strip())
-            if completed_run
-            else _first_value(content, "Finished")
-        ),
+        "start_time": _date_first(completed_run.group("start").strip()) if completed_run else _first_value(content, "Started"),
+        "finished": _date_first(completed_run.group("end").strip()) if completed_run else _first_value(content, "Finished"),
         "run_time": (
-            completed_run.group("runtime").strip() if completed_run else run_time
+            completed_run.group("runtime").strip()
+            if completed_run else run_time
         ),
         "yaml_validation": yaml_status,
         "yaml_issue_count": len(yaml_findings),
@@ -804,45 +646,18 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     findings = evaluate_text_rules_bytes(text_rules, content_bytes)
 
     sample_terms = (
-        b"version:",
-        b"branch:",
-        b"[quickstart]",
-        b"finished:",
-        b"finished ",
-        b"run time:",
-        b"start time:",
-        b"started:",
-        b"platform:",
-        b"memory:",
-        b"available memory:",
-        b"run command:",
-        b"plex db cache setting:",
-        b"overlay_path:",
-        b"overlay_files:",
-        b"--time",
-        b"plex configuration",
-        b"using asset directory",
-        b"scheduled maintenance",
-        b"connected to server",
-        b"running on",
-        b"plexpass:",
-        b"connected to library",
-        b"type:",
-        b"agent:",
-        b"scanner:",
-        b"ratings source:",
-        b"library connection successful",
-        b"library connection failed",
-        b"scanning metadata",
-        b"run_order:",
-        b"- operations",
-        b"mass_user_rating_update",
-        b"mass_episode_user_ratings_update",
+        b"version:", b"branch:",
+        b"[quickstart]", b"finished:", b"finished ", b"run time:", b"start time:", b"started:",
+        b"platform:", b"memory:", b"available memory:", b"run command:",
+        b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
+        b"plex configuration", b"using asset directory", b"scheduled maintenance",
+        b"connected to server", b"running on", b"plexpass:", b"connected to library",
+        b"type:", b"agent:", b"scanner:", b"ratings source:",
+        b"library connection successful", b"library connection failed",
+        b"scanning metadata", b"run_order:",
+        b"- operations", b"mass_user_rating_update", b"mass_episode_user_ratings_update",
     )
-    missing_terms = (
-        b"tmdb_person updated poster",
-        b"collection warning: no poster found",
-    )
+    missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found")
     sampled_lines: dict[int, str] = {}
     missing_lines: list[str] = []
     marker_found = False
@@ -858,21 +673,14 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         end = content_bytes.find(b"\n", start)
         if end < 0:
             end = content_length
-        return (
-            content_bytes[start:end].decode("utf-8", errors="replace").rstrip("\r"),
-            end,
-        )
+        return content_bytes[start:end].decode("utf-8", errors="replace").rstrip("\r"), end
 
     while chunk_start < content_length:
         chunk_end = min(content_length, chunk_start + chunk_size)
         scan_end = min(content_length, chunk_end + overlap)
         chunk = content_bytes[chunk_start:scan_end]
         lowered_chunk = chunk.lower()
-        marker_found = (
-            marker_found
-            or b"[kometa.py:" in lowered_chunk
-            or b"[plex_meta_manager.py:" in lowered_chunk
-        )
+        marker_found = marker_found or b"[kometa.py:" in lowered_chunk or b"[plex_meta_manager.py:" in lowered_chunk
         core_length = chunk_end - chunk_start
         matches = []
         for term in sample_terms + missing_terms:
@@ -900,34 +708,22 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
                     next_line, _next_end = decoded_line(line_end + 1)
                     sampled_lines.setdefault(current_line + 1, next_line)
                 encoded_line = line.lower().encode()
-                complete_log |= (
-                    b"finished:" in encoded_line and b"run time:" in encoded_line
-                )
+                complete_log |= b"finished:" in encoded_line and b"run time:" in encoded_line
             if lowered_term in missing_terms:
                 block_end = line_end
-                for _ in range(
-                    4 if lowered_term == b"tmdb_person updated poster" else 0
-                ):
+                for _ in range(4 if lowered_term == b"tmdb_person updated poster" else 0):
                     if block_end >= content_length:
                         break
                     _next_line, block_end = decoded_line(block_end + 1)
-                missing_lines.append(
-                    content_bytes[line_start:block_end].decode(
-                        "utf-8", errors="replace"
-                    )
-                )
+                missing_lines.append(content_bytes[line_start:block_end].decode("utf-8", errors="replace"))
         core = chunk[:core_length]
         lines_before_chunk += core.count(b"\n")
         chunk_start = chunk_end
 
-    line_count = lines_before_chunk + int(
-        bool(content_length) and content_bytes[content_length - 1] != 10
-    )
+    line_count = lines_before_chunk + int(bool(content_length) and content_bytes[content_length - 1] != 10)
     sampled = [
         "\n" * max(0, number - previous - 1) + sampled_lines[number]
-        for previous, number in zip(
-            [0, *sorted(sampled_lines)[:-1]], sorted(sampled_lines)
-        )
+        for previous, number in zip([0, *sorted(sampled_lines)[:-1]], sorted(sampled_lines))
     ]
     if not marker_found:
         raise ScanError("This does not appear to be a complete Kometa log file.")
@@ -935,34 +731,19 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     sample_content = "\n".join(sampled)
     version_match = re.search(r"\bVersion:\s*([^|\r\n]+)", sample_content)
     kometa_version = version_match.group(1).strip() if version_match else None
-    branch_match = re.search(
-        r"\(Branch:\s*(master|develop|nightly)\)", sample_content, re.I
-    )
+    branch_match = re.search(r"\(Branch:\s*(master|develop|nightly)\)", sample_content, re.I)
     kometa_branch = branch_match.group(1).casefold() if branch_match else "unknown"
     quickstart_metadata = extract_quickstart_metadata(sample_content)
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", sample_content)
     detected_run_time = run_match.group(1).strip() if run_match else None
     context = ScanContext.from_content(
-        filename,
-        sample_content,
-        kometa_version=kometa_version,
-        run_time=detected_run_time,
-        complete=complete_log,
+        filename, sample_content, kometa_version=kometa_version,
+        run_time=detected_run_time, complete=complete_log,
     )
-    findings.extend(
-        finding for rule in custom_rules for finding in rule.evaluate(context)
-    )
+    findings.extend(finding for rule in custom_rules for finding in rule.evaluate(context))
     normalized = [finding.as_dict() for finding in findings]
     apply_documentation_branch(normalized, kometa_branch)
-    normalized.sort(
-        key=lambda item: {
-            "critical": 0,
-            "error": 1,
-            "warning": 2,
-            "schema": 3,
-            "advice": 4,
-        }[item["severity"]]
-    )
+    normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
     runtime_platform = _first_value(sample_content, "Platform")
     metadata = {
         "kometa_version": kometa_version,
@@ -985,27 +766,18 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         filename=filename,
         recommendations=normalized,
         metadata=metadata,
-        overview=_log_overview(
-            filename, sample_content, kometa_version, detected_run_time, normalized
-        ),
+        overview=_log_overview(filename, sample_content, kometa_version, detected_run_time, normalized),
         categories=category_configuration(),
         missing_people=extract_missing_people("\n".join(missing_lines)),
     )
 
-
 def extract_quickstart_metadata(content: str) -> dict:
     """Extract non-sensitive Quickstart launcher metadata from a Kometa log."""
     marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", content, re.IGNORECASE)
-    fields = (
-        {
-            key.casefold(): value
-            for key, value in re.findall(
-                r"\b(quickstart|branch)=([^\s|]+)", marker.group(0), re.IGNORECASE
-            )
-        }
-        if marker
-        else {}
-    )
+    fields = {
+        key.casefold(): value
+        for key, value in re.findall(r"\b(quickstart|branch)=([^\s|]+)", marker.group(0), re.IGNORECASE)
+    } if marker else {}
     branch = fields.get("branch", "unknown").casefold()
     if branch not in {"master", "develop"}:
         branch = "unknown"
@@ -1029,12 +801,8 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
 
     version_match = re.search(r"\bVersion:\s*([^|\r\n]+)", content)
     kometa_version = version_match.group(1).strip() if version_match else None
-    kometa_branch_match = re.search(
-        r"\(Branch:\s*(master|develop|nightly)\)", content, re.IGNORECASE
-    )
-    kometa_branch = (
-        kometa_branch_match.group(1).casefold() if kometa_branch_match else "unknown"
-    )
+    kometa_branch_match = re.search(r"\(Branch:\s*(master|develop|nightly)\)", content, re.IGNORECASE)
+    kometa_branch = kometa_branch_match.group(1).casefold() if kometa_branch_match else "unknown"
     quickstart_metadata = extract_quickstart_metadata(content)
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", content)
     detected_run_time = run_match.group(1).strip() if run_match else None
@@ -1050,15 +818,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         registry.register(rule)
     normalized = [finding.as_dict() for finding in registry.evaluate(context)]
     apply_documentation_branch(normalized, kometa_branch)
-    normalized.sort(
-        key=lambda item: {
-            "critical": 0,
-            "error": 1,
-            "warning": 2,
-            "schema": 3,
-            "advice": 4,
-        }[item["severity"]]
-    )
+    normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
 
     runtime_platform = _first_value(content, "Platform")
     metadata = {
@@ -1071,8 +831,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": detected_run_time is not None,
         "header_found": kometa_version is not None,
-        "line_count": content.count("\n")
-        + int(bool(content) and not content.endswith("\n")),
+        "line_count": content.count("\n") + int(bool(content) and not content.endswith("\n")),
         "size_bytes": len(content_bytes),
         "counts": {
             level: sum(item["severity"] == level for item in normalized)
@@ -1083,9 +842,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         filename=filename,
         recommendations=normalized,
         metadata=metadata,
-        overview=_log_overview(
-            filename, content, kometa_version, detected_run_time, normalized
-        ),
+        overview=_log_overview(filename, content, kometa_version, detected_run_time, normalized),
         categories=category_configuration(),
         missing_people=extract_missing_people(content),
     )
@@ -1102,9 +859,7 @@ def scan_content_size(content: bytes | Path) -> int:
 
 
 def _scan_temporary_log(filename: str, source) -> tuple[str, bytes | Path, ScanResult]:
-    temporary = tempfile.NamedTemporaryFile(
-        prefix="logscan-", suffix=".log", delete=False
-    )
+    temporary = tempfile.NamedTemporaryFile(prefix="logscan-", suffix=".log", delete=False)
     temporary_path = Path(temporary.name)
     try:
         size = 0
@@ -1112,9 +867,7 @@ def _scan_temporary_log(filename: str, source) -> tuple[str, bytes | Path, ScanR
             while chunk := source.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_FILE_BYTES:
-                    raise ScanError(
-                        "The extracted archive contents are larger than the 1 GB limit."
-                    )
+                    raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
                 temporary.write(chunk)
         if not size:
             raise ScanError("The archive does not contain any files to scan.")
@@ -1128,23 +881,16 @@ def _scan_temporary_log(filename: str, source) -> tuple[str, bytes | Path, ScanR
         raise
 
 
-def scan_archive_path(
-    filename: str, path: Path
-) -> list[tuple[str, bytes | Path, ScanResult]]:
+def scan_archive_path(filename: str, path: Path) -> list[tuple[str, bytes | Path, ScanResult]]:
     """Scan a spooled upload while keeping large extracted logs off the heap."""
     lowered = filename.casefold()
     suffix = Path(filename).suffix.casefold()
-    if lowered.endswith(
-        (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
-    ):
+    if lowered.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")):
         try:
             results = []
             with tarfile.open(path, mode="r:*") as archive:
                 for entry in archive.getmembers():
-                    if (
-                        not entry.isfile()
-                        or Path(entry.name).suffix.casefold() not in ALLOWED_SUFFIXES
-                    ):
+                    if not entry.isfile() or Path(entry.name).suffix.casefold() not in ALLOWED_SUFFIXES:
                         continue
                     source = archive.extractfile(entry)
                     if source is not None:
@@ -1172,13 +918,7 @@ def scan_archive_path(
                 source = zstd.ZstdDecompressor().stream_reader(compressed)
             with source:
                 return [_scan_temporary_log(f"{Path(filename).stem}.log", source)]
-        except (
-            gzip.BadGzipFile,
-            EOFError,
-            lzma.LZMAError,
-            OSError,
-            zstd.ZstdError,
-        ) as exc:
+        except (gzip.BadGzipFile, EOFError, lzma.LZMAError, OSError, zstd.ZstdError) as exc:
             names = {".gz": "GZIP", ".bz2": "BZIP2", ".xz": "XZ", ".zst": "Zstandard"}
             raise ScanError(f"The selected {names[suffix]} file is invalid.") from exc
         finally:
@@ -1188,92 +928,53 @@ def scan_archive_path(
         return [(filename, path, _scan_large_path(filename, path))]
     return scan_archive_logs(filename, path.read_bytes())
 
-
-def scan_archive_logs(
-    filename: str, content_bytes: bytes
-) -> list[tuple[str, bytes | Path, ScanResult]]:
+def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, bytes | Path, ScanResult]]:
     """Return one scan input and result for every valid Kometa log in a ZIP."""
-
-    def collect(
-        name: str, content: bytes, depth: int
-    ) -> list[tuple[str, bytes, ScanResult]]:
+    def collect(name: str, content: bytes, depth: int) -> list[tuple[str, bytes, ScanResult]]:
         if Path(name).suffix.lower() == ".zip":
             if depth >= MAX_ARCHIVE_DEPTH:
-                raise ScanError(
-                    "Archives may be nested no more than three levels deep."
-                )
+                raise ScanError("Archives may be nested no more than three levels deep.")
             try:
                 with zipfile.ZipFile(BytesIO(content)) as archive:
-                    files = _validate_archive_names(
-                        [entry.filename for entry in archive.infolist()]
-                    )
+                    files = _validate_archive_names([entry.filename for entry in archive.infolist()])
                     entries = [archive.getinfo(member) for member in files]
                     if any(entry.flag_bits & 0x1 for entry in entries):
-                        raise ScanError(
-                            "The ZIP contains encrypted files and cannot be scanned."
-                        )
+                        raise ScanError("The ZIP contains encrypted files and cannot be scanned.")
                     if sum(entry.file_size for entry in entries) > MAX_FILE_BYTES:
-                        raise ScanError(
-                            "The extracted ZIP contents are larger than the 1 GB limit."
-                        )
+                        raise ScanError("The extracted ZIP contents are larger than the 1 GB limit.")
                     results = []
                     for entry in entries:
                         with archive.open(entry) as member:
-                            if (
-                                entry.file_size >= STREAM_SCAN_THRESHOLD
-                                and Path(entry.filename).suffix.lower()
-                                in ALLOWED_SUFFIXES
-                            ):
-                                temporary = tempfile.NamedTemporaryFile(
-                                    prefix="logscan-", suffix=".log", delete=False
-                                )
+                            if entry.file_size >= STREAM_SCAN_THRESHOLD and Path(entry.filename).suffix.lower() in ALLOWED_SUFFIXES:
+                                temporary = tempfile.NamedTemporaryFile(prefix="logscan-", suffix=".log", delete=False)
                                 temporary_path = Path(temporary.name)
                                 try:
                                     with temporary:
-                                        shutil.copyfileobj(
-                                            member, temporary, length=1024 * 1024
-                                        )
-                                    result = _scan_large_path(
-                                        entry.filename, temporary_path
-                                    )
-                                    results.append(
-                                        (entry.filename, temporary_path, result)
-                                    )
+                                        shutil.copyfileobj(member, temporary, length=1024 * 1024)
+                                    result = _scan_large_path(entry.filename, temporary_path)
+                                    results.append((entry.filename, temporary_path, result))
                                 except Exception:
                                     temporary_path.unlink(missing_ok=True)
                                     raise
                             else:
-                                results.extend(
-                                    collect(entry.filename, member.read(), depth + 1)
-                                )
+                                results.extend(collect(entry.filename, member.read(), depth + 1))
                     return results
             except zipfile.BadZipFile as exc:
                 raise ScanError("The selected ZIP file is invalid.") from exc
             except ScanError as exc:
-                if (
-                    depth > 0
-                    and str(exc) == "The archive does not contain any files to scan."
-                ):
+                if depth > 0 and str(exc) == "The archive does not contain any files to scan.":
                     return []
                 raise
         try:
             prepared_name, prepared_content = prepare_scan_input(name, content, depth)
-            return [
-                (
-                    prepared_name,
-                    prepared_content,
-                    scan_log(prepared_name, prepared_content),
-                )
-            ]
+            return [(prepared_name, prepared_content, scan_log(prepared_name, prepared_content))]
         except ScanError:
             return []
 
     scans = collect(filename, content_bytes, 0)
     total_size = sum(scan_content_size(content) for _name, content, _result in scans)
     if total_size > MAX_FILE_BYTES:
-        raise ScanError(
-            "The extracted archive contents are larger than the 1 GB limit."
-        )
+        raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
     if not scans:
         raise ScanError("The archive does not contain a complete Kometa log file.")
     return scans
@@ -1286,15 +987,9 @@ def _stream_kometa_marker_and_size(source) -> tuple[bool, int]:
     while chunk := source.read(1024 * 1024):
         size += len(chunk)
         if size > MAX_FILE_BYTES:
-            raise ScanError(
-                "The extracted archive contents are larger than the 1 GB limit."
-            )
+            raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
         lowered = (carry + chunk).lower()
-        marker_found = (
-            marker_found
-            or b"[kometa.py:" in lowered
-            or b"[plex_meta_manager.py:" in lowered
-        )
+        marker_found = marker_found or b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered
         carry = chunk[-32:]
     return marker_found, size
 
@@ -1308,10 +1003,7 @@ def _find_scannable_tar_path(path: Path) -> list[tuple[str, int]]:
         with tarfile.open(path, mode="r:*") as archive:
             found = []
             for entry in archive.getmembers():
-                if (
-                    not entry.isfile()
-                    or Path(entry.name).suffix.lower() not in ALLOWED_SUFFIXES
-                ):
+                if not entry.isfile() or Path(entry.name).suffix.lower() not in ALLOWED_SUFFIXES:
                     continue
                 member = archive.extractfile(entry)
                 if member is not None:
@@ -1326,21 +1018,15 @@ def _find_scannable_tar_path(path: Path) -> list[tuple[str, int]]:
 
 
 def _find_scannable_zstandard_tar(path: Path) -> list[tuple[str, int]]:
-    temporary = tempfile.NamedTemporaryFile(
-        prefix="logscan-zstd-", suffix=".tar", delete=False
-    )
+    temporary = tempfile.NamedTemporaryFile(prefix="logscan-zstd-", suffix=".tar", delete=False)
     temporary_path = Path(temporary.name)
     try:
         extracted_size = 0
-        with path.open("rb") as compressed, zstd.ZstdDecompressor().stream_reader(
-            compressed
-        ) as source, temporary:
+        with path.open("rb") as compressed, zstd.ZstdDecompressor().stream_reader(compressed) as source, temporary:
             while chunk := source.read(1024 * 1024):
                 extracted_size += len(chunk)
                 if extracted_size > MAX_FILE_BYTES:
-                    raise ScanError(
-                        "The extracted Zstandard contents are larger than the 1 GB limit."
-                    )
+                    raise ScanError("The extracted Zstandard contents are larger than the 1 GB limit.")
                 temporary.write(chunk)
         return _find_scannable_tar_path(temporary_path)
     except zstd.ZstdError as exc:
@@ -1350,9 +1036,7 @@ def _find_scannable_zstandard_tar(path: Path) -> list[tuple[str, int]]:
 
 
 def _find_scannable_compressed_log(
-    filename: str,
-    path: Path,
-    suffix: str,
+    filename: str, path: Path, suffix: str,
 ) -> list[tuple[str, int]]:
     compressed = None
     try:
@@ -1377,7 +1061,6 @@ def _find_scannable_compressed_log(
         return [(Path(filename).stem, extracted_size)]
     raise ScanError("The archive does not contain a complete Kometa log file.")
 
-
 def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int]]:
     """Identify logs in a spooled upload without retaining the upload in memory."""
     size = path.stat().st_size
@@ -1401,9 +1084,7 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
         raise ScanError("The archive does not contain a complete Kometa log file.")
     if suffix != ".zip":
         if suffix not in ALLOWED_SUFFIXES:
-            raise ScanError(
-                "Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file."
-            )
+            raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")
         with path.open("rb") as source:
             if _stream_contains_kometa_marker(source):
                 return [(filename, size)]
@@ -1412,10 +1093,7 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
         with zipfile.ZipFile(path) as archive:
             found = []
             for entry in archive.infolist():
-                if (
-                    entry.is_dir()
-                    or Path(entry.filename).suffix.lower() not in ALLOWED_SUFFIXES
-                ):
+                if entry.is_dir() or Path(entry.filename).suffix.lower() not in ALLOWED_SUFFIXES:
                     continue
                 with archive.open(entry) as member:
                     if _stream_contains_kometa_marker(member):
@@ -1426,10 +1104,7 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
         raise ScanError("The selected ZIP file is invalid.") from exc
     raise ScanError("The archive does not contain a complete Kometa log file.")
 
-
-def find_scannable_archive_logs(
-    filename: str, content_bytes: bytes
-) -> list[tuple[str, int]]:
+def find_scannable_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, int]]:
     """Permissively identify Kometa logs before the strict scan validates every entry."""
     if Path(filename).suffix.lower() != ".zip":
         result = scan_log(filename, content_bytes)
@@ -1438,10 +1113,7 @@ def find_scannable_archive_logs(
         with zipfile.ZipFile(BytesIO(content_bytes)) as archive:
             found = []
             for entry in archive.infolist():
-                if (
-                    entry.is_dir()
-                    or Path(entry.filename).suffix.lower() not in ALLOWED_SUFFIXES
-                ):
+                if entry.is_dir() or Path(entry.filename).suffix.lower() not in ALLOWED_SUFFIXES:
                     continue
                 if entry.file_size >= STREAM_SCAN_THRESHOLD:
                     marker_found = False
@@ -1449,10 +1121,7 @@ def find_scannable_archive_logs(
                     with archive.open(entry) as member:
                         while chunk := member.read(1024 * 1024):
                             lowered = (carry + chunk).lower()
-                            if (
-                                b"[kometa.py:" in lowered
-                                or b"[plex_meta_manager.py:" in lowered
-                            ):
+                            if b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered:
                                 marker_found = True
                                 break
                             carry = chunk[-32:]
