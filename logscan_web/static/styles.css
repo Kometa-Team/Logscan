@@ -628,11 +628,13 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-table { width: 100%; min-width: 1420px; border-collapse: collapse; font-size: .75rem; }
 .support-table th { position: sticky; z-index: 2; top: 0; padding: 0; border-bottom: 1px solid var(--border); background: #12162b; text-align: left; white-space: nowrap; }
 .support-sort { display: flex; min-height: 42px; padding: 0 11px; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); text-decoration: none; }
+.support-column-label { display: flex; min-height: 42px; padding: 0 11px; align-items: center; color: var(--muted); }
 .support-sort:hover, .support-sort.active { color: var(--text); background: rgba(114,119,248,.09); }
 .support-table td { padding: 12px 11px; border-bottom: 1px solid var(--border); color: #dbe0f5; vertical-align: top; white-space: nowrap; }
 .support-table tbody tr:hover { background: rgba(114,119,248,.055); }
 .support-table strong, .support-table small { display: block; }
 .support-table small { margin-top: 4px; color: var(--muted); font-size: .66rem; }
+.support-archive > span { display: block; font-weight: 400; }
 .support-title { max-width: 310px; }
 .support-title > a { display: block; overflow: hidden; color: var(--text); font-weight: 650; text-decoration: none; text-overflow: ellipsis; }
 .support-title > a:hover { color: var(--accent-bright); }
