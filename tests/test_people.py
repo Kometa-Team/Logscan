@@ -633,6 +633,34 @@ class StreamingScanTests(unittest.TestCase):
         finally:
             disk_content.unlink(missing_ok=True)
 
+    def test_disk_backed_scan_keeps_all_runtimes_and_adjusts_late_maintenance_section(self):
+        lines = [
+            "[2026-09-29 00:00:00,000] [kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
+            "[2026-09-29 01:56:00,000] [config.py:2] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+        ]
+        lines.extend(
+            f"[2026-09-29 01:{index % 60:02d}:00,000] [kometa.py:{index + 3}] [INFO] | Finished Section {index:03d} Run Time: 0:00:01 |"
+            for index in range(225)
+        )
+        lines.extend([
+            "[2026-09-29 02:00:05,000] [kometa.py:300] [CRITICAL] | Plex Critical Error: Response 503 (service_unavailable) received during maintenance. |",
+            "[2026-09-29 05:04:00,000] [kometa.py:301] [INFO] | Finished People's Choice Awards Run Time: 3:08:00 |",
+        ])
+        archive_bytes = BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("meta.log", "\n".join(lines).encode())
+
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+            scans = scan_archive_logs("meta.zip", archive_bytes.getvalue())
+        _filename, disk_content, result = scans[0]
+        try:
+            runtimes = result.overview["section_run_times"]
+            self.assertEqual(len(runtimes), 226)
+            self.assertEqual(runtimes[0]["name"], "People's Choice Awards")
+            self.assertEqual(runtimes[0]["duration"], "0:08:00")
+            self.assertEqual(runtimes[-1]["duration"], "0:00:01")
+        finally:
+            disk_content.unlink(missing_ok=True)
 
 class RuntimeMetadataTests(unittest.TestCase):
     def test_section_run_times_are_sorted_and_zero_values_are_excluded(self):

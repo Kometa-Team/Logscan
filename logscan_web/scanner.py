@@ -650,7 +650,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         b"[quickstart]", b"finished:", b"finished ", b"run time:", b"start time:", b"started:",
         b"platform:", b"memory:", b"available memory:", b"run command:",
         b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
-        b"plex configuration", b"using asset directory", b"scheduled maintenance",
+        b"plex configuration", b"using asset directory", b"scheduled maintenance", b"service_unavailable",
         b"connected to server", b"running on", b"plexpass:", b"connected to library",
         b"type:", b"agent:", b"scanner:", b"ratings source:",
         b"library connection successful", b"library connection failed",
@@ -668,6 +668,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     chunk_start = 0
     lines_before_chunk = 0
     sample_hits = {term: 0 for term in sample_terms}
+    unlimited_sample_terms = {b"finished ", b"run time:"}
 
     def decoded_line(start: int) -> tuple[str, int]:
         end = content_bytes.find(b"\n", start)
@@ -684,14 +685,14 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         core_length = chunk_end - chunk_start
         matches = []
         for term in sample_terms + missing_terms:
-            if term in sample_hits and sample_hits[term] >= 200:
+            if term not in unlimited_sample_terms and term in sample_hits and sample_hits[term] >= 200:
                 continue
             position = lowered_chunk.find(term)
             while 0 <= position < core_length:
                 matches.append((position, term))
                 if term in sample_hits:
                     sample_hits[term] += 1
-                    if sample_hits[term] >= 200:
+                    if term not in unlimited_sample_terms and sample_hits[term] >= 200:
                         break
                 position = lowered_chunk.find(term, position + len(term))
         newline_cursor = 0
