@@ -369,9 +369,13 @@ h2 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.5rem); letter-spacing: -.04em;
 .runtime-summary-count { margin-left: auto; color: var(--muted); font-size: .75rem; font-weight: 500; }
 .runtime-summary[open] > summary .chevron { transform: rotate(90deg); }
 .runtime-summary-body { padding: 14px 16px 16px; border-top: 1px solid var(--border); }
-.runtime-summary-header { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.runtime-summary-header { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
 .runtime-summary-header label { color: var(--muted); font-size: .78rem; }
 .runtime-summary-header select { min-width: 110px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: white; font: inherit; }
+.runtime-pager { display: flex; align-items: center; gap: 7px; }
+.runtime-page-button { width: 34px; height: 34px; border-radius: 7px; font-size: .72rem; }
+.runtime-page-button:disabled { cursor: default; opacity: .38; }
+.runtime-page { min-width: 44px; color: var(--muted); font-size: .75rem; text-align: center; }
 .runtime-summary-body > p { margin: 6px 0 12px; color: var(--muted); font-size: .78rem; }
 .runtime-list { margin: 0; padding: 0; display: grid; border: 1px solid var(--border); border-radius: 8px; list-style: none; }
 .runtime-list li { min-width: 0; padding: 11px 14px; display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr) auto; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); }
