@@ -1489,6 +1489,56 @@ class RuntimeMetadataTests(unittest.TestCase):
             },
         })
 
+    def test_quickstart_generated_header_exposes_safe_operational_metadata(self):
+        prefix = "[2026-09-12 23:07:10,167] [config.py:315] [DEBUG] | # "
+        content = "\n".join(prefix + value + " |" for value in [
+            "dreamy_kare config created by Quickstart on 2026-09-12 23:02:21",
+            "OS: Windows 11",
+            "Docker: False",
+            "CPU: Intel64 Family 6 Model 94 Stepping 3, GenuineIntel (8 cores)",
+            "Memory: 14011 MB / 32657 MB (42%) | 18645 MB Free",
+            "Python: 3.12.10",
+            "Git: git version 2.55.0.windows.3",
+            "Browser: private browser value",
+            "Quickstart Port: 8008",
+            "Quickstart Debug: Disabled",
+            "Quickstart Theme: kometa",
+            "Quickstart Optimize Template Defaults: Enabled",
+            "Quickstart Config Archive History: 10",
+            "Quickstart Kometa Log Retention: Keep all (0)",
+            "Quickstart ImageMaid Log Retention: Keep all (0)",
+            r"Quickstart Test Libraries Temp Path: C:\Users\private\tmp",
+            "Kometa Runtime Mode: Quickstart-managed install",
+            "Quickstart Session Lifetime Days: 30",
+            "Quickstart: 0.10.6-build33 | Branch: run_command_fixes | Environment: Local-Windows",
+        ])
+
+        quickstart = extract_quickstart_metadata(content)["quickstart"]
+
+        self.assertEqual(quickstart["version"], "0.10.6-build33")
+        self.assertEqual(quickstart["branch"], "run_command_fixes")
+        self.assertEqual(quickstart["mode"], "Quickstart-managed install")
+        self.assertEqual(quickstart["metadata"], {
+            "platform": "Local-Windows",
+            "os": "Windows 11",
+            "docker": "False",
+            "cpu": "Intel64 Family 6 Model 94 Stepping 3, GenuineIntel (8 cores)",
+            "memory": "14011 MB / 32657 MB (42%) | 18645 MB Free",
+            "python": "3.12.10",
+            "git": "git version 2.55.0.windows.3",
+            "port": "8008",
+            "debug": "Disabled",
+            "theme": "kometa",
+            "optimize_template_defaults": "Enabled",
+            "config_archive_history": "10",
+            "kometa_log_retention": "Keep all (0)",
+            "imagemaid_log_retention": "Keep all (0)",
+            "session_lifetime_days": "30",
+        })
+        serialized = json.dumps(quickstart)
+        self.assertNotIn("private browser value", serialized)
+        self.assertNotIn(r"C:\Users\private", serialized)
+        self.assertNotIn("dreamy_kare", serialized)
     def test_quickstart_metadata_block_is_structured_and_private_values_are_omitted(self):
         content = "\n".join([
             "[Quickstart] Metadata Start",

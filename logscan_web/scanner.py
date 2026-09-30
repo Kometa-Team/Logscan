@@ -706,6 +706,11 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         b"[quickstart]", b"config created by quickstart", b"quickstart:",
         b"kometa runtime mode:", b"libraries configured with quickstart:",
         b"information on library:", b"content count:",
+        b"# os:", b"# docker:", b"# cpu:", b"# python:", b"# git:",
+        b"# quickstart port:", b"# quickstart debug:", b"# quickstart theme:",
+        b"# quickstart optimize template defaults:", b"# quickstart config archive history:",
+        b"# quickstart kometa log retention:", b"# quickstart imagemaid log retention:",
+        b"# quickstart session lifetime days:",
         b"finished:", b"finished ", b"run time:", b"start time:", b"started:",
         b"platform:", b"memory:", b"available memory:", b"run command:",
         b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
@@ -846,6 +851,7 @@ def extract_quickstart_metadata(content: str) -> dict:
         lines.extend(block.group("body").splitlines())
     messages = [_log_message(line).lstrip("# ").strip() for line in content.splitlines()]
     header_detected = any("config created by quickstart" in line.casefold() for line in messages)
+    header_values = {}
     if header_detected:
         quickstart["libraries"] = []
         quickstart["library_totals"] = {}
@@ -854,7 +860,27 @@ def extract_quickstart_metadata(content: str) -> dict:
             lines.extend([f"version={summary.group(1).strip()}", f"branch={summary.group(2).strip()}", f"platform={summary.group(3).strip()}"])
         mode = next((match.group(1).strip() for line in messages if (match := re.fullmatch(r"Kometa Runtime Mode:\s*(.+)", line, re.I))), None)
         if mode:
-            lines.append(f"runtime_mode={mode}")
+            header_values["runtime_mode"] = mode
+        header_fields = {
+            "OS": "os",
+            "Docker": "docker",
+            "CPU": "cpu",
+            "Memory": "memory",
+            "Python": "python",
+            "Git": "git",
+            "Quickstart Port": "port",
+            "Quickstart Debug": "debug",
+            "Quickstart Theme": "theme",
+            "Quickstart Optimize Template Defaults": "optimize_template_defaults",
+            "Quickstart Config Archive History": "config_archive_history",
+            "Quickstart Kometa Log Retention": "kometa_log_retention",
+            "Quickstart ImageMaid Log Retention": "imagemaid_log_retention",
+            "Quickstart Session Lifetime Days": "session_lifetime_days",
+        }
+        for message in messages:
+            field = re.fullmatch(r"([^:]+):\s*(.+)", message)
+            if field and field.group(1).strip() in header_fields:
+                header_values[header_fields[field.group(1).strip()]] = field.group(2).strip()
         current = None
         for message in messages:
             library = re.fullmatch(r"Information on library:\s*\[([^]]+)]", message, re.I)
@@ -886,14 +912,20 @@ def extract_quickstart_metadata(content: str) -> dict:
         pair = re.match(r"([\w -]+):\s*(.*?)\s*$", cleaned)
         if pair and pair.group(2):
             values[pair.group(1).strip().casefold().replace(" ", "_").replace("-", "_")] = pair.group(2).strip()
+    values.update(header_values)
     version = values.get("quickstart") or values.get("version")
     branch = (values.get("branch") or "unknown").casefold()
-    if branch not in {"master", "develop"}:
+    if branch in {"private", "redacted", "(redacted)"} or not re.fullmatch(r"[a-z0-9][a-z0-9._/-]{0,79}", branch):
         branch = "unknown"
     flags_value = values.get("flags") or values.get("launch_flags") or ""
     flags = [item.strip() for item in re.split(r"[,;]", flags_value) if item.strip()]
     mode = values.get("mode") or values.get("runtime_mode")
-    allowed_metadata = {"platform", "workspace", "config", "runtime", "launcher"}
+    allowed_metadata = {
+        "platform", "workspace", "config", "runtime", "launcher", "os", "docker",
+        "cpu", "memory", "python", "git", "port", "debug", "theme",
+        "optimize_template_defaults", "config_archive_history", "kometa_log_retention",
+        "imagemaid_log_retention", "session_lifetime_days",
+    }
     metadata = {key: value for key, value in values.items() if key in allowed_metadata and value and value.casefold() not in {"private", "redacted", "(redacted)"}}
     quickstart.update({"detected": bool(marker or block or header_detected), "version": version, "branch": branch, "mode": mode, "flags": flags, "metadata": metadata})
     return {"quickstart_run": quickstart["detected"], "quickstart_version": version, "quickstart_branch": branch, "quickstart": quickstart}
