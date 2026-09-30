@@ -616,7 +616,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .environment-section { overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .environment-section > summary { min-height: 72px; padding: 12px 16px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 18px; align-items: center; gap: 12px; list-style: none; cursor: pointer; }
 .environment-section > summary::-webkit-details-marker { display: none; }
-.environment-logo { width: 40px; height: 40px; display: grid; border: 1px solid var(--border); border-radius: 8px; place-items: center; font-size: .74rem; font-weight: 800; }
+.environment-logo { width: 40px; height: 40px; padding: 4px; display: block; border: 1px solid var(--border); border-radius: 8px; object-fit: contain; }
 .environment-kometa .environment-logo { border-color: rgba(249,115,22,.5); color: #fdba74; }
 .environment-plex .environment-logo { border-color: rgba(251,191,36,.5); color: #fde68a; }
 .environment-quickstart .environment-logo { border-color: rgba(74,222,128,.48); color: #bbf7d0; }

@@ -1051,9 +1051,10 @@ function environmentSection(kind, title, summary, rows, open = false) {
   section.className = `environment-section environment-${kind}`;
   section.open = open;
   const heading = document.createElement("summary");
-  const badge = document.createElement("span");
+  const badge = document.createElement("img");
   badge.className = "environment-logo";
-  badge.textContent = kind === "quickstart" ? "QS" : title.slice(0, 1);
+  badge.src = `/static/${kind}.png`;
+  badge.alt = "";
   const identity = document.createElement("span");
   identity.className = "environment-identity";
   const name = document.createElement("strong");

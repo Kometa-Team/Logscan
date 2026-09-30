@@ -1164,6 +1164,7 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn('overview.run_launcher = metadata.quickstart_run', script)
         self.assertIn('environmentSection("quickstart", "Quickstart"', script)
+        self.assertIn('badge.src = `/static/${kind}.png`', script)
         self.assertIn("metadata.quickstart_run", script)
         self.assertIn('metadata.quickstart_version || "version unknown"', script)
         self.assertIn('"Direct Kometa run"', script)
@@ -1179,6 +1180,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('environmentSection("kometa", "Kometa"', script)
         self.assertIn('environmentSection("plex", "Plex"', script)
         self.assertIn('environmentSection("quickstart", "Quickstart"', script)
+        self.assertIn('badge.src = `/static/${kind}.png`', script)
         self.assertIn('const servers = overview.plex_servers || []', script)
     def test_overview_validation_status_tracks_live_schema_results(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
