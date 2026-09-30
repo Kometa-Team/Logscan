@@ -125,18 +125,6 @@ function showOverview(group, overview) {
     ["Uncompressed archive size", overview.archive_uncompressed_size_display],
     ["Compression ratio", overview.archive_compression_ratio],
     ["Archive size reduction", overview.archive_reduction_percent],
-    ["Version recorded in log", overview.kometa_version],
-    ["Update target recorded in log", overview.newest_version_at_run],
-    ["Current comparison branch", overview.current_comparison_branch],
-    ["Current branch version", overview.current_branch_version],
-    ["Current master version", overview.current_master_version],
-    ["Current develop version", overview.current_develop_version],
-    ["Current versions checked", overview.current_versions_checked],
-    ["Platform", overview.platform],
-    ["Total memory", overview.total_memory],
-    ["Available memory", overview.available_memory],
-    ["Run command", overview.run_command],
-    ["Run launcher", overview.run_launcher],
     ["Start time", overview.start_time],
     ["End time", overview.finished],
     ["Run time", overview.run_time],
@@ -1043,6 +1031,149 @@ function summaryCard(label, value, small = false) {
   return card;
 }
 
+function detailRows(rows) {
+  const list = document.createElement("dl");
+  list.className = "environment-details";
+  rows.filter(([, value]) => value !== undefined && value !== null && value !== "").forEach(([label, value]) => {
+    const wrapper = document.createElement("div");
+    const term = document.createElement("dt");
+    const definition = document.createElement("dd");
+    term.textContent = label;
+    definition.textContent = Array.isArray(value) ? value.join(", ") : value;
+    wrapper.append(term, definition);
+    list.append(wrapper);
+  });
+  return list;
+}
+
+function environmentSection(kind, title, summary, rows, open = false) {
+  const section = document.createElement("details");
+  section.className = `environment-section environment-${kind}`;
+  section.open = open;
+  const heading = document.createElement("summary");
+  const badge = document.createElement("span");
+  badge.className = "environment-logo";
+  badge.textContent = kind === "quickstart" ? "QS" : title.slice(0, 1);
+  const identity = document.createElement("span");
+  identity.className = "environment-identity";
+  const name = document.createElement("strong");
+  name.textContent = title;
+  const description = document.createElement("span");
+  description.textContent = summary;
+  identity.append(name, description);
+  const chevron = document.createElement("span");
+  chevron.className = "chevron";
+  chevron.textContent = ">";
+  heading.append(badge, identity, chevron);
+  section.append(heading, detailRows(rows));
+  return section;
+}
+
+function findingTile(label, severity, count) {
+  const tile = document.createElement("button");
+  tile.type = "button";
+  tile.className = `finding-tile finding-${severity}`;
+  tile.disabled = !Number(count);
+  const value = document.createElement("strong");
+  value.textContent = Number(count || 0).toLocaleString();
+  const name = document.createElement("span");
+  name.textContent = label;
+  tile.append(value, name);
+  tile.addEventListener("click", () => document.querySelector(`.nav-button[data-group="${severity}"]`)?.click());
+  return tile;
+}
+
+function renderSummary(metadata, overview) {
+  if (!summaryGrid) return;
+  const metricGrid = document.createElement("section");
+  metricGrid.className = "scan-metric-grid";
+  metricGrid.setAttribute("aria-label", "Scan summary");
+  const metricHeading = document.createElement("h3");
+  metricHeading.className = "summary-section-heading";
+  metricHeading.textContent = "Scan summary";
+  metricGrid.append(metricHeading,
+    summaryCard("Lines scanned", Number(metadata.line_count || 0).toLocaleString()),
+    summaryCard("Log size", formatBytes(metadata.size_bytes || 0)),
+    summaryCard("Run time", overview.run_time || metadata.run_time || "Unknown", true),
+    summaryCard("Findings", Object.values(metadata.counts).reduce((total, count) => total + Number(count || 0), 0).toLocaleString()),
+  );
+
+  const findings = document.createElement("section");
+  findings.className = "finding-grid";
+  findings.setAttribute("aria-label", "Findings");
+  const findingsHeading = document.createElement("h3");
+  findingsHeading.className = "summary-section-heading";
+  findingsHeading.textContent = "Findings";
+  findings.append(findingsHeading,
+    findingTile("Critical", "critical", metadata.counts.critical),
+    findingTile("Errors", "error", metadata.counts.error),
+    findingTile("Warnings", "warning", metadata.counts.warning),
+    findingTile("Schema", "schema", metadata.counts.schema),
+    findingTile("Advice", "advice", metadata.counts.advice),
+  );
+
+  const environment = document.createElement("section");
+  environment.className = "environment-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = "Environment";
+  environment.append(heading);
+  environment.append(environmentSection("kometa", "Kometa", [
+    metadata.kometa_version,
+    metadata.kometa_branch && metadata.kometa_branch !== "unknown" ? metadata.kometa_branch : null,
+    metadata.installation_method,
+  ].filter(Boolean).join(" · ") || "Version not recorded", [
+    ["Version", metadata.kometa_version],
+    ["Branch", metadata.kometa_branch],
+    ["Installation", metadata.installation_method],
+    ["Platform", overview.platform || metadata.runtime_platform],
+    ["Total memory", overview.total_memory],
+    ["Available memory", overview.available_memory],
+    ["Run command", overview.run_command],
+  ], true));
+
+  const configurations = overview.plex_configurations || [];
+  const plexLines = configurations.flatMap((section) => section.lines || []);
+  const maintenance = plexLines.map((line) => line.match(/Scheduled maintenance running between\s+(.+)/i)?.[1]).find(Boolean);
+  const servers = overview.plex_servers || [];
+  if (servers.length || configurations.length) {
+    const first = servers[0] || {};
+    const summary = [first.name, first.version, first.platform].filter(Boolean).join(" · ") || `${configurations.length} libraries`;
+    const rows = servers.flatMap((server, index) => [
+      [servers.length > 1 ? `Server ${index + 1}` : "Server", server.name],
+      ["Plex version", server.version],
+      ["Host platform", server.platform],
+    ]);
+    rows.push(["Libraries", configurations.length], ["Maintenance window", maintenance]);
+    environment.append(environmentSection("plex", "Plex", summary, rows));
+  }
+
+  const quickstart = metadata.quickstart || {
+    detected: metadata.quickstart_run,
+    version: metadata.quickstart_version,
+    branch: metadata.quickstart_branch,
+    mode: null,
+    flags: [],
+    metadata: {},
+  };
+  if (quickstart.detected) {
+    const extra = quickstart.metadata || {};
+    environment.append(environmentSection("quickstart", "Quickstart", [
+      quickstart.version,
+      quickstart.branch !== "unknown" ? quickstart.branch : null,
+      quickstart.mode,
+    ].filter(Boolean).join(" · ") || "Detected", [
+      ["Version", quickstart.version],
+      ["Branch", quickstart.branch],
+      ["Runtime mode", quickstart.mode || extra.runtime],
+      ["Platform", extra.platform],
+      ["Workspace", extra.workspace],
+      ["Configuration", extra.config],
+      ["Launcher", extra.launcher],
+      ["Launch flags", quickstart.flags || []],
+    ]));
+  }
+  summaryGrid.replaceChildren(metricGrid, findings, environment);
+}
 function renderBatchResults(scans, admin = false) {
   if (!scans.length) {
     batchResults.hidden = true;
@@ -1204,20 +1335,7 @@ function renderResults(data, runSchemaValidation = true) {
   }
   const groups = [...categories].sort((left, right) => left.priority - right.priority);
   document.querySelector("#results-title").textContent = data.filename;
-  const plexServers = overview.plex_servers || [];
-  const plexServerSummary = plexServers.map((server) => [
-    server.name,
-    server.version ? `Plex ${server.version}` : null,
-    server.platform,
-  ].filter(Boolean).join("\n")).join("\n\n");
-  if (summaryGrid) summaryGrid.replaceChildren(
-    summaryCard("Log details", `${metadata.line_count.toLocaleString()} lines · ${formatBytes(metadata.size_bytes)}${metadata.kometa_version ? `\nKometa ${metadata.kometa_version}` : ""}`, true),
-    ...(plexServerSummary ? [summaryCard(plexServers.length === 1 ? "Plex server" : "Plex servers", plexServerSummary, true)] : []),
-    summaryCard("Critical", metadata.counts.critical),
-    summaryCard("Warnings", metadata.counts.warning),
-    summaryCard("Schema", metadata.counts.schema),
-    summaryCard("Advice", metadata.counts.advice),
-  );
+  renderSummary(metadata, overview);
 
   sectionNav.replaceChildren();
   const sectionSelect = document.createElement("select");

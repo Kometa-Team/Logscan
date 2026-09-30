@@ -797,21 +797,75 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     )
 
 def extract_quickstart_metadata(content: str) -> dict:
-    """Extract non-sensitive Quickstart launcher metadata from a Kometa log."""
+    """Extract structured, non-sensitive Quickstart launcher metadata."""
+    quickstart = {
+        "detected": False,
+        "version": None,
+        "branch": "unknown",
+        "mode": None,
+        "flags": [],
+        "metadata": {},
+    }
+    lines = []
     marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", content, re.IGNORECASE)
-    fields = {
-        key.casefold(): value
-        for key, value in re.findall(r"\b(quickstart|branch)=([^\s|]+)", marker.group(0), re.IGNORECASE)
-    } if marker else {}
-    branch = fields.get("branch", "unknown").casefold()
+    if marker:
+        lines.append(marker.group(0))
+
+    block = re.search(
+        r"^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+(?:Start|Begin)[ \t]*\r?$"
+        r"(?P<body>.*?)"
+        r"^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+End[ \t]*\r?$",
+        content,
+        re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    )
+    if block:
+        lines.extend(block.group("body").splitlines())
+
+    allowed_metadata = {"platform", "workspace", "config", "runtime", "launcher"}
+    values = {}
+    for line in lines:
+        cleaned = re.sub(
+            r"^.*?\[Quickstart\]\s*", "", line, flags=re.IGNORECASE
+        ).strip(" |")
+        for key, quoted, bare in re.findall(
+            r'\b([\w-]+)=(?:"([^"]*)"|([^\s|]+))', cleaned
+        ):
+            values[key.casefold().replace("-", "_")] = quoted or bare
+        pair = re.match(r"([\w -]+):\s*(.*?)\s*$", cleaned)
+        if pair and pair.group(2):
+            key = pair.group(1).strip().casefold().replace(" ", "_").replace("-", "_")
+            values[key] = pair.group(2).strip()
+
+    version = values.get("quickstart") or values.get("version")
+    branch = (values.get("branch") or "unknown").casefold()
     if branch not in {"master", "develop"}:
         branch = "unknown"
-    return {
-        "quickstart_run": bool(marker),
-        "quickstart_version": fields.get("quickstart"),
-        "quickstart_branch": branch,
+    flags_value = values.get("flags") or values.get("launch_flags") or ""
+    flags = [item.strip() for item in re.split(r"[,;]", flags_value) if item.strip()]
+    mode = values.get("mode") or values.get("runtime_mode")
+    metadata = {
+        key: value
+        for key, value in values.items()
+        if key in allowed_metadata
+        and value
+        and value.casefold() not in {"private", "redacted", "(redacted)"}
     }
-
+    quickstart.update(
+        {
+            "detected": bool(marker or block),
+            "version": version,
+            "branch": branch,
+            "mode": mode,
+            "flags": flags,
+            "metadata": metadata,
+        }
+    )
+    return {
+        "quickstart_run": quickstart["detected"],
+        "quickstart_version": version,
+        "quickstart_branch": branch,
+        "quickstart": quickstart,
+    }
 
 def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     filename, content_bytes = prepare_scan_input(filename, content_bytes)

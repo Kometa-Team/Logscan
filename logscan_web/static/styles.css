@@ -594,6 +594,54 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .schema-review .primary-button { grid-column: 1; grid-row: auto; margin-top: 8px; width: 100%; }
 }
 
+/* Scan summary and environment */
+.summary-grid { display: grid; grid-template-columns: 1fr; gap: 18px; margin: 30px 0; }
+.scan-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.summary-section-heading { grid-column: 1 / -1; margin: 2px 0 0; font-size: 1rem; }
+.scan-metric-grid .summary-card { min-height: 96px; }
+.scan-metric-grid .summary-value { margin-top: 9px; font-size: 1.35rem; letter-spacing: 0; }
+.finding-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.finding-tile { min-width: 0; min-height: 72px; padding: 12px 14px; display: flex; align-items: flex-start; flex-direction: column; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); text-align: left; }
+.finding-tile strong { font-size: 1.25rem; line-height: 1; }
+.finding-tile span { margin-top: 7px; color: var(--muted); font-size: .76rem; }
+.finding-tile:disabled { cursor: default; opacity: .58; }
+.finding-tile:not(:disabled):hover { background: rgba(255,255,255,.055); }
+.finding-critical { border-color: rgba(251,113,133,.38); }
+.finding-error { border-color: rgba(251,146,60,.38); }
+.finding-warning { border-color: rgba(250,204,21,.38); }
+.finding-schema { border-color: rgba(167,139,250,.42); }
+.finding-advice { border-color: rgba(96,165,250,.38); }
+.environment-panel { display: grid; gap: 10px; }
+.environment-panel > h3 { margin: 4px 0 2px; font-size: 1rem; }
+.environment-section { overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.environment-section > summary { min-height: 72px; padding: 12px 16px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 18px; align-items: center; gap: 12px; list-style: none; cursor: pointer; }
+.environment-section > summary::-webkit-details-marker { display: none; }
+.environment-logo { width: 40px; height: 40px; display: grid; border: 1px solid var(--border); border-radius: 8px; place-items: center; font-size: .74rem; font-weight: 800; }
+.environment-kometa .environment-logo { border-color: rgba(249,115,22,.5); color: #fdba74; }
+.environment-plex .environment-logo { border-color: rgba(251,191,36,.5); color: #fde68a; }
+.environment-quickstart .environment-logo { border-color: rgba(74,222,128,.48); color: #bbf7d0; }
+.environment-identity { min-width: 0; display: flex; align-items: baseline; gap: 12px; }
+.environment-identity strong { flex: 0 0 auto; }
+.environment-identity span { min-width: 0; overflow: hidden; color: var(--muted); font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
+.environment-section[open] > summary { border-bottom: 1px solid var(--border); }
+.environment-section[open] > summary .chevron { transform: rotate(90deg); }
+.environment-details { margin: 0; padding: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.environment-details > div { min-width: 0; }
+.environment-details dt { color: var(--muted); font-size: .7rem; text-transform: uppercase; }
+.environment-details dd { margin: 5px 0 0; overflow-wrap: anywhere; color: #eef0ff; font-size: .86rem; }
+
+@media (max-width: 760px) {
+  .scan-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .finding-grid { grid-template-columns: repeat(5, minmax(76px, 1fr)); overflow-x: auto; padding-bottom: 4px; }
+  .environment-identity { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .environment-details { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 420px) {
+  .scan-metric-grid { grid-template-columns: 1fr 1fr; }
+  .scan-metric-grid .summary-card { min-height: 88px; padding: 14px; }
+  .scan-metric-grid .summary-value { font-size: 1.05rem; }
+}
 /* Support log console */
 .support-login-shell { display: grid; min-height: calc(100vh - 76px); padding: 32px 20px; place-items: center; }
 .support-login-panel { width: min(460px, 100%); padding: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }

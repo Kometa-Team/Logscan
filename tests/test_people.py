@@ -591,6 +591,10 @@ class StreamingScanTests(unittest.TestCase):
             "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
             "[kometa.py:2] [WARNING] | timed out.",
             "[Quickstart] Run marker: quickstart=0.10.6-build7 branch=develop",
+            "[Quickstart] Metadata Start",
+            "[Quickstart] version=0.10.6-build7 branch=develop mode=managed flags=--run,--read-only",
+            "[Quickstart] platform=Linux launcher=compose",
+            "[Quickstart] Metadata End",
         ]).encode()
         expected = scan_log("meta.log", content)
         archive_bytes = BytesIO()
@@ -1158,7 +1162,8 @@ class RuntimeMetadataTests(unittest.TestCase):
     def test_overview_identifies_quickstart_and_direct_launchers(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 
-        self.assertIn('["Run launcher", overview.run_launcher]', script)
+        self.assertIn('overview.run_launcher = metadata.quickstart_run', script)
+        self.assertIn('environmentSection("quickstart", "Quickstart"', script)
         self.assertIn("metadata.quickstart_run", script)
         self.assertIn('metadata.quickstart_version || "version unknown"', script)
         self.assertIn('"Direct Kometa run"', script)
@@ -1169,11 +1174,12 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn('id="summary-grid"', template)
         self.assertIn('aria-label="Scan summary"', template)
-        self.assertIn("const plexServers = overview.plex_servers || []", script)
-        self.assertIn('server.version ? `Plex ${server.version}` : null', script)
-        self.assertIn('server.platform', script)
-        self.assertIn('plexServers.length === 1 ? "Plex server" : "Plex servers"', script)
-
+        self.assertIn('className = "scan-metric-grid"', script)
+        self.assertIn('findingTile("Errors", "error", metadata.counts.error)', script)
+        self.assertIn('environmentSection("kometa", "Kometa"', script)
+        self.assertIn('environmentSection("plex", "Plex"', script)
+        self.assertIn('environmentSection("quickstart", "Quickstart"', script)
+        self.assertIn('const servers = overview.plex_servers || []', script)
     def test_overview_validation_status_tracks_live_schema_results(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 
@@ -1449,13 +1455,38 @@ class RuntimeMetadataTests(unittest.TestCase):
             "quickstart_run": True,
             "quickstart_version": "0.10.6-build7",
             "quickstart_branch": "develop",
+            "quickstart": {
+                "detected": True, "version": "0.10.6-build7", "branch": "develop",
+                "mode": None, "flags": [], "metadata": {},
+            },
         })
         self.assertEqual(direct, {
             "quickstart_run": False,
             "quickstart_version": None,
             "quickstart_branch": "unknown",
+            "quickstart": {
+                "detected": False, "version": None, "branch": "unknown",
+                "mode": None, "flags": [], "metadata": {},
+            },
         })
 
+    def test_quickstart_metadata_block_is_structured_and_private_values_are_omitted(self):
+        content = "\n".join([
+            "[Quickstart] Metadata Start",
+            "[Quickstart] version=0.10.9 branch=develop mode=managed flags=--run,--read-only",
+            "[Quickstart] platform=Linux workspace=private config=(redacted) launcher=compose",
+            "[Quickstart] Metadata End",
+        ])
+
+        extracted = extract_quickstart_metadata(content)
+
+        self.assertEqual(extracted["quickstart"]["version"], "0.10.9")
+        self.assertEqual(extracted["quickstart"]["mode"], "managed")
+        self.assertEqual(extracted["quickstart"]["flags"], ["--run", "--read-only"])
+        self.assertEqual(extracted["quickstart"]["metadata"], {
+            "platform": "Linux",
+            "launcher": "compose",
+        })
     def test_kometa_and_quickstart_channels_are_extracted_from_safe_markers(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Python 3.12.1) (Branch: nightly) |",
