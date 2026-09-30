@@ -615,6 +615,7 @@ class StreamingScanTests(unittest.TestCase):
             "[config.py:3] [INFO] | Connected to server NZWHS01 version 1.31.2.6810-a607d384f |",
             "[config.py:4] [INFO] | Connected to library TestMovies |",
             "[config.py:5] [INFO] | Library Connection Successful |",
+            "[builder.py:6] [INFO] | Type: imdb_awards |",
             "[kometa.py:6] [INFO] | Finished Unrelated Collection Run Time: 0:12:34 |",
             "[builder.py:7] [INFO] | Scanning Metadata and Images |",
             "[config.py:8] [INFO] | Run Order: operations |",
@@ -632,6 +633,7 @@ class StreamingScanTests(unittest.TestCase):
             self.assertIn("Connected to library TestMovies", sections[0]["lines"])
             self.assertNotIn("Run Order: operations", sections[0]["lines"])
             self.assertNotIn("Finished Unrelated Collection Run Time: 0:12:34", sections[0]["lines"])
+            self.assertNotIn("Type: imdb_awards", sections[0]["lines"])
         finally:
             disk_content.unlink(missing_ok=True)
 

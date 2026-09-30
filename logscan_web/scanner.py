@@ -435,6 +435,11 @@ def extract_plex_configurations(content: str) -> list[dict[str, object]]:
             continue
         if current is None:
             continue
+        if "Library Connection Successful" in message:
+            current.append(message)
+            sections.append(_plex_configuration_section(current, len(sections) + 1))
+            current = None
+            continue
         if (
             re.search(r"\bScanning\b", message)
             or "Library Connection Failed" in message
