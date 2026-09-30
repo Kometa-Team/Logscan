@@ -968,7 +968,7 @@ def create_app() -> Flask:
 
     @app.get("/favicon.ico")
     def favicon():
-        return send_file(Path(app.static_folder) / "favicon.png", mimetype="image/png")
+        return send_file(Path(app.static_folder) / "logscan.png", mimetype="image/png")
 
     @app.get("/people")
     def people_page():

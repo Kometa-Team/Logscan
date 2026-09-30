@@ -1166,8 +1166,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('environmentSection("quickstart", "Quickstart"', script)
         self.assertIn('badge.src = `/static/${kind}.png`', script)
         self.assertIn('sectionContent.scrollIntoView({ behavior: "smooth", block: "start" })', script)
-        self.assertIn('plexLogo.src = "/static/plex.png"', script)
-        self.assertIn('Library connection details reported by this Plex server.', script)
+        self.assertIn('plexConfigurationList(configurations)', script)
+        self.assertIn('Connection details reported for each Plex library.', script)
         self.assertNotIn('[["Run command", overview.run_command]], true', script)
         self.assertIn("metadata.quickstart_run", script)
         self.assertIn('metadata.quickstart_version || "version unknown"', script)
@@ -1186,8 +1186,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('environmentSection("quickstart", "Quickstart"', script)
         self.assertIn('badge.src = `/static/${kind}.png`', script)
         self.assertIn('sectionContent.scrollIntoView({ behavior: "smooth", block: "start" })', script)
-        self.assertIn('plexLogo.src = "/static/plex.png"', script)
-        self.assertIn('Library connection details reported by this Plex server.', script)
+        self.assertIn('plexConfigurationList(configurations)', script)
+        self.assertIn('Connection details reported for each Plex library.', script)
         self.assertNotIn('[["Run command", overview.run_command]], true', script)
         self.assertIn('const servers = overview.plex_servers || []', script)
     def test_overview_validation_status_tracks_live_schema_results(self):
@@ -1882,7 +1882,7 @@ class PeopleUnionTests(unittest.TestCase):
     def test_people_header_uses_official_kometa_icon(self):
         response = self.client.get("/people")
         self.assertEqual(response.status_code, 200)
-        self.assertIn('class="brand-mark" src="/static/favicon.png"', response.get_data(as_text=True))
+        self.assertIn('class="brand-mark" src="/static/logscan.png"', response.get_data(as_text=True))
         self.assertNotIn('<span class="brand-mark">K</span>', response.get_data(as_text=True))
 
     def test_favicon_is_available_at_browser_default_path(self):

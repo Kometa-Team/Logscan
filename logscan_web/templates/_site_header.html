@@ -1,6 +1,6 @@
 <header class="site-header">
   <a class="brand" href="/" aria-label="Kometa Logscan home">
-    <img class="brand-mark" src="{{ url_for('static', filename='favicon.png') }}" alt="">
+    <img class="brand-mark" src="{{ url_for('static', filename='logscan.png') }}" alt="">
     <span>Kometa Logscan</span>
   </a>
   {% if discord_user %}<a class="header-my-uploads" href="{{ url_for('support.logs', view='mine') }}"{% if active_page == 'support' and view_mode|default('mine') == 'mine' %} aria-current="page"{% endif %}>{% if discord_user.avatar %}<img src="{{ discord_user.avatar }}" alt="">{% endif %}<span>My uploads</span></a>{% else %}<a class="header-my-uploads" href="{{ url_for('support.authorize', next=request.full_path.rstrip('?')) }}">Sign in with Discord</a>{% endif %}

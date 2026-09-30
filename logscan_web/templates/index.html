@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Scan a Kometa log and review practical recommendations.">
-  <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
+  <link rel="icon" href="{{ url_for('static', filename='logscan.png') }}" type="image/png">
   <title>Kometa Log Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260930-4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260930-5') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
-  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260930-4') }}" defer></script>
+  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260930-5') }}" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>

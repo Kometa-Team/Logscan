@@ -250,46 +250,6 @@ function showOverview(group, overview) {
     runtimeSection.append(runtimeSummary, runtimeBody);
     sectionContent.append(runtimeSection);
   }
-  const plexConfigurations = overview.plex_configurations || [];
-  if (plexConfigurations.length) {
-    const plexHeading = document.createElement("div");
-    plexHeading.className = "overview-subheading plex-section-heading";
-    const plexLogo = document.createElement("img");
-    plexLogo.className = "plex-section-logo";
-    plexLogo.src = "/static/plex.png";
-    plexLogo.alt = "";
-    const plexHeadingText = document.createElement("div");
-    const plexTitle = document.createElement("h4");
-    plexTitle.textContent = "Plex Configuration";
-    const plexDescription = document.createElement("p");
-    plexDescription.textContent = "Library connection details reported by this Plex server.";
-    plexHeadingText.append(plexTitle, plexDescription);
-    plexHeading.append(plexLogo, plexHeadingText);
-    sectionContent.append(plexHeading);
-    const plexList = document.createElement("div");
-    plexList.className = "plex-configuration-list";
-    plexConfigurations.forEach((configuration) => {
-      const panel = document.createElement("details");
-      panel.className = "plex-configuration";
-      const summary = document.createElement("summary");
-      const title = document.createElement("span");
-      title.textContent = configuration.title;
-      const chevron = document.createElement("span");
-      chevron.className = "chevron";
-      chevron.textContent = "\u203a";
-      summary.append(title, chevron);
-      const body = document.createElement("div");
-      body.className = "plex-configuration-body";
-      (configuration.lines || []).forEach((line) => {
-        const row = document.createElement("p");
-        row.textContent = line;
-        body.append(row);
-      });
-      panel.append(summary, body);
-      plexList.append(panel);
-    });
-    sectionContent.append(plexList);
-  }
 }
 
 function selectedFiles(files) {
@@ -1056,7 +1016,7 @@ function detailRows(rows) {
   return list;
 }
 
-function environmentSection(kind, title, summary, rows, open = false) {
+function environmentSection(kind, title, summary, rows, open = false, extraContent = null) {
   const section = document.createElement("details");
   section.className = `environment-section environment-${kind}`;
   section.open = open;
@@ -1077,9 +1037,42 @@ function environmentSection(kind, title, summary, rows, open = false) {
   chevron.textContent = ">";
   heading.append(badge, identity, chevron);
   section.append(heading, detailRows(rows));
+  if (extraContent) section.append(extraContent);
   return section;
 }
 
+function plexConfigurationList(configurations) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "environment-plex-configurations";
+  const heading = document.createElement("h4");
+  heading.textContent = "Library configuration";
+  const description = document.createElement("p");
+  description.textContent = "Connection details reported for each Plex library.";
+  const list = document.createElement("div");
+  list.className = "plex-configuration-list";
+  configurations.forEach((configuration) => {
+    const panel = document.createElement("details");
+    panel.className = "plex-configuration";
+    const summary = document.createElement("summary");
+    const title = document.createElement("span");
+    title.textContent = configuration.title;
+    const chevron = document.createElement("span");
+    chevron.className = "chevron";
+    chevron.textContent = ">";
+    summary.append(title, chevron);
+    const body = document.createElement("div");
+    body.className = "plex-configuration-body";
+    (configuration.lines || []).forEach((line) => {
+      const row = document.createElement("p");
+      row.textContent = line;
+      body.append(row);
+    });
+    panel.append(summary, body);
+    list.append(panel);
+  });
+  wrapper.append(heading, description, list);
+  return wrapper;
+}
 function findingTile(label, severity, count) {
   const tile = document.createElement("button");
   tile.type = "button";
@@ -1158,7 +1151,7 @@ function renderSummary(metadata, overview) {
       ["Host platform", server.platform],
     ]);
     rows.push(["Libraries", configurations.length], ["Maintenance window", maintenance]);
-    environment.append(environmentSection("plex", "Plex", summary, rows));
+    environment.append(environmentSection("plex", "Plex", summary, rows, false, plexConfigurationList(configurations)));
   }
 
   const quickstart = metadata.quickstart || {
