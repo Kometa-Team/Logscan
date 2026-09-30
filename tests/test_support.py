@@ -208,6 +208,33 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertNotIn("delete_token_hash", body)
 
 
+    def test_inventory_filters_quickstart_and_direct_runs(self):
+        direct_result = SimpleNamespace(
+            filename="direct-example.log",
+            recommendations=[],
+            metadata={
+                "size_bytes": 1024,
+                "line_count": 50,
+                "kometa_version": "2.5.1",
+                "quickstart_run": False,
+                "complete": True,
+            },
+            overview={"uploaded_by": "Support Person", "uploaded_by_id": "42"},
+            categories=[],
+        )
+        self.store.create("direct-example.log", b"log", direct_result)
+        self.authorize_session()
+
+        quickstart = self.client.get("/support/logs?launcher=quickstart").get_data(as_text=True)
+        self.assertIn("discord-example.log", quickstart)
+        self.assertNotIn("direct-example.log", quickstart)
+        self.assertIn('<option value="quickstart" selected>Quickstart</option>', quickstart)
+        self.assertIn("launcher=quickstart", quickstart)
+
+        direct = self.client.get("/support/logs?launcher=direct").get_data(as_text=True)
+        self.assertIn("direct-example.log", direct)
+        self.assertNotIn("discord-example.log", direct)
+        self.assertIn('<option value="direct" selected>Not Quickstart</option>', direct)
     def test_schema_count_is_backed_by_persisted_validation_metadata(self):
         self.authorize_session()
         body = self.client.get("/support/logs?severity=schema").get_data(as_text=True)

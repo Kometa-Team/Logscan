@@ -6,24 +6,25 @@
   <title>{{ 'Active logs' if is_support_console else 'My uploads' }} · Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260929-1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260930-1') }}">
   <script src="{{ url_for('static', filename='support_logs.js', v='20260927-1') }}" defer></script>
 </head>
 <body>
   {% macro sort_link(key, label) -%}
     {% set next_direction = 'asc' if sort_key != key or direction == 'desc' else 'desc' %}
-    <a class="support-sort{% if sort_key == key %} active{% endif %}" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=key, direction=next_direction) }}">{{ label }}{% if sort_key == key %}<span aria-hidden="true">{{ '↓' if direction == 'desc' else '↑' }}</span>{% endif %}</a>
+    <a class="support-sort{% if sort_key == key %} active{% endif %}" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, launcher=launcher_filter, severity=severity_filter, page_size=page_size, sort=key, direction=next_direction) }}">{{ label }}{% if sort_key == key %}<span aria-hidden="true">{{ '↓' if direction == 'desc' else '↑' }}</span>{% endif %}</a>
   {%- endmacro %}
   {% set active_page = 'support' %}{% include '_site_header.html' %}
   <main class="support-shell">
     <section class="support-heading"><div><p class="eyebrow">{{ 'Support console' if is_support_console else 'Discord uploads' }}</p><h1>{{ 'Active logs' if is_support_console else 'My uploads' }}</h1><p class="hero-copy">{{ 'Review every scan currently retained on this server.' if is_support_console else 'Review and manage web scans uploaded while signed in with Discord.' }} Logs disappear automatically at their displayed deletion time.</p></div><div class="support-total"><strong>{{ total_logs }}</strong><span>{{ 'on server' if is_support_console else 'yours' }}</span></div></section>
 
-    <details class="support-filter-panel"{% if query or source_filter != 'all' or severity_filter != 'all' or page_size != 25 %} data-active-filters{% endif %}>
-      <summary><span>Search and filters</span><span class="support-filter-status">{% if query or source_filter != 'all' or severity_filter != 'all' or page_size != 25 %}Active{% else %}All logs{% endif %}</span></summary>
+    <details class="support-filter-panel"{% if query or source_filter != 'all' or launcher_filter != 'all' or severity_filter != 'all' or page_size != 25 %} data-active-filters{% endif %}>
+      <summary><span>Search and filters</span><span class="support-filter-status">{% if query or source_filter != 'all' or launcher_filter != 'all' or severity_filter != 'all' or page_size != 25 %}Active{% else %}All logs{% endif %}</span></summary>
       <form class="support-filters" method="get">
       <input type="hidden" name="view" value="{{ view_mode }}">
       <label class="support-search"><span>Search</span><input type="search" name="q" value="{{ query }}" placeholder="Title, uploader, ID, version, platform…"></label>
       <label><span>Source</span><select name="source"><option value="all"{% if source_filter == 'all' %} selected{% endif %}>All sources</option><option value="discord"{% if source_filter == 'discord' %} selected{% endif %}>Discord</option><option value="web"{% if source_filter == 'web' %} selected{% endif %}>Web</option></select></label>
+      <label><span>Launcher</span><select name="launcher"><option value="all"{% if launcher_filter == 'all' %} selected{% endif %}>All launchers</option><option value="quickstart"{% if launcher_filter == 'quickstart' %} selected{% endif %}>Quickstart</option><option value="direct"{% if launcher_filter == 'direct' %} selected{% endif %}>Not Quickstart</option></select></label>
       <label><span>Severity</span><select name="severity"><option value="all"{% if severity_filter == 'all' %} selected{% endif %}>All findings</option>{% for severity in ('critical','error','warning','schema','advice') %}<option value="{{ severity }}"{% if severity_filter == severity %} selected{% endif %}>{{ severity|title }}</option>{% endfor %}<option value="none"{% if severity_filter == 'none' %} selected{% endif %}>No findings</option></select></label>
       <label><span>Rows</span><select name="page_size">{% for size in (25,50,100) %}<option value="{{ size }}"{% if page_size == size %} selected{% endif %}>{{ size }}</option>{% endfor %}<option value="all"{% if page_size == 'all' %} selected{% endif %}>All</option></select></label>
       <input type="hidden" name="sort" value="{{ sort_key }}"><input type="hidden" name="direction" value="{{ direction }}">
@@ -54,7 +55,7 @@
         </tbody>
       </table>
     </div>
-    {% if page_count > 1 %}<nav class="pagination" aria-label="Log pages">{% if page > 1 %}<a class="secondary-button" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page-1) }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ page_count }}</span>{% if page < page_count %}<a class="secondary-button" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page+1) }}">Next</a>{% endif %}</nav>{% endif %}
+    {% if page_count > 1 %}<nav class="pagination" aria-label="Log pages">{% if page > 1 %}<a class="secondary-button" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, launcher=launcher_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page-1) }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ page_count }}</span>{% if page < page_count %}<a class="secondary-button" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, launcher=launcher_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page+1) }}">Next</a>{% endif %}</nav>{% endif %}
     <dialog id="support-navigation-dialog" class="support-navigation-dialog" aria-labelledby="support-navigation-title">
       <div class="support-navigation-panel">
         <header class="support-navigation-header"><div><p class="eyebrow">Navigate log</p><h2 id="support-navigation-title"></h2></div><button type="button" id="support-navigation-close" class="support-navigation-close" aria-label="Close navigation dialog">×</button></header>

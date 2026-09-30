@@ -154,6 +154,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
     def logs():
         query = request.args.get("q", "").strip()
         source_filter = request.args.get("source", "all").casefold()
+        launcher_filter = request.args.get("launcher", "all").casefold()
         severity_filter = request.args.get("severity", "all").casefold()
         sort_key = request.args.get("sort", "created_at")
         direction = request.args.get("direction", "desc")
@@ -186,6 +187,12 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             rows = [row for row in rows if query_key in row["search_text"]]
         if source_filter in {"discord", "web"}:
             rows = [row for row in rows if row["source"] == source_filter]
+        if launcher_filter == "quickstart":
+            rows = [row for row in rows if row["quickstart_run"]]
+        elif launcher_filter == "direct":
+            rows = [row for row in rows if not row["quickstart_run"]]
+        else:
+            launcher_filter = "all"
         if severity_filter in {"critical", "error", "warning", "schema", "advice"}:
             rows = [row for row in rows if row["counts"][severity_filter] > 0]
         elif severity_filter == "none":
@@ -228,6 +235,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             page_size="all" if page_size is None else page_size,
             query=query,
             source_filter=source_filter,
+            launcher_filter=launcher_filter,
             severity_filter=severity_filter,
             sort_key=sort_key,
             direction=direction,
