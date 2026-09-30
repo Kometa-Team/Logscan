@@ -1270,7 +1270,8 @@ function renderSummary(metadata, overview) {
     summaryCard("Log size", formatBytes(metadata.size_bytes || 0)),
     summaryCard("Run time", overview.run_time || metadata.run_time || "Unknown", true),
     summaryCard("Findings", Object.values(metadata.counts).reduce((total, count) => total + Number(count || 0), 0).toLocaleString()),
-  );  const findings = document.createElement("section");
+  );
+  const findings = document.createElement("section");
   findings.className = "finding-grid";
   findings.setAttribute("aria-label", "Findings");
   const findingsHeading = document.createElement("h3");
@@ -1306,6 +1307,8 @@ function renderSummary(metadata, overview) {
   const configurations = overview.plex_configurations || [];
   const plexLines = configurations.flatMap((section) => section.lines || []);
   const maintenance = plexLines.map((line) => line.match(/Scheduled maintenance running between\s+(.+)/i)?.[1]).find(Boolean);
+  const dbCache = plexLines.map((line) => line.match(/Plex DB cache setting:\s*(.+)/i)?.[1]).find(Boolean);
+  const plexPass = plexLines.map((line) => line.match(/PlexPass:\s*(.+)/i)?.[1]).find(Boolean);
   const servers = overview.plex_servers || [];
   if (servers.length || configurations.length) {
     const first = servers[0] || {};
@@ -1316,7 +1319,9 @@ function renderSummary(metadata, overview) {
       ["Host platform", server.platform],
     ]);
     const totals = overview.quickstart_library_totals || {};
-    rows.push(["Libraries", totals.libraries || configurations.length],
+    rows.push(["Plex DB cache", dbCache],
+      ["PlexPass", plexPass],
+      ["Libraries", totals.libraries || configurations.length],
       ["Movies", totals.movies ? Number(totals.movies).toLocaleString() : null],
       ["Shows", totals.shows ? Number(totals.shows).toLocaleString() : null],
       ["Episodes", totals.episodes ? Number(totals.episodes).toLocaleString() : null],

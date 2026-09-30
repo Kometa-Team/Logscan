@@ -1143,6 +1143,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('document.createElement("optgroup")', script)
         self.assertIn('Collection files', script)
         self.assertIn('Metadata operations', script)
+        self.assertIn('["Plex DB cache", dbCache]', script)
+        self.assertIn('["PlexPass", plexPass]', script)
         self.assertIn('["all", `All (', script)
         self.assertIn('document.createElement("details")', script)
         self.assertIn('rank.textContent = `${start + index + 1} of ${sectionRunTimes.length}`', script)
