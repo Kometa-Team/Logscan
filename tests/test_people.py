@@ -34,6 +34,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
 from logscan_web.app import add_missing_people_recommendations, app, create_app
 from logscan_web.scanner import (
     MAX_FILE_BYTES,
+    STREAM_SCAN_THRESHOLD,
     extract_missing_people,
     extract_plex_configurations,
     extract_section_run_times,
@@ -637,6 +638,42 @@ class StreamingScanTests(unittest.TestCase):
         finally:
             disk_content.unlink(missing_ok=True)
 
+    def test_large_log_threshold_and_runtime_results_match_regular_scan(self):
+        self.assertEqual(STREAM_SCAN_THRESHOLD, 64 * 1024 * 1024)
+        lines = [
+            "[2026-09-26 22:17:45,061] [kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
+            "[2026-09-26 22:17:45,061] [plex.py:2] [INFO] | Scheduled maintenance running between 2:00 and 5:00 |",
+        ]
+        lines.extend(
+            f"[2026-09-27 01:{index % 60:02d}:00,000] [kometa.py:{index + 3}] [INFO] | Finished Section {index:03d} Run Time: 0:00:01 |"
+            for index in range(225)
+        )
+        lines.extend([
+            "[2026-09-27 05:00:17,563] [kometa.py:300] [INFO] | Finished People's Choice Awards 2008 Collection |",
+            "[2026-09-27 05:00:17,563] [kometa.py:300] [INFO] | Collection Run Time: 3:00:17 |",
+        ])
+        archive_bytes = BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("meta.log", "\n".join(lines).encode())
+
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", MAX_FILE_BYTES):
+            regular_scans = scan_archive_logs("meta.zip", archive_bytes.getvalue())
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+            large_scans = scan_archive_logs("meta.zip", archive_bytes.getvalue())
+        _regular_name, regular_content, regular_result = regular_scans[0]
+        _large_name, large_content, large_result = large_scans[0]
+        try:
+            self.assertEqual(
+                large_result.overview["section_run_times"],
+                regular_result.overview["section_run_times"],
+            )
+            self.assertEqual(len(large_result.overview["section_run_times"]), 226)
+            self.assertEqual(large_result.overview["section_run_times"][0]["duration"], "0:00:17")
+        finally:
+            if isinstance(regular_content, Path):
+                regular_content.unlink(missing_ok=True)
+            if isinstance(large_content, Path):
+                large_content.unlink(missing_ok=True)
     def test_disk_backed_scan_keeps_all_runtimes_and_adjusts_late_maintenance_section(self):
         lines = [
             "[2026-09-29 00:00:00,000] [kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
@@ -705,7 +742,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(runtimes[0]["seconds"], 480)
         self.assertEqual(runtimes[0]["reported_duration"], "3:08:00")
 
-    def test_section_run_time_is_not_adjusted_without_a_maintenance_event(self):
+    def test_section_run_time_handles_silent_plex_maintenance(self):
         content = "\n".join([
             "[2026-09-29 01:56:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
             "[2026-09-29 05:04:00,000] [kometa.py:2] [INFO] | Finished People's Choice Awards Run Time: 3:08:00 |",
@@ -713,9 +750,32 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         runtimes = extract_section_run_times(content)
 
-        self.assertEqual(runtimes[0]["duration"], "3:08:00")
-        self.assertNotIn("reported_duration", runtimes[0])
+        self.assertEqual(runtimes[0]["duration"], "0:08:00")
+        self.assertEqual(runtimes[0]["reported_duration"], "3:08:00")
 
+    def test_section_run_time_matches_silent_production_maintenance_gap(self):
+        content = "\n".join([
+            "[2026-09-26 22:17:45,061] [plex.py:871] [INFO] | Scheduled maintenance running between 2:00 and 5:00 |",
+            "[2026-09-27 05:00:17,563] [kometa.py:1470] [INFO] | Finished People's Choice Awards 2008 Collection |",
+            "[2026-09-27 05:00:17,563] [kometa.py:1470] [INFO] | Collection Run Time: 3:00:17 |",
+        ])
+
+        runtimes = extract_section_run_times(content)
+
+        self.assertEqual(runtimes[0]["duration"], "0:00:17")
+        self.assertEqual(runtimes[0]["seconds"], 17)
+        self.assertEqual(runtimes[0]["reported_duration"], "3:00:17")
+
+    def test_section_run_time_outside_maintenance_is_unchanged(self):
+        content = "\n".join([
+            "[2026-09-29 01:00:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+            "[2026-09-29 06:08:00,000] [kometa.py:2] [INFO] | Finished Morning Collection Run Time: 0:08:00 |",
+        ])
+
+        runtimes = extract_section_run_times(content)
+
+        self.assertEqual(runtimes[0]["duration"], "0:08:00")
+        self.assertNotIn("reported_duration", runtimes[0])
     def test_section_run_time_handles_overnight_maintenance_window(self):
         content = "\n".join([
             "[2026-09-29 22:56:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 23:00 and 02:00 |",

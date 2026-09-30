@@ -556,11 +556,8 @@ def _maintenance_overlap_seconds(
     start: datetime,
     end: datetime,
     windows: list[tuple[time, time]],
-    events: list[datetime],
 ) -> int:
-    """Return scheduled maintenance overlap when a Plex maintenance event occurred."""
-    if not any(start <= event <= end for event in events):
-        return 0
+    """Return the part of a section runtime inside Plex scheduled maintenance."""
     overlap = 0
     day = start.date() - timedelta(days=1)
     while day <= end.date():
@@ -594,13 +591,6 @@ def extract_section_run_times(content: str) -> list[dict[str, object]]:
         window = (start_value, end_value)
         if window not in windows:
             windows.append(window)
-    maintenance_events = [
-        timestamp
-        for line in raw_lines
-        if "maintenance" in _log_message(line).casefold()
-        and ("503" in line or "service_unavailable" in line.casefold())
-        if (timestamp := _log_timestamp(line)) is not None
-    ]
     runtimes: list[dict[str, object]] = []
     for index, (message, line_number) in enumerate(messages):
         finished_with_runtime = re.match(r"^Finished\s+(?!:)(.+?)\s+Run Time:\s*(.+)$", message, re.I)
@@ -617,9 +607,9 @@ def extract_section_run_times(content: str) -> list[dict[str, object]]:
             continue
         reported_duration = duration
         finished_at = _log_timestamp(raw_lines[line_number - 1])
-        if finished_at and windows and maintenance_events:
+        if finished_at and windows:
             started_at = finished_at - timedelta(seconds=seconds)
-            seconds -= _maintenance_overlap_seconds(started_at, finished_at, windows, maintenance_events)
+            seconds -= _maintenance_overlap_seconds(started_at, finished_at, windows)
             if seconds <= 0:
                 continue
             if seconds != _runtime_seconds(reported_duration or ""):
