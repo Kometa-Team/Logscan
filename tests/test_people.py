@@ -1165,11 +1165,15 @@ class RuntimeMetadataTests(unittest.TestCase):
 
     def test_summary_cards_show_plex_server_details(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        template = Path("logscan_web/templates/index.html").read_text(encoding="utf-8")
 
+        self.assertIn('id="summary-grid"', template)
+        self.assertIn('aria-label="Scan summary"', template)
         self.assertIn("const plexServers = overview.plex_servers || []", script)
         self.assertIn('server.version ? `Plex ${server.version}` : null', script)
         self.assertIn('server.platform', script)
         self.assertIn('plexServers.length === 1 ? "Plex server" : "Plex servers"', script)
+
     def test_overview_validation_status_tracks_live_schema_results(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 
