@@ -363,6 +363,11 @@ h2 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.5rem); letter-spacing: -.04em;
   .overview-validation-issue dt { color: #c4b5fd; }
   .overview-validation-issue dd { font-weight: 650; }
 .overview-subheading { margin: 24px 0 12px; font-size: 1rem; }
+.plex-section-heading { padding: 12px 14px; display: flex; align-items: center; gap: 12px; border: 1px solid rgba(251,191,36,.28); border-radius: 8px; background: rgba(251,191,36,.06); }
+.plex-section-logo { width: 38px; height: 38px; flex: 0 0 38px; object-fit: contain; }
+.plex-section-heading h4 { margin: 0; font-size: 1rem; }
+.plex-section-heading p { margin: 3px 0 0; color: var(--muted); font-size: .78rem; }
+.section-content { scroll-margin-top: 24px; }
 .runtime-summary { margin-top: 24px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .runtime-summary > summary { padding: 15px 16px; display: flex; align-items: center; gap: 12px; list-style: none; cursor: pointer; font-weight: 600; }
 .runtime-summary > summary::-webkit-details-marker { display: none; }

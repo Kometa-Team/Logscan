@@ -252,9 +252,19 @@ function showOverview(group, overview) {
   }
   const plexConfigurations = overview.plex_configurations || [];
   if (plexConfigurations.length) {
-    const plexHeading = document.createElement("h4");
-    plexHeading.className = "overview-subheading";
-    plexHeading.textContent = "Plex Configuration";
+    const plexHeading = document.createElement("div");
+    plexHeading.className = "overview-subheading plex-section-heading";
+    const plexLogo = document.createElement("img");
+    plexLogo.className = "plex-section-logo";
+    plexLogo.src = "/static/plex.png";
+    plexLogo.alt = "";
+    const plexHeadingText = document.createElement("div");
+    const plexTitle = document.createElement("h4");
+    plexTitle.textContent = "Plex Configuration";
+    const plexDescription = document.createElement("p");
+    plexDescription.textContent = "Library connection details reported by this Plex server.";
+    plexHeadingText.append(plexTitle, plexDescription);
+    plexHeading.append(plexLogo, plexHeadingText);
     sectionContent.append(plexHeading);
     const plexList = document.createElement("div");
     plexList.className = "plex-configuration-list";
@@ -1080,7 +1090,10 @@ function findingTile(label, severity, count) {
   const name = document.createElement("span");
   name.textContent = label;
   tile.append(value, name);
-  tile.addEventListener("click", () => document.querySelector(`.nav-button[data-group="${severity}"]`)?.click());
+  tile.addEventListener("click", () => {
+    document.querySelector(`.nav-button[data-group="${severity}"]`)?.click();
+    requestAnimationFrame(() => sectionContent.scrollIntoView({ behavior: "smooth", block: "start" }));
+  });
   return tile;
 }
 
@@ -1130,7 +1143,7 @@ function renderSummary(metadata, overview) {
     ["Total memory", overview.total_memory],
     ["Available memory", overview.available_memory],
     ["Run command", overview.run_command],
-  ], true));
+  ]));
 
   const configurations = overview.plex_configurations || [];
   const plexLines = configurations.flatMap((section) => section.lines || []);
