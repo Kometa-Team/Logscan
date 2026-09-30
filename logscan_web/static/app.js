@@ -1035,7 +1035,10 @@ function summaryCard(label, value, small = false) {
   name.textContent = label;
   const content = document.createElement("div");
   content.className = `summary-value${small ? " small" : ""}`;
-  content.textContent = value;
+  `${value}`.split("\n").forEach((line, index) => {
+    if (index) content.append(document.createElement("br"));
+    content.append(line);
+  });
   card.append(name, content);
   return card;
 }
@@ -1201,8 +1204,15 @@ function renderResults(data, runSchemaValidation = true) {
   }
   const groups = [...categories].sort((left, right) => left.priority - right.priority);
   document.querySelector("#results-title").textContent = data.filename;
+  const plexServers = overview.plex_servers || [];
+  const plexServerSummary = plexServers.map((server) => [
+    server.name,
+    server.version ? `Plex ${server.version}` : null,
+    server.platform,
+  ].filter(Boolean).join("\n")).join("\n\n");
   if (summaryGrid) summaryGrid.replaceChildren(
     summaryCard("Log details", `${metadata.line_count.toLocaleString()} lines · ${formatBytes(metadata.size_bytes)}${metadata.kometa_version ? `\nKometa ${metadata.kometa_version}` : ""}`, true),
+    ...(plexServerSummary ? [summaryCard(plexServers.length === 1 ? "Plex server" : "Plex servers", plexServerSummary, true)] : []),
     summaryCard("Critical", metadata.counts.critical),
     summaryCard("Warnings", metadata.counts.warning),
     summaryCard("Schema", metadata.counts.schema),

@@ -1103,6 +1103,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('metadata.quickstart_version || "version unknown"', script)
         self.assertIn('"Direct Kometa run"', script)
 
+    def test_summary_cards_show_plex_server_details(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn("const plexServers = overview.plex_servers || []", script)
+        self.assertIn('server.version ? `Plex ${server.version}` : null', script)
+        self.assertIn('server.platform', script)
+        self.assertIn('plexServers.length === 1 ? "Plex server" : "Plex servers"', script)
     def test_overview_validation_status_tracks_live_schema_results(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 
@@ -1344,6 +1351,11 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(result.overview["plex_analytics"]["platforms"], ["Linux"])
         self.assertEqual(result.overview["plex_analytics"]["library_types"], ["Movie"])
         self.assertEqual(result.overview["plex_analytics"]["agents"], ["tv.plex.agents.movie"])
+        self.assertEqual(result.overview["plex_servers"], [{
+            "name": "NZWHS01",
+            "version": "1.31.2.6810-a607d384f",
+            "platform": "Linux version 6.1.34-Unraid",
+        }])
 
     def test_plex_configuration_title_falls_back_for_partial_sections(self):
         content = "\n".join([

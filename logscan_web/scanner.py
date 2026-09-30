@@ -456,6 +456,30 @@ def extract_plex_configurations(content: str) -> list[dict[str, object]]:
     return sections
 
 
+def plex_server_summaries(sections: list[dict[str, object]]) -> list[dict[str, str]]:
+    """Return unique Plex server details for at-a-glance scan cards."""
+    servers: list[dict[str, str]] = []
+    for section in sections:
+        lines = [str(line) for line in section.get("lines", [])]
+        server_match = next(
+            (match for line in lines if (match := re.fullmatch(r"Connected to server\s+(.+?)\s+version\s+(.+)", line, re.I))),
+            None,
+        )
+        if not server_match:
+            continue
+        platform_match = next(
+            (match for line in lines if (match := re.fullmatch(r"Running on\s+(.+)", line, re.I))),
+            None,
+        )
+        server = {
+            "name": server_match.group(1).strip(),
+            "version": server_match.group(2).strip(),
+            "platform": platform_match.group(1).strip() if platform_match else "Unknown",
+        }
+        if server not in servers:
+            servers.append(server)
+    return servers
+
 def plex_analytics(sections: list[dict[str, object]]) -> dict[str, list[str]]:
     """Return bounded Plex categories that are safe to persist as aggregates."""
     values = {
@@ -643,6 +667,7 @@ def _log_overview(
         "yaml_issue_count": len(yaml_findings),
         "section_run_times": extract_section_run_times(content),
         "plex_configurations": plex_configurations,
+        "plex_servers": plex_server_summaries(plex_configurations),
         "plex_analytics": plex_analytics(plex_configurations),
     }
 
