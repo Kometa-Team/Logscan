@@ -638,6 +638,8 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .log-overview-details-body { padding: 16px; }
 .log-overview-details-body .runtime-summary { margin-top: 16px; }
 .log-overview-details-body .result-layout { margin-top: 20px; }
+.log-overview-details .result-layout { grid-template-columns: minmax(0, 1fr); }
+.log-overview-details .section-nav { display: none; }
 .overview-finding-switcher { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 .overview-finding-switch { min-width: 72px; min-height: 48px; padding: 7px 10px; display: grid; grid-template-columns: auto auto; align-items: center; justify-content: center; gap: 7px; border: 1px solid currentColor; border-radius: 6px; cursor: pointer; }
 .overview-finding-switch strong { font-size: .9rem; }
