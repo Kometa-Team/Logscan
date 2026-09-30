@@ -111,10 +111,43 @@ function showOverview(group, overview) {
   const sectionSelect = document.querySelector("#section-select");
   if (sectionSelect) { sectionSelect.value = group.key; setSectionSelectSeverity(sectionSelect, group.key); }
   sectionContent.replaceChildren();
-  const header = document.createElement("div");
-  header.className = "section-header";
-  header.innerHTML = `<h3>${group.label}</h3><p>${group.description}</p>`;
-  sectionContent.append(header);
+  document.querySelector(".log-overview-details")?.remove();
+  const overviewPanel = document.createElement("details");
+  overviewPanel.className = "log-overview-details";
+  const overviewHeading = document.createElement("summary");
+  const overviewLogo = document.createElement("img");
+  overviewLogo.src = "/static/logscan.png";
+  overviewLogo.alt = "";
+  const overviewIdentity = document.createElement("span");
+  const overviewTitle = document.createElement("strong");
+  overviewTitle.textContent = group.label;
+  const overviewDescription = document.createElement("span");
+  overviewDescription.textContent = group.description;
+  overviewIdentity.append(overviewTitle, overviewDescription);
+  const overviewCounts = document.createElement("span");
+  overviewCounts.className = "overview-counts";
+  [
+    ["critical", "Critical"],
+    ["error", "Errors"],
+    ["warning", "Warnings"],
+    ["schema", "Schema"],
+    ["advice", "Advice"],
+  ].forEach(([severity, label]) => {
+    const count = currentRecommendations.filter((item) => item.severity === severity).length;
+    const badge = document.createElement("span");
+    badge.className = `overview-count overview-count-${severity}`;
+    badge.textContent = count.toLocaleString();
+    badge.title = `${label}: ${count.toLocaleString()}`;
+    badge.setAttribute("aria-label", badge.title);
+    overviewCounts.append(badge);
+  });
+  const overviewChevron = document.createElement("span");
+  overviewChevron.className = "chevron";
+  overviewChevron.textContent = ">";
+  overviewHeading.append(overviewLogo, overviewIdentity, overviewCounts, overviewChevron);
+  const overviewBody = document.createElement("div");
+  overviewBody.className = "log-overview-details-body";
+  overviewPanel.append(overviewHeading, overviewBody);
   const details = [
     ["Log name", overview.log_name],
     ...(overview.uploaded_by ? [["Log Info", { uploader: overview.uploaded_by, id: overview.uploaded_by_id, messageUrl: overview.message_url }]] : []),
@@ -185,7 +218,7 @@ function showOverview(group, overview) {
     item.append(term, definition);
     grid.append(item);
   });
-  sectionContent.append(grid);
+  overviewBody.append(grid);
   const sectionRunTimes = overview.section_run_times || [];
   if (sectionRunTimes.length) {
     const runtimeSection = document.createElement("details");
@@ -248,8 +281,42 @@ function showOverview(group, overview) {
     renderRunTimes();
     runtimeBody.append(runtimeHeader, runtimeNote, runtimeList);
     runtimeSection.append(runtimeSummary, runtimeBody);
-    sectionContent.append(runtimeSection);
+    overviewBody.append(runtimeSection);
   }
+  const findingSwitcher = document.createElement("div");
+  findingSwitcher.className = "overview-finding-switcher";
+  findingSwitcher.setAttribute("aria-label", "Switch finding category");
+  [
+    ["critical", "Critical"],
+    ["error", "Errors"],
+    ["warning", "Warnings"],
+    ["schema", "Schema"],
+    ["advice", "Advice"],
+  ].forEach(([severity, label]) => {
+    const count = currentRecommendations.filter((item) => item.severity === severity).length;
+    if (!count) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `overview-finding-switch overview-count-${severity}`;
+    button.dataset.severity = severity;
+    button.title = `${label}: ${count.toLocaleString()}`;
+    button.setAttribute("aria-label", button.title);
+    const value = document.createElement("strong");
+    value.textContent = count.toLocaleString();
+    const name = document.createElement("span");
+    name.textContent = label;
+    button.append(value, name);
+    button.addEventListener("click", () => {
+      document.querySelector(`.nav-button[data-group="${severity}"]`)?.click();
+      findingSwitcher.querySelectorAll("button").forEach((candidate) => candidate.classList.toggle("active", candidate === button));
+      requestAnimationFrame(() => sectionContent.scrollIntoView({ behavior: "smooth", block: "start" }));
+    });
+    findingSwitcher.append(button);
+  });
+  if (findingSwitcher.childElementCount) overviewBody.append(findingSwitcher);  const resultLayout = sectionContent.closest(".result-layout");
+  if (resultLayout) overviewBody.append(resultLayout);
+  document.querySelector(".environment-panel")?.append(overviewPanel);
+  overviewPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function selectedFiles(files) {
@@ -907,6 +974,9 @@ function showGroup(group, recommendations) {
   document.querySelectorAll(".nav-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.group === group.key);
   });
+  document.querySelectorAll(".overview-finding-switch").forEach((button) => {
+    button.classList.toggle("active", button.dataset.severity === group.key);
+  });
   const sectionSelect = document.querySelector("#section-select");
   if (sectionSelect) { sectionSelect.value = group.key; setSectionSelectSeverity(sectionSelect, group.key); }
   sectionContent.replaceChildren();
@@ -1056,6 +1126,11 @@ function plexConfigurationList(configurations) {
     const summary = document.createElement("summary");
     const title = document.createElement("span");
     title.textContent = configuration.title;
+    if (configuration.content_summary) {
+      const count = document.createElement("small");
+      count.textContent = configuration.content_summary;
+      title.append(count);
+    }
     const chevron = document.createElement("span");
     chevron.className = "chevron";
     chevron.textContent = ">";
@@ -1084,6 +1159,8 @@ function findingTile(label, severity, count) {
   name.textContent = label;
   tile.append(value, name);
   tile.addEventListener("click", () => {
+    const overviewPanel = document.querySelector(".log-overview-details");
+    if (overviewPanel) overviewPanel.open = true;
     document.querySelector(`.nav-button[data-group="${severity}"]`)?.click();
     requestAnimationFrame(() => sectionContent.scrollIntoView({ behavior: "smooth", block: "start" }));
   });
@@ -1103,9 +1180,7 @@ function renderSummary(metadata, overview) {
     summaryCard("Log size", formatBytes(metadata.size_bytes || 0)),
     summaryCard("Run time", overview.run_time || metadata.run_time || "Unknown", true),
     summaryCard("Findings", Object.values(metadata.counts).reduce((total, count) => total + Number(count || 0), 0).toLocaleString()),
-  );
-
-  const findings = document.createElement("section");
+  );  const findings = document.createElement("section");
   findings.className = "finding-grid";
   findings.setAttribute("aria-label", "Findings");
   const findingsHeading = document.createElement("h3");
@@ -1150,7 +1225,12 @@ function renderSummary(metadata, overview) {
       ["Plex version", server.version],
       ["Host platform", server.platform],
     ]);
-    rows.push(["Libraries", configurations.length], ["Maintenance window", maintenance]);
+    const totals = overview.quickstart_library_totals || {};
+    rows.push(["Libraries", totals.libraries || configurations.length],
+      ["Movies", totals.movies ? Number(totals.movies).toLocaleString() : null],
+      ["Shows", totals.shows ? Number(totals.shows).toLocaleString() : null],
+      ["Episodes", totals.episodes ? Number(totals.episodes).toLocaleString() : null],
+      ["Maintenance window", maintenance]);
     environment.append(environmentSection("plex", "Plex", summary, rows, false, plexConfigurationList(configurations)));
   }
 
@@ -1177,6 +1257,10 @@ function renderSummary(metadata, overview) {
       ["Configuration", extra.config],
       ["Launcher", extra.launcher],
       ["Launch flags", quickstart.flags || []],
+      ["Configured libraries", quickstart.library_totals?.libraries],
+      ["Movie items", quickstart.library_totals?.movies],
+      ["Shows", quickstart.library_totals?.shows],
+      ["Episodes", quickstart.library_totals?.episodes],
     ]));
   }
   summaryGrid.replaceChildren(metricGrid, findings, environment);
@@ -1345,23 +1429,25 @@ function renderResults(data, runSchemaValidation = true) {
   renderSummary(metadata, overview);
 
   sectionNav.replaceChildren();
+  sectionNav.hidden = false;
   const sectionSelect = document.createElement("select");
   sectionSelect.id = "section-select";
   sectionSelect.className = "section-select";
   sectionSelect.setAttribute("aria-label", "View a log section");
   groups.forEach((group) => {
+    if (group.key === "overview") return;
     const recommendationCount = group.key === "schema"
       ? schemaIssueRecommendations(recommendations).length
       : recommendations.filter((item) => item.severity === group.key).length;
-    if (group.key !== "overview" && recommendationCount === 0) return;
+    if (recommendationCount === 0) return;
     const option = document.createElement("option");
     option.value = group.key;
     option.dataset.severity = group.key;
-    option.textContent = group.key === "overview" ? group.label : `${group.label} (${recommendationCount})`;
+    option.textContent = `${group.label} (${recommendationCount})`;
     sectionSelect.append(option);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "nav-button";
+    button.className = `nav-button nav-${group.key}`;
     button.dataset.group = group.key;
     const label = document.createElement("span");
     label.textContent = group.label;
@@ -1383,7 +1469,9 @@ function renderResults(data, runSchemaValidation = true) {
   });
   sectionNav.prepend(sectionSelect);
   showOverview(groups[0], overview);
+  if (!sectionNav.querySelector(".nav-button")) sectionNav.hidden = true;
   results.hidden = false;
+  document.body.classList.add("has-scan-results");
   currentScanId = data.id || currentScanId;
   document.querySelector("#delete-scan").hidden = !deleteToken;
   applySupportDestination(data, groups, recommendations);

@@ -419,7 +419,35 @@ def _plex_configuration_section(lines: list[str], number: int) -> dict[str, obje
         label = f"{library_type}: {name}"
     else:
         label = library_type or name or f"Section {number}"
-    return {"title": f"Plex Configuration - {label}", "lines": lines}
+    return {
+        "title": f"Plex Configuration - {label}",
+        "library_name": name,
+        "library_type": library_type,
+        "lines": lines,
+    }
+
+
+def _library_key(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def enrich_plex_configurations(sections: list[dict[str, object]], quickstart: dict | None) -> list[dict[str, object]]:
+    """Add safe Quickstart item counts to matching Plex library sections."""
+    libraries = {_library_key(item.get("name")): item for item in (quickstart or {}).get("libraries", []) if isinstance(item, dict) and item.get("name")}
+    for section in sections:
+        library = libraries.get(_library_key(section.get("library_name")))
+        if not library:
+            continue
+        counts = {key: int(library.get(key) or 0) for key in ("movies", "shows", "episodes") if int(library.get(key) or 0) > 0}
+        if not counts:
+            continue
+        section["content_counts"] = counts
+        summary = " / ".join(f"{count:,} {key}" for key, count in counts.items())
+        section["content_summary"] = summary
+        lines = section.setdefault("lines", [])
+        if not any(str(line).casefold().startswith("content count:") for line in lines):
+            lines.append(f"Content Count: {summary}")
+    return sections
 
 
 def extract_plex_configurations(content: str) -> list[dict[str, object]]:
@@ -625,6 +653,7 @@ def _log_overview(
     kometa_version: str | None,
     run_time: str | None,
     recommendations: list[dict],
+    quickstart: dict | None = None,
 ) -> dict:
     yaml_findings = [item for item in recommendations if item["severity"] == "schema"]
     yaml_status = (
@@ -637,7 +666,9 @@ def _log_overview(
         r"Start Time:\s*(?P<start>.*?)\s+Finished:\s*(?P<end>.*?)\s+Run Time:\s*(?P<runtime>[^|\r\n]+)",
         content,
     )
-    plex_configurations = extract_plex_configurations(content)
+    plex_configurations = enrich_plex_configurations(
+        extract_plex_configurations(content), quickstart
+    )
     return {
         "log_name": filename,
         "finding_count": len(recommendations),
@@ -659,6 +690,7 @@ def _log_overview(
         "plex_configurations": plex_configurations,
         "plex_servers": plex_server_summaries(plex_configurations),
         "plex_analytics": plex_analytics(plex_configurations),
+        "quickstart_library_totals": (quickstart or {}).get("library_totals", {}),
     }
 
 
@@ -671,7 +703,10 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
 
     sample_terms = (
         b"version:", b"branch:",
-        b"[quickstart]", b"finished:", b"finished ", b"run time:", b"start time:", b"started:",
+        b"[quickstart]", b"config created by quickstart", b"quickstart:",
+        b"kometa runtime mode:", b"libraries configured with quickstart:",
+        b"information on library:", b"content count:",
+        b"finished:", b"finished ", b"run time:", b"start time:", b"started:",
         b"platform:", b"memory:", b"available memory:", b"run command:",
         b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
         b"plex configuration", b"using asset directory", b"scheduled maintenance", b"service_unavailable",
@@ -791,51 +826,66 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         filename=filename,
         recommendations=normalized,
         metadata=metadata,
-        overview=_log_overview(filename, sample_content, kometa_version, detected_run_time, normalized),
+        overview=_log_overview(
+            filename, sample_content, kometa_version, detected_run_time, normalized,
+            quickstart_metadata["quickstart"],
+        ),
         categories=category_configuration(),
         missing_people=extract_missing_people("\n".join(missing_lines)),
     )
 
 def extract_quickstart_metadata(content: str) -> dict:
     """Extract structured, non-sensitive Quickstart launcher metadata."""
-    quickstart = {
-        "detected": False,
-        "version": None,
-        "branch": "unknown",
-        "mode": None,
-        "flags": [],
-        "metadata": {},
-    }
+    quickstart = {"detected": False, "version": None, "branch": "unknown", "mode": None, "flags": [], "metadata": {}}
     lines = []
     marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", content, re.IGNORECASE)
     if marker:
         lines.append(marker.group(0))
-
-    block = re.search(
-        r"^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+(?:Start|Begin)[ \t]*\r?$"
-        r"(?P<body>.*?)"
-        r"^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+End[ \t]*\r?$",
-        content,
-        re.IGNORECASE | re.MULTILINE | re.DOTALL,
-    )
+    block = re.search(r"^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+(?:Start|Begin)[ \t]*\r?$(?P<body>.*?)^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+End[ \t]*\r?$", content, re.IGNORECASE | re.MULTILINE | re.DOTALL)
     if block:
         lines.extend(block.group("body").splitlines())
-
-    allowed_metadata = {"platform", "workspace", "config", "runtime", "launcher"}
+    messages = [_log_message(line).lstrip("# ").strip() for line in content.splitlines()]
+    header_detected = any("config created by quickstart" in line.casefold() for line in messages)
+    if header_detected:
+        quickstart["libraries"] = []
+        quickstart["library_totals"] = {}
+        summary = next((match for line in messages if (match := re.fullmatch(r"Quickstart:\s*([^|]+)\|\s*Branch:\s*([^|]+)\|\s*Environment:\s*(.+)", line, re.I))), None)
+        if summary:
+            lines.extend([f"version={summary.group(1).strip()}", f"branch={summary.group(2).strip()}", f"platform={summary.group(3).strip()}"])
+        mode = next((match.group(1).strip() for line in messages if (match := re.fullmatch(r"Kometa Runtime Mode:\s*(.+)", line, re.I))), None)
+        if mode:
+            lines.append(f"runtime_mode={mode}")
+        current = None
+        for message in messages:
+            library = re.fullmatch(r"Information on library:\s*\[([^]]+)]", message, re.I)
+            if library:
+                current = {"name": library.group(1).strip()}
+                quickstart["libraries"].append(current)
+                continue
+            if current is None:
+                continue
+            field = re.fullmatch(r"(Type|Agent|Scanner|Ratings Source):\s*(.+)", message, re.I)
+            if field:
+                current[field.group(1).casefold().replace(" ", "_")] = field.group(2).strip()
+                continue
+            count_line = re.fullmatch(r"Content Count:\s*(.+)", message, re.I)
+            if count_line:
+                for count, kind in re.findall(r"([\d,]+)\s+(movies?|shows?|episodes?)", count_line.group(1), re.I):
+                    key = {"movie": "movies", "show": "shows", "episode": "episodes"}[kind.rstrip("s").casefold()]
+                    current[key] = int(count.replace(",", ""))
+        totals = {"libraries": len(quickstart["libraries"]), "movies": 0, "shows": 0, "episodes": 0}
+        for library in quickstart["libraries"]:
+            for key in ("movies", "shows", "episodes"):
+                totals[key] += int(library.get(key) or 0)
+        quickstart["library_totals"] = totals
     values = {}
     for line in lines:
-        cleaned = re.sub(
-            r"^.*?\[Quickstart\]\s*", "", line, flags=re.IGNORECASE
-        ).strip(" |")
-        for key, quoted, bare in re.findall(
-            r'\b([\w-]+)=(?:"([^"]*)"|([^\s|]+))', cleaned
-        ):
+        cleaned = re.sub(r"^.*?\[Quickstart\]\s*", "", line, flags=re.IGNORECASE).strip(" |")
+        for key, quoted, bare in re.findall(r'\b([\w-]+)=(?:"([^"]*)"|([^\s|]+))', cleaned):
             values[key.casefold().replace("-", "_")] = quoted or bare
         pair = re.match(r"([\w -]+):\s*(.*?)\s*$", cleaned)
         if pair and pair.group(2):
-            key = pair.group(1).strip().casefold().replace(" ", "_").replace("-", "_")
-            values[key] = pair.group(2).strip()
-
+            values[pair.group(1).strip().casefold().replace(" ", "_").replace("-", "_")] = pair.group(2).strip()
     version = values.get("quickstart") or values.get("version")
     branch = (values.get("branch") or "unknown").casefold()
     if branch not in {"master", "develop"}:
@@ -843,30 +893,10 @@ def extract_quickstart_metadata(content: str) -> dict:
     flags_value = values.get("flags") or values.get("launch_flags") or ""
     flags = [item.strip() for item in re.split(r"[,;]", flags_value) if item.strip()]
     mode = values.get("mode") or values.get("runtime_mode")
-    metadata = {
-        key: value
-        for key, value in values.items()
-        if key in allowed_metadata
-        and value
-        and value.casefold() not in {"private", "redacted", "(redacted)"}
-    }
-    quickstart.update(
-        {
-            "detected": bool(marker or block),
-            "version": version,
-            "branch": branch,
-            "mode": mode,
-            "flags": flags,
-            "metadata": metadata,
-        }
-    )
-    return {
-        "quickstart_run": quickstart["detected"],
-        "quickstart_version": version,
-        "quickstart_branch": branch,
-        "quickstart": quickstart,
-    }
-
+    allowed_metadata = {"platform", "workspace", "config", "runtime", "launcher"}
+    metadata = {key: value for key, value in values.items() if key in allowed_metadata and value and value.casefold() not in {"private", "redacted", "(redacted)"}}
+    quickstart.update({"detected": bool(marker or block or header_detected), "version": version, "branch": branch, "mode": mode, "flags": flags, "metadata": metadata})
+    return {"quickstart_run": quickstart["detected"], "quickstart_version": version, "quickstart_branch": branch, "quickstart": quickstart}
 def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     filename, content_bytes = prepare_scan_input(filename, content_bytes)
     if not content_bytes:
@@ -921,7 +951,10 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         filename=filename,
         recommendations=normalized,
         metadata=metadata,
-        overview=_log_overview(filename, content, kometa_version, detected_run_time, normalized),
+        overview=_log_overview(
+            filename, content, kometa_version, detected_run_time, normalized,
+            quickstart_metadata["quickstart"],
+        ),
         categories=category_configuration(),
         missing_people=extract_missing_people(content),
     )
