@@ -730,19 +730,80 @@ async function showConfigInViewer(targetStart = 0, targetEnd = targetStart) {
   if (!logViewer.open) logViewer.showModal();
 }
 
+function usefulSectionTitle(value) {
+  const title = String(value || "").replace(/\s+/g, " ").trim();
+  if (!title || /^[-–—=:|\s]+$/.test(title) || /^line\s+[\d,]+$/i.test(title)) return null;
+  return title;
+}
+
+function libraryFromSectionTitle(title) {
+  const direct = /^(?:Plex\s+)?Library\s*:\s*(.+)$/i.exec(title);
+  if (direct) return direct[1].trim();
+  const library = /^(?:(?:Running|Starting|Finished)\s+)?(.+?)\s+Library(?:\s+(?:Run|Operations))?$/i.exec(title);
+  return library ? library[1].trim() : null;
+}
+
+function sectionPresentation(title, library) {
+  const collection = /\bLoading\s+Collection\s+Files?\b\s*(?:[:\-–—]\s*(.+))?/i.exec(title);
+  if (collection) return {
+    group: `${library || "General"} · Collection files`,
+    label: collection[1]?.trim() || "Load collection files",
+  };
+  if (/\b(?:MediUX|metadata\s+files?|metadata\s+operations?|posters?)\b/i.test(title)) return {
+    group: `${library || "General"} · Metadata operations`,
+    label: title.replace(/^Loading\s+/i, "").trim(),
+  };
+  return {
+    group: library ? `${library} · Other sections` : "General",
+    label: title,
+  };
+}
+
+function groupedLogSections(sections) {
+  const groups = new Map();
+  let currentLibrary = null;
+  sections.forEach((section) => {
+    const title = usefulSectionTitle(section.title);
+    if (!title || !Number(section.line)) return;
+    const detectedLibrary = libraryFromSectionTitle(title);
+    if (detectedLibrary) currentLibrary = detectedLibrary;
+    const presentation = sectionPresentation(title, currentLibrary);
+    if (!groups.has(presentation.group)) groups.set(presentation.group, []);
+    groups.get(presentation.group).push({ ...section, label: presentation.label });
+  });
+  groups.forEach((items) => {
+    const totals = new Map();
+    items.forEach((item) => totals.set(item.label, (totals.get(item.label) || 0) + 1));
+    const seen = new Map();
+    items.forEach((item) => {
+      if (totals.get(item.label) < 2) return;
+      const occurrence = (seen.get(item.label) || 0) + 1;
+      seen.set(item.label, occurrence);
+      item.label = `${item.label} ${occurrence}`;
+    });
+  });
+  return [...groups.entries()].map(([label, items]) => ({ label, items }));
+}
 function populateSectionJump() {
   sectionJump.replaceChildren();
+  const groupedSections = groupedLogSections(currentLogSections);
+  const sectionCount = groupedSections.reduce((total, group) => total + group.items.length, 0);
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = currentLogSections.length ? "Select a section" : "No sections found";
+  placeholder.textContent = sectionCount ? "Select a section" : "No sections found";
   sectionJump.append(placeholder);
-  currentLogSections.forEach((section) => {
-    const option = document.createElement("option");
-    option.value = section.line;
-    option.textContent = `${section.title} — line ${section.line.toLocaleString()}`;
-    sectionJump.append(option);
+  groupedSections.forEach((group) => {
+    const options = document.createElement("optgroup");
+    options.label = `${group.label} (${group.items.length.toLocaleString()})`;
+    group.items.forEach((section) => {
+      const option = document.createElement("option");
+      option.value = section.line;
+      option.textContent = `${section.label} — line ${section.line.toLocaleString()}`;
+      options.append(option);
+    });
+    sectionJump.append(options);
   });
-  sectionJump.disabled = currentLogSections.length === 0;
+  sectionJump.disabled = sectionCount === 0;
 }
 
 function populateSchemaIssueJump() {
