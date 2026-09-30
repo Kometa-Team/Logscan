@@ -284,7 +284,7 @@ a.source-badge:hover { filter: brightness(1.2); }
 }
 .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent-bright); background: rgba(109, 113, 240, .06); }
 .drop-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.upload-icon { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 14px; background: #171c35; }
+.upload-icon { position: relative; display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 14px; background: #171c35; }
 .upload-icon svg { width: 24px; fill: none; stroke: var(--accent-bright); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .drop-title { font-size: 1.05rem; font-weight: 650; }
 .drop-copy { margin-top: 8px; color: var(--muted); font-size: .9rem; }
@@ -426,7 +426,15 @@ details[open] .chevron { transform: rotate(90deg); }
 .schema-review p { margin: 0; color: var(--muted); font-size: .85rem; }
 .schema-review .primary-button { grid-column: 2; grid-row: 1 / span 2; justify-content: center; }
 #form-status.error { color: #fda4af !important; }
+.loading { cursor: progress; }
 .loading .upload-icon { animation: pulse 1.3s ease-in-out infinite; }
+.loading .upload-icon svg { opacity: 0; }
+.loading .upload-icon::after { content: ""; position: absolute; width: 24px; height: 24px; box-sizing: border-box; border: 3px solid rgba(174,180,255,.24); border-top-color: var(--accent-bright); border-radius: 50%; animation: upload-spin .75s linear infinite; }
+@keyframes upload-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .loading .upload-icon { animation: none; }
+  .loading .upload-icon::after { animation-duration: 1.5s; }
+}
 @keyframes pulse { 50% { box-shadow: 0 0 0 9px rgba(114,119,248,.1); } }
 
 .log-viewer {
