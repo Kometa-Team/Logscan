@@ -1402,6 +1402,37 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("https://www.kometa.wiki/en/latest/config/anidb", connection["solution"])
         self.assertEqual(connection["evidence_lines"], [3])
 
+    def test_removed_trakt_source_has_specific_recommendation(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.5.1-build6 (Branch: master) |",
+            "[meta.py:172] [INFO] | File Loaded From: /config/collections-config/1-Movies_Tops.yml |",
+            "[meta.py:173] [ERROR] | Trakt is no longer supported, please see the Announcements channel in the Kometa Discord server for further information |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "trakt_unsupported")
+
+        self.assertEqual(finding["severity"], "error")
+        self.assertEqual(finding["evidence_lines"], [3])
+        self.assertIn("no longer supports", finding["description"])
+        self.assertIn("file identified immediately above", finding["solution"])
+        self.assertIn("Announcements", finding["solution"])
+
+    def test_missing_config_subattribute_explains_logged_default(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.5.1-build6 (Branch: master) |",
+            "[config.py:641] [WARNING] | Config Warning: settings sub-attribute verify_ssl not found using True as default |",
+            "[config.py:935] [INFO] |========================================================================================",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "config_subattribute_default")
+
+        self.assertEqual(finding["severity"], "warning")
+        self.assertEqual(finding["evidence_lines"], [2])
+        self.assertIn("default value shown", finding["description"])
+        self.assertIn("No change is required", finding["solution"])
+
     def test_runtime_platform_is_reduced_to_a_safe_family(self):
         self.assertEqual(normalized_platform("Linux-6.1.34-Unraid-x86_64"), "Linux")
         self.assertEqual(normalized_platform("Linux-5.15.0-microsoft-standard-WSL2"), "WSL")

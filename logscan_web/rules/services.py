@@ -21,6 +21,7 @@ RULES = (
     _rule("tautulli_key", "Tautulli Error: Invalid apikey"),
     _rule("tautulli_url", "Tautulli Error: Invalid URL"),
     _rule("trakt_connection", "Trakt Connection Failed"),
+    _rule("trakt_unsupported", "Trakt is no longer supported"),
     _rule("mal_connection", "My Anime List Connection Failed"),
     _rule("timeout", "timed out."),
 )

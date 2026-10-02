@@ -27,6 +27,7 @@ RULES = (
     _rule("legacy_pmm", "- pmm:"),
     _rule("mdblist_attribute", "mdblist_list attribute not allowed"),
     _rule("metadata_attribute", "metadata attribute is required"),
+    _same_line_rule("config_subattribute_default", "Config Warning:", "sub-attribute", "not found using"),
     _rule("legacy_missing", "missing_path", "save_missing"),
     _rule("legacy_overlay_level", "overlay_level:"),
     _rule("yaml", "ruamel.yaml."),
