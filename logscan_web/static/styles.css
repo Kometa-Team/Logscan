@@ -766,7 +766,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .severity-chip.schema { color: #c4b5fd; background: rgba(167,139,250,.12); }
 .severity-chip.advice { color: #bfdbfe; background: rgba(96,165,250,.12); }
 .support-none { color: var(--muted); }
-.support-actions { display: flex; gap: 6px; }
+.support-actions { display: flex; align-items: center; gap: 10px; }
 .support-actions a { padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; color: #c7d2fe; text-decoration: none; }
 .support-actions a:hover { border-color: var(--accent-bright); color: white; }
 .support-empty { height: 160px; color: var(--muted) !important; text-align: center; vertical-align: middle !important; }
@@ -799,7 +799,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-discord-login { display: inline-flex; min-height: 46px; align-items: center; text-decoration: none; }
 .support-identity { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: .78rem; }
 .support-identity img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
-.support-actions-heading, .support-actions { position: sticky !important; z-index: 3; left: 0; width: 104px; min-width: 104px; background: #0d1122; }
+.support-actions-heading, .support-actions { position: sticky !important; z-index: 3; left: 0; width: 132px; min-width: 132px; background: #0d1122; }
 .support-actions-heading { z-index: 4 !important; background: #12162b !important; }
 .support-navigate { min-width: 82px; padding: 6px 9px; border: 1px solid var(--accent-bright); border-radius: 5px; background: transparent; color: #c7d2fe; cursor: pointer; text-align: center; }
 .support-navigate:hover, .support-navigate:focus-visible { border-color: #a5b4fc; color: white; }
@@ -872,4 +872,24 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .support-upload-drop { min-height: 230px; }
   .support-upload-actions { flex-direction: column-reverse; }
   .support-upload-actions button { width: 100%; }
+}
+.support-select-all, .support-row-select { display: grid; width: 28px; height: 32px; flex: 0 0 auto; place-items: center; cursor: pointer; }
+.support-select-all { margin-left: 8px; }
+.support-select-all input, .support-row-select input { width: 17px; height: 17px; margin: 0; accent-color: var(--accent-bright); cursor: pointer; }
+.support-bulk-bar { min-height: 52px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid rgba(251,113,133,.35); border-bottom: 0; background: rgba(244,63,94,.07); color: #fecdd3; }
+.support-bulk-bar[hidden] { display: none; }
+.support-bulk-bar span { font-size: .8rem; }
+.support-bulk-delete-dialog { width: min(520px, calc(100% - 32px)); max-height: calc(100dvh - 48px); padding: 0; overflow: hidden; border: 1px solid rgba(251,113,133,.45); border-radius: 8px; background: #0d1122; color: var(--text); box-shadow: 0 24px 70px rgba(0,0,0,.65); }
+.support-bulk-delete-dialog::backdrop { background: rgba(2,5,16,.82); backdrop-filter: blur(3px); }
+.support-bulk-delete-panel { max-height: calc(100dvh - 48px); padding: 24px; overflow-y: auto; }
+.support-bulk-delete-panel h2 { margin: 5px 0 0; font-size: 1.3rem; letter-spacing: 0; }
+.support-bulk-delete-panel > p:not(.eyebrow) { margin: 20px 0 0; color: var(--muted); font-size: .84rem; line-height: 1.55; }
+.support-bulk-delete-list { max-height: 220px; margin: 18px 0 0; padding: 12px 12px 12px 30px; overflow-y: auto; border-block: 1px solid var(--border); color: #e7e9f7; font-size: .78rem; }
+.support-bulk-delete-list li { padding: 5px 0; overflow-wrap: anywhere; }
+.support-bulk-delete-dialog .support-delete-button { min-width: 112px; justify-content: center; }
+@media (max-width: 560px) {
+  .support-actions-heading, .support-actions { width: 126px; min-width: 126px; }
+  .support-bulk-bar { position: sticky; z-index: 5; bottom: 0; }
+  .support-bulk-delete-dialog { width: calc(100% - 16px); max-height: calc(100dvh - 16px); margin: auto 8px 8px; }
+  .support-bulk-delete-panel { max-height: calc(100dvh - 16px); padding: 20px 16px; }
 }

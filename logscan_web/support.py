@@ -276,6 +276,40 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             view_mode=view_mode,
         )
 
+    @blueprint.post("/logs/delete-selected")
+    @discord_login_required
+    def delete_selected_logs():
+        payload = request.get_json(silent=True) or {}
+        supplied_ids = payload.get("scan_ids")
+        if not isinstance(supplied_ids, list):
+            abort(400, description="Select one or more logs to delete.")
+        scan_ids = list(dict.fromkeys(
+            value.strip() for value in supplied_ids
+            if isinstance(value, str) and value.strip()
+        ))
+        if not scan_ids or len(scan_ids) > 1000:
+            abort(400, description="Select between 1 and 1,000 logs to delete.")
+
+        user = discord_session_user()
+        support_access = support_session_authorized()
+        records = []
+        for scan_id in scan_ids:
+            record = store.get(scan_id)
+            owns_log = str(((record or {}).get("overview") or {}).get("uploaded_by_id") or "") == str(user["id"])
+            if record is None or (not support_access and not owns_log):
+                abort(404)
+            records.append((scan_id, record))
+
+        deleted = sum(store.delete_authorized(scan_id) for scan_id, _record in records)
+        current_app.logger.warning(
+            "Stored logs bulk deleted: requested=%d deleted=%d user_id=%s support_access=%s",
+            len(scan_ids),
+            deleted,
+            user.get("id", "unknown"),
+            support_access,
+        )
+        return {"deleted": deleted}
+
     @blueprint.post("/logs/<scan_id>/delete")
     @discord_login_required
     def delete_log(scan_id):

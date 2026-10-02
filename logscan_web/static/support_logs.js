@@ -229,3 +229,101 @@ if (recoveredUploadJob && uploadDialog) {
   uploadStatus.textContent = "Recovering scan status…";
   watchSupportUpload(recoveredUploadJob);
 }
+
+const selectAllLogs = document.querySelector("#support-select-all");
+const logSelections = [...document.querySelectorAll(".support-log-select")];
+const bulkBar = document.querySelector("#support-bulk-bar");
+const selectedCount = document.querySelector("#support-selected-count");
+const deleteSelected = document.querySelector("#support-delete-selected");
+const bulkDeleteDialog = document.querySelector("#support-bulk-delete-dialog");
+const bulkDeleteClose = document.querySelector("#support-bulk-delete-close");
+const bulkDeleteCancel = document.querySelector("#support-bulk-delete-cancel");
+const bulkDeleteConfirm = document.querySelector("#support-bulk-delete-confirm");
+const bulkDeleteCopy = document.querySelector("#support-bulk-delete-copy");
+const bulkDeleteList = document.querySelector("#support-bulk-delete-list");
+const bulkDeleteStatus = document.querySelector("#support-bulk-delete-status");
+
+function selectedLogs() {
+  return logSelections.filter((checkbox) => checkbox.checked);
+}
+
+function syncBulkSelection() {
+  const selected = selectedLogs();
+  if (selectedCount) selectedCount.textContent = selected.length.toLocaleString();
+  if (bulkBar) bulkBar.hidden = selected.length === 0;
+  if (deleteSelected) deleteSelected.textContent = `Delete selected (${selected.length})`;
+  if (selectAllLogs) {
+    selectAllLogs.checked = logSelections.length > 0 && selected.length === logSelections.length;
+    selectAllLogs.indeterminate = selected.length > 0 && selected.length < logSelections.length;
+  }
+}
+
+function closeBulkDeleteDialog() {
+  if (bulkDeleteDialog?.dataset.busy !== "true") bulkDeleteDialog?.close();
+}
+
+function openBulkDeleteDialog() {
+  const selected = selectedLogs();
+  if (!selected.length || !bulkDeleteDialog) return;
+  const count = selected.length;
+  bulkDeleteCopy.textContent = `This permanently removes ${count} selected log${count === 1 ? "" : "s"} and associated scan results. This cannot be undone.`;
+  const shown = selected.slice(0, 8).map((checkbox) => {
+    const item = document.createElement("li");
+    item.textContent = checkbox.dataset.title || checkbox.value;
+    return item;
+  });
+  if (selected.length > shown.length) {
+    const remainder = document.createElement("li");
+    remainder.textContent = `And ${selected.length - shown.length} more`;
+    shown.push(remainder);
+  }
+  bulkDeleteList.replaceChildren(...shown);
+  bulkDeleteStatus.textContent = "";
+  bulkDeleteStatus.classList.remove("error");
+  bulkDeleteConfirm.textContent = count === 1 ? "Delete log" : `Delete ${count} logs`;
+  bulkDeleteDialog.showModal();
+}
+
+selectAllLogs?.addEventListener("change", () => {
+  logSelections.forEach((checkbox) => { checkbox.checked = selectAllLogs.checked; });
+  syncBulkSelection();
+});
+logSelections.forEach((checkbox) => checkbox.addEventListener("change", syncBulkSelection));
+deleteSelected?.addEventListener("click", openBulkDeleteDialog);
+bulkDeleteClose?.addEventListener("click", closeBulkDeleteDialog);
+bulkDeleteCancel?.addEventListener("click", closeBulkDeleteDialog);
+bulkDeleteDialog?.addEventListener("cancel", (event) => {
+  if (bulkDeleteDialog.dataset.busy === "true") event.preventDefault();
+});
+bulkDeleteDialog?.addEventListener("click", (event) => {
+  if (event.target === bulkDeleteDialog) closeBulkDeleteDialog();
+});
+bulkDeleteConfirm?.addEventListener("click", async () => {
+  const scanIds = selectedLogs().map((checkbox) => checkbox.value);
+  if (!scanIds.length) return;
+  bulkDeleteDialog.dataset.busy = "true";
+  bulkDeleteConfirm.disabled = true;
+  bulkDeleteClose.disabled = true;
+  bulkDeleteCancel.disabled = true;
+  bulkDeleteStatus.textContent = `Deleting ${scanIds.length} log${scanIds.length === 1 ? "" : "s"}…`;
+  bulkDeleteStatus.classList.remove("error");
+  try {
+    const response = await fetch("/support/logs/delete-selected", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scan_ids: scanIds }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "The selected logs could not be deleted.");
+    bulkDeleteStatus.textContent = `${result.deleted} log${result.deleted === 1 ? "" : "s"} deleted`;
+    location.reload();
+  } catch (error) {
+    bulkDeleteDialog.dataset.busy = "false";
+    bulkDeleteConfirm.disabled = false;
+    bulkDeleteClose.disabled = false;
+    bulkDeleteCancel.disabled = false;
+    bulkDeleteStatus.textContent = error.message;
+    bulkDeleteStatus.classList.add("error");
+  }
+});
+syncBulkSelection();

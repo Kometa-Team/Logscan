@@ -335,6 +335,10 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn('sessionStorage.getItem("supportActiveScanJob")', script)
         self.assertIn('headers: { "X-Scan-Job-ID": jobId }', script)
         self.assertIn("completedUploadDestination", script)
+        self.assertIn('id="support-select-all"', template)
+        self.assertIn('id="support-bulk-delete-dialog"', template)
+        self.assertIn('fetch("/support/logs/delete-selected"', script)
+        self.assertIn("selectAllLogs.indeterminate", script)
         self.assertIn('data-view="{{ view_mode }}"', template)
         self.assertIn('deleteForm.dataset.view || "mine"', script)
         self.assertLess(template.index("support-actions-heading"), template.index("support-title"))
@@ -369,6 +373,73 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("@media (max-width: 560px)", css)
         self.assertIn("width: 100%; min-height: 42px", css)
 
+    def test_regular_user_can_bulk_delete_owned_logs(self):
+        second = SimpleNamespace(
+            filename="second-owned.log",
+            recommendations=[],
+            metadata={"size_bytes": 10, "line_count": 1, "complete": True},
+            overview={"uploaded_by": "Support Person", "uploaded_by_id": "42"},
+            categories=[],
+        )
+        second_id, _token = self.store.create("second-owned.log", b"log", second)
+        with self.client.session_transaction() as support_session:
+            support_session["support_authorized_at"] = 9999999999
+            support_session["support_access"] = False
+            support_session["discord_user"] = {"id": "42", "username": "Support Person", "avatar": ""}
+
+        response = self.client.post(
+            "/support/logs/delete-selected",
+            json={"scan_ids": [self.scan_id, second_id, self.scan_id]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["deleted"], 2)
+        self.assertIsNone(self.store.get(self.scan_id))
+        self.assertIsNone(self.store.get(second_id))
+
+    def test_bulk_delete_is_atomic_for_unowned_selection(self):
+        unowned = SimpleNamespace(
+            filename="unowned.log",
+            recommendations=[],
+            metadata={"size_bytes": 10, "line_count": 1, "complete": True},
+            overview={"uploaded_by": "Another User", "uploaded_by_id": "99"},
+            categories=[],
+        )
+        unowned_id, _token = self.store.create("unowned.log", b"log", unowned)
+        with self.client.session_transaction() as support_session:
+            support_session["support_authorized_at"] = 9999999999
+            support_session["support_access"] = False
+            support_session["discord_user"] = {"id": "42", "username": "Support Person", "avatar": ""}
+
+        response = self.client.post(
+            "/support/logs/delete-selected",
+            json={"scan_ids": [self.scan_id, unowned_id]},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIsNotNone(self.store.get(self.scan_id))
+        self.assertIsNotNone(self.store.get(unowned_id))
+
+    def test_support_member_can_bulk_delete_across_owners(self):
+        unowned = SimpleNamespace(
+            filename="support-delete.log",
+            recommendations=[],
+            metadata={"size_bytes": 10, "line_count": 1, "complete": True},
+            overview={"uploaded_by": "Another User", "uploaded_by_id": "99"},
+            categories=[],
+        )
+        unowned_id, _token = self.store.create("support-delete.log", b"log", unowned)
+        self.authorize_session()
+
+        response = self.client.post(
+            "/support/logs/delete-selected",
+            json={"scan_ids": [self.scan_id, unowned_id]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["deleted"], 2)
+        self.assertIsNone(self.store.get(self.scan_id))
+        self.assertIsNone(self.store.get(unowned_id))
     def test_support_member_can_delete_log_without_exposing_token(self):
         unauthorized = self.client.post(f"/support/logs/{self.scan_id}/delete")
         self.assertEqual(unauthorized.status_code, 302)

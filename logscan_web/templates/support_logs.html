@@ -6,8 +6,8 @@
   <title>{{ 'Active logs' if is_support_console else 'My uploads' }} · Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261002-1') }}">
-  <script src="{{ url_for('static', filename='support_logs.js', v='20261002-1') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261002-2') }}">
+  <script src="{{ url_for('static', filename='support_logs.js', v='20261002-2') }}" defer></script>
 </head>
 <body>
   {% macro sort_link(key, label) -%}
@@ -34,13 +34,14 @@
     </details>
 
     <div class="support-results-meta"><span>{{ filtered_logs }} matching log{% if filtered_logs != 1 %}s{% endif %}</span><span>Page {{ page }} of {{ page_count }}</span></div>
+    <div id="support-bulk-bar" class="support-bulk-bar" hidden><span><strong id="support-selected-count">0</strong> selected</span><button id="support-delete-selected" class="support-delete-button" type="button">Delete selected</button></div>
     <div class="support-table-wrap">
       <table class="support-table">
-        <thead><tr><th class="support-actions-heading"><span class="visually-hidden">Actions</span></th><th>{{ sort_link('title','Title') }}</th><th>{{ sort_link('uploader','Uploaded by') }}</th><th>{{ sort_link('source','Source') }}</th><th>{{ sort_link('created_at','Uploaded') }}</th><th>{{ sort_link('expires_at','Expires in') }}</th><th>{{ sort_link('findings','Findings') }}</th><th>{{ sort_link('version','Kometa / Environment') }}</th><th>{{ sort_link('lines','Lines') }}</th><th>{{ sort_link('size','Extracted size') }}</th><th><span class="support-column-label">Archive</span></th></tr></thead>
+        <thead><tr><th class="support-actions-heading"><label class="support-select-all"><input id="support-select-all" type="checkbox" aria-label="Select all logs on this page"><span class="visually-hidden">Select all visible logs</span></label><span class="visually-hidden">Actions</span></th><th>{{ sort_link('title','Title') }}</th><th>{{ sort_link('uploader','Uploaded by') }}</th><th>{{ sort_link('source','Source') }}</th><th>{{ sort_link('created_at','Uploaded') }}</th><th>{{ sort_link('expires_at','Expires in') }}</th><th>{{ sort_link('findings','Findings') }}</th><th>{{ sort_link('version','Kometa / Environment') }}</th><th>{{ sort_link('lines','Lines') }}</th><th>{{ sort_link('size','Extracted size') }}</th><th><span class="support-column-label">Archive</span></th></tr></thead>
         <tbody>
           {% for row in rows %}
           <tr>
-            <td class="support-actions">{% set hours = (row.remaining_seconds // 3600) %}{% set minutes = ((row.remaining_seconds % 3600) // 60) %}<button type="button" class="support-navigate" data-scan-id="{{ row.id }}" data-title="{{ row.filename }}" data-uploader="{{ row.uploader }}" data-source="{{ row.source|title }}" data-expires="{{ hours }}h {{ minutes }}m" data-findings="{{ row.finding_count }}" data-environment="{{ row.kometa_version }} · {{ row.installation }}{% if row.quickstart_run %} · Quickstart {{ row.quickstart_version or '' }}{% endif %}">Navigate</button><div class="support-destination-options" hidden><a href="{{ url_for('result_page', scan_id=row.id) }}#section=overview">Overview</a>{% for severity in ('critical','error','warning','schema','advice') %}{% if severity == 'schema' or row.counts[severity] %}<a class="destination-{{ severity }}" href="{{ url_for('result_page', scan_id=row.id) }}#section={{ severity }}">{{ severity|title }}{% if row.counts[severity] or (severity == 'schema' and row.schema_count_available) %} <span>{{ row.counts[severity] }}</span>{% elif severity == 'schema' %} <span>Unavailable</span>{% endif %}</a>{% endif %}{% endfor %}<a class="destination-config" href="{{ url_for('result_page', scan_id=row.id) }}#viewer=config">Configuration</a><a class="destination-log" href="{{ url_for('result_page', scan_id=row.id) }}#viewer=log">Raw log</a>{% if row.message_url %}<a class="destination-discord" href="{{ row.message_url }}" target="_blank" rel="noopener">Discord message</a>{% endif %}</div></td>
+            <td class="support-actions"><label class="support-row-select"><input class="support-log-select" type="checkbox" value="{{ row.id }}" data-title="{{ row.filename }}" aria-label="Select {{ row.filename }}"></label>{% set hours = (row.remaining_seconds // 3600) %}{% set minutes = ((row.remaining_seconds % 3600) // 60) %}<button type="button" class="support-navigate" data-scan-id="{{ row.id }}" data-title="{{ row.filename }}" data-uploader="{{ row.uploader }}" data-source="{{ row.source|title }}" data-expires="{{ hours }}h {{ minutes }}m" data-findings="{{ row.finding_count }}" data-environment="{{ row.kometa_version }} · {{ row.installation }}{% if row.quickstart_run %} · Quickstart {{ row.quickstart_version or '' }}{% endif %}">Navigate</button><div class="support-destination-options" hidden><a href="{{ url_for('result_page', scan_id=row.id) }}#section=overview">Overview</a>{% for severity in ('critical','error','warning','schema','advice') %}{% if severity == 'schema' or row.counts[severity] %}<a class="destination-{{ severity }}" href="{{ url_for('result_page', scan_id=row.id) }}#section={{ severity }}">{{ severity|title }}{% if row.counts[severity] or (severity == 'schema' and row.schema_count_available) %} <span>{{ row.counts[severity] }}</span>{% elif severity == 'schema' %} <span>Unavailable</span>{% endif %}</a>{% endif %}{% endfor %}<a class="destination-config" href="{{ url_for('result_page', scan_id=row.id) }}#viewer=config">Configuration</a><a class="destination-log" href="{{ url_for('result_page', scan_id=row.id) }}#viewer=log">Raw log</a>{% if row.message_url %}<a class="destination-discord" href="{{ row.message_url }}" target="_blank" rel="noopener">Discord message</a>{% endif %}</div></td>
             <td class="support-title"><a href="{{ url_for('result_page', scan_id=row.id) }}">{{ row.filename }}</a><code>{{ row.id }}</code></td>
             <td><strong>{{ row.uploader }}</strong>{% if row.uploader_id %}<small>{{ row.uploader_id }}</small>{% endif %}</td>
             <td><span class="support-source {{ row.source }}">{{ row.source|title }}</span></td>
@@ -56,6 +57,15 @@
       </table>
     </div>
     {% if page_count > 1 %}<nav class="pagination" aria-label="Log pages">{% if page > 1 %}<a class="secondary-button" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, launcher=launcher_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page-1) }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ page_count }}</span>{% if page < page_count %}<a class="secondary-button" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, launcher=launcher_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page+1) }}">Next</a>{% endif %}</nav>{% endif %}
+    <dialog id="support-bulk-delete-dialog" class="support-bulk-delete-dialog" aria-labelledby="support-bulk-delete-title">
+      <div class="support-bulk-delete-panel">
+        <header class="support-upload-header"><div><p class="eyebrow">Permanent action</p><h2 id="support-bulk-delete-title">Delete selected logs?</h2></div><button type="button" id="support-bulk-delete-close" class="support-navigation-close" aria-label="Close confirmation dialog">×</button></header>
+        <p id="support-bulk-delete-copy">This permanently removes the selected logs and scan results. This cannot be undone.</p>
+        <ul id="support-bulk-delete-list" class="support-bulk-delete-list"></ul>
+        <p id="support-bulk-delete-status" class="support-upload-status" role="status"></p>
+        <div class="support-upload-actions"><button id="support-bulk-delete-cancel" class="secondary-button" type="button">Cancel</button><button id="support-bulk-delete-confirm" class="support-delete-button" type="button">Delete logs</button></div>
+      </div>
+    </dialog>
     {% if not is_support_console %}
     <dialog id="support-upload-dialog" class="support-upload-dialog" aria-labelledby="support-upload-title">
       <div class="support-upload-panel">
