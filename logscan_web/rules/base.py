@@ -116,94 +116,95 @@ def evaluate_text_rules(rules: list[TextRule], context: ScanContext) -> list[Fin
     return findings
 
 def evaluate_text_rules_bytes(rules: list[TextRule], content: bytes) -> list[Finding]:
-    """Evaluate large logs with bounded literal searches and first-hit evidence."""
+    """Evaluate large logs while retaining repeated evidence with bounded storage."""
     newline = bytes((10,))
+    evidence_limit = 10_000
 
     def variants(value: str) -> tuple[bytes, ...]:
         encoded = value.encode()
         return tuple(dict.fromkeys((encoded, encoded.lower(), encoded.upper())))
 
-    def first_position(value: str, word_bounded: bool = False) -> int:
+    def matching_positions(value: str, word_bounded: bool = False) -> list[int]:
+        matches = set()
         for candidate in variants(value):
             position = content.find(candidate)
-            while position >= 0:
-                if not word_bounded:
-                    return position
+            while position >= 0 and len(matches) < evidence_limit:
                 before = content[position - 1] if position else None
                 end = position + len(candidate)
                 after = content[end] if end < len(content) else None
-                if not (
+                bounded = not (
                     (before is not None and (chr(before).isalnum() or before == 95))
                     or (after is not None and (chr(after).isalnum() or after == 95))
-                ):
-                    return position
-                position = content.find(candidate, position + 1)
-        return -1
+                )
+                if not word_bounded or bounded:
+                    matches.add(position)
+                position = content.find(candidate, position + max(1, len(candidate)))
+        return sorted(matches)
 
-    findings = []
-    line_cache: dict[int, int] = {0: 1}
-
-    def line_number(position: int) -> int:
-        if position in line_cache:
-            return line_cache[position]
-        start = max(candidate for candidate in line_cache if candidate <= position)
-        number = line_cache[start]
-        cursor = start
-        while True:
-            cursor = content.find(newline, cursor, position)
-            if cursor < 0:
-                break
-            number += 1
-            cursor += 1
-        line_cache[position] = number
-        return number
-
+    pending = []
     for rule in rules:
         evidence_positions = []
         if rule.any_of:
-            positions = [first_position(value) for value in rule.any_of]
-            positions = [position for position in positions if position >= 0]
+            positions = [position for value in rule.any_of for position in matching_positions(value)]
             if not positions:
                 continue
             evidence_positions.extend(positions)
         if rule.word_bounded_any_of:
-            positions = [first_position(value, True) for value in rule.word_bounded_any_of]
-            positions = [position for position in positions if position >= 0]
+            positions = [
+                position
+                for value in rule.word_bounded_any_of
+                for position in matching_positions(value, True)
+            ]
             if not positions:
                 continue
             evidence_positions.extend(positions)
         if rule.all_of:
-            positions = [first_position(value) for value in rule.all_of]
-            if any(position < 0 for position in positions):
+            positions_by_value = [matching_positions(value) for value in rule.all_of]
+            if any(not positions for positions in positions_by_value):
                 continue
-            evidence_positions.extend(positions)
+            evidence_positions.extend(
+                position for positions in positions_by_value for position in positions
+            )
         if rule.all_on_same_line:
             anchor = max(rule.all_on_same_line, key=len)
-            matched_position = -1
-            for candidate in variants(anchor):
-                position = content.find(candidate)
-                while position >= 0:
-                    line_start = content.rfind(newline, 0, position) + 1
-                    line_end = content.find(newline, position)
-                    if line_end < 0:
-                        line_end = len(content)
-                    line = content[line_start:line_end].lower()
-                    if all(value.lower().encode() in line for value in rule.all_on_same_line):
-                        matched_position = position
+            matched_lines = set()
+            for position in matching_positions(anchor):
+                line_start = content.rfind(newline, 0, position) + 1
+                line_end = content.find(newline, position)
+                if line_end < 0:
+                    line_end = len(content)
+                line = content[line_start:line_end].lower()
+                if all(value.lower().encode() in line for value in rule.all_on_same_line):
+                    matched_lines.add(line_start)
+                    if len(matched_lines) >= evidence_limit:
                         break
-                    position = content.find(candidate, position + 1)
-                if matched_position >= 0:
-                    break
-            if matched_position < 0:
+            if not matched_lines:
                 continue
-            evidence_positions.append(matched_position)
-        definition = rule.definition
+            evidence_positions.extend(matched_lines)
+        pending.append((rule.definition, tuple(sorted(set(evidence_positions)))))
+
+    positions = sorted({position for _definition, evidence in pending for position in evidence})
+    position_lines = {}
+    line_number = 1
+    cursor = 0
+    for position in positions:
+        while True:
+            next_newline = content.find(newline, cursor, position)
+            if next_newline < 0:
+                break
+            line_number += 1
+            cursor = next_newline + 1
+        position_lines[position] = line_number
+
+    findings = []
+    for definition, evidence in pending:
+        evidence_lines = tuple(sorted({position_lines[position] for position in evidence}))[:evidence_limit]
         findings.append(Finding(
             definition.id,
             definition.category,
             definition.title,
             definition.description,
             definition.solution,
-            tuple(sorted({line_number(position) for position in evidence_positions})),
+            evidence_lines,
         ))
     return findings

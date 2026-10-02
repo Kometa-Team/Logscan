@@ -678,6 +678,39 @@ class StreamingScanTests(unittest.TestCase):
                 regular_content.unlink(missing_ok=True)
             if isinstance(large_content, Path):
                 large_content.unlink(missing_ok=True)
+
+    def test_large_log_findings_keep_every_evidence_occurrence(self):
+        lines = [
+            "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
+            "[config.py:2] [WARNING] | Service request timed out. |",
+            "[config.py:3] [WARNING] | Service request timed out. |",
+            "[config.py:4] [INFO] | unrelated line |",
+            "[config.py:5] [WARNING] | Service request timed out. |",
+            "[kometa.py:6] [INFO] | Finished: 2026-10-02 12:00:00 Run Time: 0:00:05 |",
+        ]
+        archive_bytes = BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("meta.log", "\n".join(lines).encode())
+
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", MAX_FILE_BYTES):
+            regular_scans = scan_archive_logs("meta.zip", archive_bytes.getvalue())
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+            large_scans = scan_archive_logs("meta.zip", archive_bytes.getvalue())
+        _regular_name, regular_content, regular_result = regular_scans[0]
+        _large_name, large_content, large_result = large_scans[0]
+        try:
+            regular = next(item for item in regular_result.recommendations if item["id"] == "timeout")
+            large = next(item for item in large_result.recommendations if item["id"] == "timeout")
+            self.assertEqual(regular["evidence_lines"], [2, 3, 5])
+            self.assertEqual(large["evidence_lines"], regular["evidence_lines"])
+            warning = next(item for item in large_result.recommendations if item["id"] == "kometa_warning")
+            self.assertEqual(warning["evidence_lines"], [2, 3, 5])
+        finally:
+            if isinstance(regular_content, Path):
+                regular_content.unlink(missing_ok=True)
+            if isinstance(large_content, Path):
+                large_content.unlink(missing_ok=True)
+
     def test_disk_backed_scan_keeps_all_runtimes_and_adjusts_late_maintenance_section(self):
         lines = [
             "[2026-09-29 00:00:00,000] [kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
