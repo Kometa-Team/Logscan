@@ -313,7 +313,7 @@ class StreamingScanTests(unittest.TestCase):
                 self.fail(f"Signed-in background scan did not finish: {payload}")
             time.sleep(0.01)
         self.assertEqual(payload["phase"], "complete", payload)
-        self.assertEqual(payload["redirect_url"], "/support/logs?view=mine")
+        self.assertRegex(payload["redirect_url"], r"^http://localhost/scan/[^#]+#delete=.+$")
         self.assertNotIn("result", payload)
         records = [
             json.loads(path.read_text(encoding="utf-8"))

@@ -1370,7 +1370,7 @@ def create_app() -> Flask:
                 "unscanned_files": unscanned_files,
             }
             if uploaded_by_id and not is_bot:
-                update_scan_job(job_id, "complete", redirect_url=url_for("support.logs", view="mine"))
+                update_scan_job(job_id, "complete", redirect_url=response["batch_admin_url"])
             else:
                 update_scan_job(job_id, "complete", result=response)
             return jsonify(response)
@@ -1379,7 +1379,8 @@ def create_app() -> Flask:
             update_scan_job(job_id, "complete", result=response)
             return jsonify(response)
         if uploaded_by_id:
-            update_scan_job(job_id, "complete", redirect_url=url_for("support.logs", view="mine"))
+            result_destination = f'{payloads[0]["result_url"]}#delete={payloads[0]["delete_token"]}'
+            update_scan_job(job_id, "complete", redirect_url=result_destination)
         else:
             update_scan_job(job_id, "complete", result=payloads[0])
         return jsonify({"scans": payloads}) if len(payloads) > 1 else jsonify(payloads[0])

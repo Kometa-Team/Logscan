@@ -6,8 +6,8 @@
   <title>{{ 'Active logs' if is_support_console else 'My uploads' }} · Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260930-1') }}">
-  <script src="{{ url_for('static', filename='support_logs.js', v='20260927-1') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261002-1') }}">
+  <script src="{{ url_for('static', filename='support_logs.js', v='20261002-1') }}" defer></script>
 </head>
 <body>
   {% macro sort_link(key, label) -%}
@@ -16,7 +16,7 @@
   {%- endmacro %}
   {% set active_page = 'support' %}{% include '_site_header.html' %}
   <main class="support-shell">
-    <section class="support-heading"><div><p class="eyebrow">{{ 'Support console' if is_support_console else 'Discord uploads' }}</p><h1>{{ 'Active logs' if is_support_console else 'My uploads' }}</h1><p class="hero-copy">{{ 'Review every scan currently retained on this server.' if is_support_console else 'Review and manage web scans uploaded while signed in with Discord.' }} Logs disappear automatically at their displayed deletion time.</p></div><div class="support-total"><strong>{{ total_logs }}</strong><span>{{ 'on server' if is_support_console else 'yours' }}</span></div></section>
+    <section class="support-heading"><div><p class="eyebrow">{{ 'Support console' if is_support_console else 'Discord uploads' }}</p><h1>{{ 'Active logs' if is_support_console else 'My uploads' }}</h1><p class="hero-copy">{{ 'Review every scan currently retained on this server.' if is_support_console else 'Review and manage web scans uploaded while signed in with Discord.' }} Logs disappear automatically at their displayed deletion time.</p></div><div class="support-heading-actions"><div class="support-total"><strong>{{ total_logs }}</strong><span>{{ 'on server' if is_support_console else 'yours' }}</span></div>{% if not is_support_console %}<button class="primary-button support-upload-open" type="button"><span aria-hidden="true">↑</span> Upload log</button>{% endif %}</div></section>
 
     <details class="support-filter-panel"{% if query or source_filter != 'all' or launcher_filter != 'all' or severity_filter != 'all' or page_size != 25 %} data-active-filters{% endif %}>
       <summary><span>Search and filters</span><span class="support-filter-status">{% if query or source_filter != 'all' or launcher_filter != 'all' or severity_filter != 'all' or page_size != 25 %}Active{% else %}All logs{% endif %}</span></summary>
@@ -51,11 +51,29 @@
             <td>{{ '{:,}'.format(row.line_count) }}</td>
             <td>{% if row.size_bytes >= 1048576 %}{{ '%.1f'|format(row.size_bytes / 1048576) }} MB{% else %}{{ '%.1f'|format(row.size_bytes / 1024) }} KB{% endif %}</td><td class="support-archive">{% if row.archive_compressed_size %}<span>Compressed: {% if row.archive_compressed_size >= 1048576 %}{{ '%.1f'|format(row.archive_compressed_size / 1048576) }} MB{% else %}{{ '%.1f'|format(row.archive_compressed_size / 1024) }} KB{% endif %}</span><small>Uncompressed: {% if row.archive_uncompressed_size >= 1048576 %}{{ '%.1f'|format(row.archive_uncompressed_size / 1048576) }} MB{% else %}{{ '%.1f'|format(row.archive_uncompressed_size / 1024) }} KB{% endif %} · {{ '%.2f'|format(row.archive_compression_ratio) }}:1 · {{ '%.1f'|format(row.archive_reduction_percent) }}% reduction</small>{% else %}<span class="support-none">Not archived</span>{% endif %}</td>
           </tr>
-          {% else %}<tr><td class="support-empty" colspan="11">No active logs match these filters.</td></tr>{% endfor %}
+          {% else %}<tr><td class="support-empty" colspan="11">{% if not is_support_console and total_logs == 0 %}<span>No uploads are currently retained.</span><button class="secondary-button support-upload-open" type="button">Upload your first log</button>{% else %}No active logs match these filters.{% endif %}</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
     {% if page_count > 1 %}<nav class="pagination" aria-label="Log pages">{% if page > 1 %}<a class="secondary-button" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, launcher=launcher_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page-1) }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ page_count }}</span>{% if page < page_count %}<a class="secondary-button" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, launcher=launcher_filter, severity=severity_filter, page_size=page_size, sort=sort_key, direction=direction, page=page+1) }}">Next</a>{% endif %}</nav>{% endif %}
+    {% if not is_support_console %}
+    <dialog id="support-upload-dialog" class="support-upload-dialog" aria-labelledby="support-upload-title">
+      <div class="support-upload-panel">
+        <header class="support-upload-header"><div><p class="eyebrow">New scan</p><h2 id="support-upload-title">Upload Kometa logs</h2></div><button type="button" id="support-upload-close" class="support-navigation-close" aria-label="Close upload dialog">×</button></header>
+        <form id="support-upload-form">
+          <label id="support-upload-drop" class="support-upload-drop" for="support-log-file" tabindex="0">
+            <input id="support-log-file" name="log" type="file" accept=".log,.txt,.yml,.yaml,.zip,.7z,.tar,.tgz,.gz,.tar.bz2,.tbz2,.bz2,.tar.xz,.txz,.xz,.tar.zst,.zst,.1,.2,.3,.4,.5,.6,.7,.8,.9" multiple required>
+            <span class="support-upload-icon" aria-hidden="true">↑</span>
+            <strong>Drop Kometa logs here</strong>
+            <span>or choose files from your device</span>
+            <small id="support-upload-selection">LOG, TXT, YAML, or supported archives · 1 GB max after extraction</small>
+          </label>
+          <p id="support-upload-status" class="support-upload-status" role="status">Ready to scan</p>
+          <div class="support-upload-actions"><button id="support-upload-cancel" class="secondary-button" type="button">Cancel</button><button id="support-upload-submit" class="primary-button" type="submit" disabled>Scan logs</button></div>
+        </form>
+      </div>
+    </dialog>
+    {% endif %}
     <dialog id="support-navigation-dialog" class="support-navigation-dialog" aria-labelledby="support-navigation-title">
       <div class="support-navigation-panel">
         <header class="support-navigation-header"><div><p class="eyebrow">Navigate log</p><h2 id="support-navigation-title"></h2></div><button type="button" id="support-navigation-close" class="support-navigation-close" aria-label="Close navigation dialog">×</button></header>

@@ -838,3 +838,38 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .support-delete-form { align-items: stretch; flex-direction: column; }
   .support-delete-button { width: 100%; }
 }
+
+.support-heading-actions { display: flex; align-items: flex-end; gap: 18px; }
+.support-upload-open { min-height: 42px; padding: 0 16px; white-space: nowrap; }
+.support-upload-open > span { font-size: 1.05rem; }
+.support-empty > span { display: block; margin-bottom: 14px; }
+.support-empty .support-upload-open { display: inline-flex; align-items: center; justify-content: center; color: var(--text); }
+.support-upload-dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100dvh - 48px); padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #0d1122; color: var(--text); box-shadow: 0 24px 70px rgba(0,0,0,.62); }
+.support-upload-dialog::backdrop { background: rgba(2,5,16,.8); backdrop-filter: blur(3px); }
+.support-upload-panel { padding: 24px; }
+.support-upload-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.support-upload-header h2 { margin: 5px 0 0; font-size: 1.3rem; letter-spacing: 0; }
+.support-upload-drop { min-height: 260px; margin-top: 22px; padding: 28px 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed rgba(148,151,255,.55); border-radius: 7px; background: rgba(114,119,248,.05); text-align: center; cursor: pointer; }
+.support-upload-drop:hover, .support-upload-drop.dragover { border-color: var(--accent-bright); background: rgba(114,119,248,.1); }
+.support-upload-drop.loading { cursor: progress; }
+.support-upload-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.support-upload-icon { display: grid; width: 48px; height: 48px; margin-bottom: 16px; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: #171c35; color: var(--accent-bright); font-size: 1.45rem; }
+.support-upload-drop strong { font-size: 1rem; }
+.support-upload-drop > span:not(.support-upload-icon) { margin-top: 7px; color: var(--muted); font-size: .84rem; }
+.support-upload-drop small { max-width: 420px; margin-top: 18px; color: #7f89a8; font-size: .7rem; line-height: 1.5; overflow-wrap: anywhere; }
+.support-upload-status { min-height: 20px; margin: 14px 0 0; color: var(--muted); font-size: .78rem; }
+.support-upload-status.error { color: #fda4af; }
+.support-upload-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.support-upload-actions button { min-width: 104px; min-height: 42px; justify-content: center; }
+.support-upload-actions .secondary-button { display: inline-flex; align-items: center; border: 1px solid var(--border); color: var(--text); }
+@media (max-width: 560px) {
+  .support-heading { flex-direction: column; }
+  .support-heading-actions { width: 100%; align-items: stretch; flex-direction: column; gap: 12px; }
+  .support-total { align-items: flex-start; }
+  .support-heading-actions .support-upload-open { width: 100%; justify-content: center; }
+  .support-upload-dialog { width: calc(100% - 16px); max-height: calc(100dvh - 16px); margin: auto 8px 8px; }
+  .support-upload-panel { max-height: calc(100dvh - 16px); padding: 20px 16px; overflow-y: auto; }
+  .support-upload-drop { min-height: 230px; }
+  .support-upload-actions { flex-direction: column-reverse; }
+  .support-upload-actions button { width: 100%; }
+}

@@ -302,6 +302,20 @@ class SupportConsoleTests(unittest.TestCase):
         sent_request = mocked_urlopen.call_args.args[0]
         self.assertEqual(sent_request.get_header("User-agent"), DISCORD_USER_AGENT)
         self.assertEqual(sent_request.get_header("Authorization"), "Bearer token")
+
+    def test_my_uploads_has_compact_uploader_but_support_console_does_not(self):
+        self.authorize_session()
+        personal = self.client.get("/support/logs").get_data(as_text=True)
+        self.assertIn('class="primary-button support-upload-open"', personal)
+        self.assertIn('id="support-upload-dialog"', personal)
+        self.assertIn('id="support-upload-form"', personal)
+        self.assertIn('id="support-log-file"', personal)
+        self.assertIn('tabindex="0"', personal)
+
+        support_console = self.client.get("/support/logs?view=all").get_data(as_text=True)
+        self.assertNotIn('id="support-upload-dialog"', support_console)
+        self.assertNotIn('class="primary-button support-upload-open"', support_console)
+
     def test_navigation_dialog_is_responsive_and_contextual(self):
         template = Path("logscan_web/templates/support_logs.html").read_text(encoding="utf-8")
         script = Path("logscan_web/static/support_logs.js").read_text(encoding="utf-8")
@@ -318,6 +332,9 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("dialog.showModal()", script)
         self.assertIn("event.target === dialog", script)
         self.assertIn("window.confirm", script)
+        self.assertIn('sessionStorage.getItem("supportActiveScanJob")', script)
+        self.assertIn('headers: { "X-Scan-Job-ID": jobId }', script)
+        self.assertIn("completedUploadDestination", script)
         self.assertIn('data-view="{{ view_mode }}"', template)
         self.assertIn('deleteForm.dataset.view || "mine"', script)
         self.assertLess(template.index("support-actions-heading"), template.index("support-title"))
