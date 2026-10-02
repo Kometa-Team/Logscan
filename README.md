@@ -62,7 +62,8 @@ The application loads `.env` from the current working directory for local
 development. Real process environment variables take precedence.
 
 - `LOGSCAN_API_KEY` authenticates automated log uploads. Generate a long random value.
-- `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` identify a Discord application used for support sign-in.
+- `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET` identify a Discord application used for account sign-in.
+- `DISCORD_BOT_TOKEN` enables live support-role revalidation on privileged requests. The bot must belong to the configured guild and its token must remain secret.
 - `DISCORD_REDIRECT_URI` must exactly match the application's OAuth redirect; production uses `https://logscan.kometa.team/support/callback`.
 - `DISCORD_GUILD_ID` is the Kometa Discord server ID.
 - `DISCORD_SUPPORT_ROLE_IDS` is a comma-separated allowlist of support or administrator role IDs. Holding any listed role grants access.
@@ -79,8 +80,13 @@ using Flask, or the equivalent path on the selected Waitress port.
 The protected support inventory is available at `/support/logs`. In the Discord
 Developer Portal, register the configured callback under OAuth2 Redirects.
 Enable Discord Developer Mode to copy the server and role IDs. Sign-in requests
-only `identify` and `guilds.members.read`, stores no Discord access token, and
-expires the local authorization after eight hours.
+only `identify` and `guilds.members.read` and store no Discord OAuth access token.
+Account sessions persist for 30 days. When `DISCORD_BOT_TOKEN` is configured,
+every privileged request revalidates support membership against Discord and denies
+access if validation fails; repeated checks within one request share a single lookup.
+Without a bot token, the role assertion expires after eight hours and requires a
+fresh OAuth sign-in.
+
 ## Production
 
 Do not use Flask's development server for a public deployment.

@@ -9,26 +9,55 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from flask import Blueprint, abort, current_app, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, g, redirect, render_template, request, session, url_for
 
 DISCORD_API_URL = "https://discord.com/api/v10"
 DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 DISCORD_USER_AGENT = "Kometa-Logscan/1.0 (+https://github.com/Kometa-Team/Logscan)"
-SESSION_MAX_AGE_SECONDS = 24 * 60 * 60
+ACCOUNT_SESSION_SECONDS = 30 * 24 * 60 * 60
+SUPPORT_ROLE_FALLBACK_SECONDS = 8 * 60 * 60
 
 
 def discord_session_user() -> dict | None:
     """Return the fresh, verified Discord identity for the current session."""
-    if time.time() - session.get("support_authorized_at", 0) > SESSION_MAX_AGE_SECONDS:
+    if time.time() - session.get("support_authorized_at", 0) > ACCOUNT_SESSION_SECONDS:
         return None
     return session.get("discord_user") or session.get("support_user")
 
 
 def support_session_authorized() -> bool:
-    """Return whether the verified Discord identity has a support role."""
+    """Return whether the current Discord member still has a support role."""
     user = discord_session_user()
+    if not user:
+        return False
     legacy_support_session = bool(session.get("support_user") and "support_access" not in session)
-    return bool(user and (session.get("support_access") or legacy_support_session))
+    if legacy_support_session:
+        return True
+    if not session.get("support_access"):
+        return False
+
+    bot_token = current_app.config.get("DISCORD_BOT_TOKEN", "")
+    if not bot_token:
+        verified_at = session.get("support_role_verified_at", session.get("support_authorized_at", 0))
+        return time.time() - verified_at <= SUPPORT_ROLE_FALLBACK_SECONDS
+
+    if hasattr(g, "discord_support_access"):
+        return g.discord_support_access
+    try:
+        member = _discord_request(
+            f"/guilds/{current_app.config['DISCORD_GUILD_ID']}/members/{user['id']}",
+            headers={"Authorization": f"Bot {bot_token}"},
+        )
+        g.discord_support_access = bool(
+            current_app.config["DISCORD_SUPPORT_ROLE_IDS"].intersection(member.get("roles", []))
+        )
+    except (HTTPError, URLError, KeyError, ValueError):
+        current_app.logger.warning(
+            "Discord support role revalidation failed; denying privileged access",
+            exc_info=True,
+        )
+        g.discord_support_access = False
+    return g.discord_support_access
 
 
 SUPPORT_CONFIG_KEYS = (
@@ -129,8 +158,10 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         support_access = bool(current_app.config["DISCORD_SUPPORT_ROLE_IDS"].intersection(member.get("roles", [])))
         destination = session.pop("oauth_next", url_for("support.logs", view="mine"))
         session.clear()
+        session.permanent = True
         session["support_authorized_at"] = int(time.time())
         session["support_access"] = support_access
+        session["support_role_verified_at"] = int(time.time())
         current_app.logger.warning(
             "Discord access granted: user_id=%s guild_id=%s support_access=%s",
             user["id"],

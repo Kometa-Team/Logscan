@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.error import URLError
 
 from flask import Flask
 
@@ -75,15 +76,66 @@ class SupportConsoleTests(unittest.TestCase):
                 "avatar": "",
             }
 
-    def test_support_session_remains_authorized_for_24_hours(self):
+    def test_account_session_remains_authorized_for_30_days(self):
+        with self.app.test_request_context("/"):
+            from flask import session
+            from logscan_web.support import discord_session_user
+
+            session["discord_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time() - (29 * 24 * 60 * 60)
+            self.assertIsNotNone(discord_session_user())
+            session["support_authorized_at"] = time.time() - (31 * 24 * 60 * 60)
+            self.assertIsNone(discord_session_user())
+
+    def test_support_role_is_revalidated_once_per_request(self):
+        self.app.config["DISCORD_BOT_TOKEN"] = "bot-secret"
         with self.app.test_request_context("/"):
             from flask import session
             from logscan_web.support import support_session_authorized
 
-            session["support_user"] = {"id": "42"}
-            session["support_authorized_at"] = time.time() - (23 * 60 * 60)
+            session["discord_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time()
+            session["support_access"] = True
+            with patch("logscan_web.support._discord_request", return_value={"roles": ["support-role"]}) as request:
+                self.assertTrue(support_session_authorized())
+                self.assertTrue(support_session_authorized())
+                request.assert_called_once_with(
+                    "/guilds/guild/members/42",
+                    headers={"Authorization": "Bot bot-secret"},
+                )
+
+    def test_live_role_removal_and_discord_errors_fail_closed(self):
+        self.app.config["DISCORD_BOT_TOKEN"] = "bot-secret"
+        with self.app.test_request_context("/"):
+            from flask import session
+            from logscan_web.support import support_session_authorized
+
+            session["discord_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time()
+            session["support_access"] = True
+            with patch("logscan_web.support._discord_request", return_value={"roles": []}):
+                self.assertFalse(support_session_authorized())
+        with self.app.test_request_context("/"):
+            from flask import session
+            from logscan_web.support import support_session_authorized
+
+            session["discord_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time()
+            session["support_access"] = True
+            with patch("logscan_web.support._discord_request", side_effect=URLError("offline")):
+                self.assertFalse(support_session_authorized())
+
+    def test_support_role_without_bot_token_expires_after_eight_hours(self):
+        with self.app.test_request_context("/"):
+            from flask import session
+            from logscan_web.support import support_session_authorized
+
+            session["discord_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time()
+            session["support_access"] = True
+            session["support_role_verified_at"] = time.time() - (7 * 60 * 60)
             self.assertTrue(support_session_authorized())
-            session["support_authorized_at"] = time.time() - (25 * 60 * 60)
+            session["support_role_verified_at"] = time.time() - (9 * 60 * 60)
             self.assertFalse(support_session_authorized())
 
     def test_regular_user_console_only_lists_owned_uploads(self):
@@ -156,6 +208,8 @@ class SupportConsoleTests(unittest.TestCase):
         with self.client.session_transaction() as support_session:
             self.assertEqual(support_session["discord_user"]["id"], "42")
             self.assertTrue(support_session["support_access"])
+            self.assertTrue(support_session.permanent)
+            self.assertIn("support_role_verified_at", support_session)
 
     @patch("logscan_web.support._discord_get")
     @patch("logscan_web.support._discord_token", return_value="access-token")

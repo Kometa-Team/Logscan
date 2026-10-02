@@ -24,7 +24,7 @@ from .models import Finding
 from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_archive_path, scan_content_size, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
-from .support import create_support_blueprint, discord_session_user, support_session_authorized
+from .support import ACCOUNT_SESSION_SECONDS, create_support_blueprint, discord_session_user, support_session_authorized
 
 LOG_INDEX_STRIDE = 1000
 LOG_VIEW_MAX_LINES = 2000
@@ -242,6 +242,7 @@ def create_app() -> Flask:
     app.config["LOGSCAN_API_KEY"] = os.environ.get("LOGSCAN_API_KEY", "")
     app.config["DISCORD_CLIENT_ID"] = os.environ.get("DISCORD_CLIENT_ID", "")
     app.config["DISCORD_CLIENT_SECRET"] = os.environ.get("DISCORD_CLIENT_SECRET", "")
+    app.config["DISCORD_BOT_TOKEN"] = os.environ.get("DISCORD_BOT_TOKEN", "")
     app.config["DISCORD_GUILD_ID"] = os.environ.get("DISCORD_GUILD_ID", "")
     app.config["DISCORD_SUPPORT_ROLE_IDS"] = {
         role.strip()
@@ -253,6 +254,7 @@ def create_app() -> Flask:
     )
     app.config["LOGSCAN_SECRET_KEY"] = os.environ.get("LOGSCAN_SECRET_KEY", "")
     app.secret_key = app.config["LOGSCAN_SECRET_KEY"] or secrets.token_bytes(32)
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(seconds=ACCOUNT_SESSION_SECONDS)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = os.environ.get("LOGSCAN_SECURE_COOKIES", "false").casefold() in {"1", "true", "yes"}
