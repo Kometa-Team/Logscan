@@ -1136,6 +1136,14 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('metadata.kometa_branch === "master" ? "master" : "develop"', script)
         self.assertIn("new Blob([configForDownload()]", script)
 
+    def test_config_viewer_identifies_schema_branch(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        template = Path("logscan_web/templates/index.html").read_text(encoding="utf-8")
+
+        self.assertIn('id="viewer-schema-branch" hidden', template)
+        self.assertIn("Validated against Kometa ${currentSchemaBranch} schema", script)
+        self.assertIn("schemaBranch.hidden = !isConfig", script)
+
     def test_config_download_uses_yaml_extension(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
         self.assertIn('downloadFilename(kind = "log")', script)

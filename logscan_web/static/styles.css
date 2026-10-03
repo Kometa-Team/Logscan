@@ -464,6 +464,7 @@ details[open] .chevron { transform: rotate(90deg); }
 .viewer-header > div { min-width: 0; flex: 1 1 auto; }
 .viewer-header .eyebrow { margin-bottom: 6px; }
 .viewer-header h2 { width: 100%; max-width: 100%; overflow: hidden; font-size: 1.35rem; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-schema-branch { margin: 5px 0 0; color: var(--muted); font-size: .82rem; }
 .viewer-actions { display: flex; align-items: center; gap: 8px; }
 .viewer-actions .icon-button { width: 42px; height: 42px; }
 .viewer-control-unavailable { visibility: hidden; pointer-events: none; }

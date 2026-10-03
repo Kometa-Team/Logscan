@@ -10,10 +10,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260930-5') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261002-3') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
-  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20260930-5') }}" defer></script>
+  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20261002-3') }}" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -131,6 +131,7 @@
         <div>
           <p class="eyebrow" id="viewer-kind">Log viewer</p>
           <h2 id="viewer-filename">Uploaded log</h2>
+          <p class="viewer-schema-branch" id="viewer-schema-branch" hidden></p>
         </div>
         <div class="viewer-actions">
           <button class="secondary-button icon-action" id="open-download" type="button" aria-label="Download files" title="Download files"><i class="fa-solid fa-download" aria-hidden="true"></i></button>
