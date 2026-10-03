@@ -1546,7 +1546,15 @@ def create_app() -> Flask:
                 sections=index["sections"],
                 config=index["config"],
             )
-        return send_file(path.resolve(), mimetype="text/plain; charset=utf-8", conditional=True)
+        record = store.get(scan_id)
+        download_name = record.get("filename") if record else "kometa.log"
+        return send_file(
+            path.resolve(),
+            mimetype="text/plain; charset=utf-8",
+            conditional=True,
+            as_attachment=True,
+            download_name=download_name,
+        )
 
     @app.post("/api/scans/<scan_id>/validate-config")
     def validate_stored_config(scan_id):

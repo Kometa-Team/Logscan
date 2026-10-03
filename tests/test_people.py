@@ -254,6 +254,7 @@ class StreamingScanTests(unittest.TestCase):
         download = app.test_client().get(f"/api/scans/{scan_id}/log")
         self.assertEqual(download.status_code, 200)
         self.assertEqual(download.data, content)
+        self.assertEqual(download.headers["Content-Disposition"], 'attachment; filename=large-meta.log')
     def test_frontend_renders_anonymous_jobs_inline_and_follows_authenticated_redirects(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
         self.assertIn("function renderCompletedJob(result)", script)
