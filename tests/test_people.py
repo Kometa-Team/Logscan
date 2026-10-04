@@ -1159,7 +1159,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         template = Path("logscan_web/templates/index.html").read_text(encoding="utf-8")
 
         self.assertIn('id="viewer-schema-branch" hidden', template)
-        self.assertIn("Validated against Kometa ${currentSchemaBranch} schema", script)
+        self.assertIn("Kometa ${currentSchemaBranch} schema", script)
+        self.assertIn("schemaBranch.dataset.branch = currentSchemaBranch", script)
         self.assertIn("if (schemaBranch)", script)
         self.assertIn("schemaBranch.hidden = !isConfig", script)
 

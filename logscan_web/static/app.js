@@ -699,7 +699,8 @@ function updateViewerMode(mode) {
   document.querySelector("#viewer-filename").textContent = isConfig ? "config.yml" : (currentFile?.name || document.querySelector("#results-title").textContent);
   const schemaBranch = document.querySelector("#viewer-schema-branch");
   if (schemaBranch) {
-    schemaBranch.textContent = `Validated against Kometa ${currentSchemaBranch} schema`;
+    schemaBranch.textContent = `Kometa ${currentSchemaBranch} schema`;
+    schemaBranch.dataset.branch = currentSchemaBranch;
     schemaBranch.hidden = !isConfig;
   }
   const toggle = document.querySelector("#toggle-viewer-content");
