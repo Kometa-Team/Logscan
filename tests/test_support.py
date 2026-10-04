@@ -357,7 +357,8 @@ class SupportConsoleTests(unittest.TestCase):
         self.authorize_session()
         body = self.client.get("/support/logs?severity=schema").get_data(as_text=True)
         self.assertIn("discord-example.log", body)
-        self.assertIn('<span class="severity-chip schema" title="Schema">3</span>', body)
+        self.assertIn('<span class="severity-chip schema" title="Schema: 3">3</span>', body)
+        self.assertIn('<span class="severity-chip error" title="Error: 0">0</span>', body)
     @patch("logscan_web.support.urlopen")
     def test_discord_requests_send_explicit_user_agent(self, mocked_urlopen):
         response = mocked_urlopen.return_value.__enter__.return_value
@@ -414,6 +415,9 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertNotIn("width: min(1600px, calc(100% - 40px))", css)
         self.assertIn("{% set wide_header = true %}", template)
         self.assertIn("severity == 'schema' or row.counts[severity]", template)
+        self.assertIn('class="support-severities" aria-label="Finding counts"', template)
+        self.assertIn('title="{{ severity|title }}: {{ row.counts[severity] }}"', template)
+        self.assertNotIn("{% if row.counts[severity] %}<span class=\"severity-chip", template)
         self.assertIn("row.schema_count_available", template)
         self.assertIn("Unavailable", template)
         self.assertIn("Expires in", template)
