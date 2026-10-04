@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
@@ -379,6 +380,15 @@ def _parsed_datetime(value, fallback: datetime | None = None) -> datetime:
         return fallback or datetime.fromtimestamp(0, UTC)
 
 
+def _kometa_branch(metadata: dict) -> str:
+    branch = str(metadata.get("kometa_branch") or "").casefold()
+    if branch in {"nightly", "develop", "master"}:
+        return branch
+    version = str(metadata.get("kometa_version") or "")
+    match = re.search(r"\b(?:docker|git):\s*(nightly|develop|master)\b", version, re.IGNORECASE)
+    return match.group(1).casefold() if match else "unknown"
+
+
 def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     metadata = record.get("metadata") or {}
     overview = record.get("overview") or {}
@@ -417,7 +427,7 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         "schema_count_available": schema_count_available,
         "counts": counts,
         "kometa_version": metadata.get("kometa_version") or "Unknown",
-        "kometa_branch": metadata.get("kometa_branch") or "unknown",
+        "kometa_branch": _kometa_branch(metadata),
         "platform": metadata.get("runtime_platform") or "Unknown",
         "installation": metadata.get("installation_method") or "Unknown",
         "quickstart_run": bool(metadata.get("quickstart_run")),

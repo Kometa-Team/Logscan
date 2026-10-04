@@ -376,8 +376,8 @@ class SupportConsoleTests(unittest.TestCase):
             metadata={
                 "size_bytes": 1024,
                 "line_count": 50,
-                "kometa_version": "2.5.1",
-                "kometa_branch": "master",
+                "kometa_version": "2.5.1 (Docker: master)",
+                "kometa_branch": "unknown",
                 "quickstart_run": False,
                 "complete": True,
             },
