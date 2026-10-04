@@ -334,6 +334,7 @@ class SupportConsoleTests(unittest.TestCase):
                 "size_bytes": 1024,
                 "line_count": 50,
                 "kometa_version": "2.5.1",
+                "kometa_branch": "master",
                 "quickstart_run": False,
                 "complete": True,
             },
@@ -353,6 +354,59 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("direct-example.log", direct)
         self.assertNotIn("discord-example.log", direct)
         self.assertIn('<option value="direct" selected>Not Quickstart</option>', direct)
+
+    def test_inventory_filters_kometa_branches(self):
+        nightly_result = SimpleNamespace(
+            filename="nightly-example.log",
+            recommendations=[],
+            metadata={
+                "size_bytes": 1024,
+                "line_count": 50,
+                "kometa_version": "2.6.0-build1",
+                "kometa_branch": "nightly",
+                "quickstart_run": False,
+                "complete": True,
+            },
+            overview={"uploaded_by": "Support Person", "uploaded_by_id": "42"},
+            categories=[],
+        )
+        master_result = SimpleNamespace(
+            filename="master-example.log",
+            recommendations=[],
+            metadata={
+                "size_bytes": 1024,
+                "line_count": 50,
+                "kometa_version": "2.5.1",
+                "kometa_branch": "master",
+                "quickstart_run": False,
+                "complete": True,
+            },
+            overview={"uploaded_by": "Support Person", "uploaded_by_id": "42"},
+            categories=[],
+        )
+        self.store.create("nightly-example.log", b"log", nightly_result)
+        self.store.create("master-example.log", b"log", master_result)
+        self.authorize_session()
+
+        develop = self.client.get("/support/logs?branch=develop").get_data(as_text=True)
+        self.assertIn("discord-example.log", develop)
+        self.assertNotIn("nightly-example.log", develop)
+        self.assertNotIn("master-example.log", develop)
+        self.assertIn('<option value="develop" selected>Develop</option>', develop)
+        self.assertIn("branch=develop", develop)
+
+        nightly = self.client.get("/support/logs?branch=nightly").get_data(as_text=True)
+        self.assertIn("nightly-example.log", nightly)
+        self.assertNotIn("discord-example.log", nightly)
+        self.assertNotIn("master-example.log", nightly)
+        self.assertIn('<option value="nightly" selected>Nightly</option>', nightly)
+
+        master = self.client.get("/support/logs?branch=master").get_data(as_text=True)
+        self.assertIn("master-example.log", master)
+        self.assertNotIn("discord-example.log", master)
+        self.assertNotIn("nightly-example.log", master)
+        self.assertIn('<option value="master" selected>Master</option>', master)
+
     def test_schema_count_is_backed_by_persisted_validation_metadata(self):
         self.authorize_session()
         body = self.client.get("/support/logs?severity=schema").get_data(as_text=True)

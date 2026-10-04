@@ -186,6 +186,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         query = request.args.get("q", "").strip()
         source_filter = request.args.get("source", "all").casefold()
         launcher_filter = request.args.get("launcher", "all").casefold()
+        branch_filter = request.args.get("branch", "all").casefold()
         severity_filter = request.args.get("severity", "all").casefold()
         sort_key = request.args.get("sort", "created_at")
         direction = request.args.get("direction", "desc")
@@ -224,6 +225,10 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             rows = [row for row in rows if not row["quickstart_run"]]
         else:
             launcher_filter = "all"
+        if branch_filter in {"nightly", "develop", "master"}:
+            rows = [row for row in rows if row["kometa_branch"].casefold() == branch_filter]
+        else:
+            branch_filter = "all"
         if severity_filter in {"critical", "error", "warning", "schema", "advice"}:
             rows = [row for row in rows if row["counts"][severity_filter] > 0]
         elif severity_filter == "none":
@@ -267,6 +272,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             query=query,
             source_filter=source_filter,
             launcher_filter=launcher_filter,
+            branch_filter=branch_filter,
             severity_filter=severity_filter,
             sort_key=sort_key,
             direction=direction,
@@ -423,7 +429,7 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     row["search_text"] = " ".join(
         str(row[key]) for key in (
             "filename", "uploader", "uploader_id", "id", "kometa_version", "platform",
-            "installation", "quickstart_version", "quickstart_branch",
+            "kometa_branch", "installation", "quickstart_version", "quickstart_branch",
         )
     ).casefold()
     return row
