@@ -1249,13 +1249,22 @@ function findingTile(label, severity, count) {
   const tile = document.createElement("button");
   tile.type = "button";
   tile.className = `finding-tile finding-${severity}`;
-  tile.disabled = !Number(count);
+  const hasFindings = Number(count) > 0;
+  tile.disabled = !hasFindings && severity !== "schema";
+  if (severity === "schema" && !hasFindings) {
+    tile.title = "No schema issues detected. Open extracted config";
+    tile.setAttribute("aria-label", tile.title);
+  }
   const value = document.createElement("strong");
   value.textContent = Number(count || 0).toLocaleString();
   const name = document.createElement("span");
   name.textContent = label;
   tile.append(value, name);
   tile.addEventListener("click", () => {
+    if (severity === "schema" && !hasFindings) {
+      showConfigInViewer().catch((error) => alert(error.message));
+      return;
+    }
     const overviewPanel = document.querySelector(".log-overview-details");
     if (overviewPanel) overviewPanel.open = true;
     document.querySelector(`.nav-button[data-group="${severity}"]`)?.click();
