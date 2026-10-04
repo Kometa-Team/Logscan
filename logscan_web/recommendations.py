@@ -17,14 +17,7 @@ SCHEMA_CACHE_SECONDS = 60 * 60
 
 
 def schema_branch_for_log(log_content: str) -> str:
-    """Match schema validation to the config directive, then the Kometa release channel."""
-    directive = re.search(
-        r"yaml-language-server:\s*\$schema=.*?/kometa/(?:refs/heads/)?(master|develop|nightly)/json-schema/config-schema\.json",
-        log_content,
-        flags=re.IGNORECASE,
-    )
-    if directive:
-        return "master" if directive.group(1).lower() == "master" else "develop"
+    """Match schema validation to the logged Kometa release channel."""
     versions = re.findall(r"(?:Newest )?Version:\s*([^\r\n|]+)", log_content, flags=re.IGNORECASE)
     version_text = " ".join(versions).lower()
     if "nightly" in version_text:
