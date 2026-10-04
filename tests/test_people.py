@@ -1351,6 +1351,23 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("master", finding["message"])
         self.assertEqual(result.metadata["kometa_branch"], "nightly")
 
+    def test_retired_nightly_branch_supports_current_version_format(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.2.2 (Python 3.11.5) (Git: nightly) |",
+            "[kometa.py:2] [INFO] | Finished: Run Time: 0:01:01 |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        findings = [
+            item for item in result.recommendations
+            if item["id"] == "retired_nightly_branch"
+        ]
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["severity"], "warning")
+        self.assertEqual(findings[0]["evidence_lines"], [1])
+
+
     def test_traceback_is_critical(self):
         self.assertEqual(next(rule for rule in RULES.values() if rule.id == "traceback").category, "critical")
     def test_internal_server_error_is_critical(self):
