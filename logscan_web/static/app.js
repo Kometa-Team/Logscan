@@ -196,8 +196,9 @@ function showOverview(group, overview) {
     } else {
       definition.textContent = displayValue(value);
     }
-    if (label === "Configuration validation" && Number(overview.yaml_issue_count) > 0) {
-      const openFirstIssue = () => {
+    if (label === "Configuration validation") {
+      const hasSchemaIssues = Number(overview.yaml_issue_count) > 0;
+      const openConfiguration = () => {
         const firstIssue = schemaIssueRecommendations()
           .filter((candidate) => Number(candidate.config_line) > 0)
           .sort((left, right) => Number(left.config_line) - Number(right.config_line))[0];
@@ -206,12 +207,12 @@ function showOverview(group, overview) {
       item.classList.add("overview-validation-issue");
       item.tabIndex = 0;
       item.setAttribute("role", "button");
-      item.setAttribute("aria-label", `${value}. Review the first issue in config.yml`);
-      item.addEventListener("click", openFirstIssue);
+      item.setAttribute("aria-label", hasSchemaIssues ? `${value}. Review the first issue in config.yml` : `${value}. Open extracted config.yml`);
+      item.addEventListener("click", openConfiguration);
       item.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          openFirstIssue();
+          openConfiguration();
         }
       });
     }

@@ -1283,6 +1283,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
 
         self.assertIn('label === "Configuration validation"', script)
+        self.assertNotIn('label === "Configuration validation" && Number(overview.yaml_issue_count) > 0', script)
+        self.assertIn('hasSchemaIssues ? `${value}. Review the first issue in config.yml` : `${value}. Open extracted config.yml`', script)
         self.assertIn('item.classList.add("overview-validation-issue")', script)
         self.assertIn('item.setAttribute("role", "button")', script)
         self.assertIn("showConfigInViewer(Number(firstIssue?.config_line) || 0)", script)
