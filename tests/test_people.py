@@ -1353,6 +1353,7 @@ class RuntimeMetadataTests(unittest.TestCase):
             "mdblist_api_key": "error",
             "mdblist_limit": "error",
             "metadata_attribute": "error",
+            "legacy_mass_metadata_update": "warning",
             "legacy_missing": "warning",
             "plex_no_items": "warning",
             "omdb_api_key": "error",
@@ -1428,6 +1429,27 @@ class RuntimeMetadataTests(unittest.TestCase):
             finding["solution"],
         )
 
+    def test_legacy_mass_metadata_operations_recommend_grouped_replacements(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: develop) |",
+            "[config.py:2] [DEBUG] |     mass_genre_update: tmdb |",
+            "[config.py:3] [DEBUG] |     mass_user_rating_update: imdb |",
+            "[config.py:4] [DEBUG] |     mass_episode_critic_rating_update: tmdb |",
+            "[config.py:5] [DEBUG] |     mass_poster_update: |",
+            "[config.py:6] [DEBUG] |     mass_image_update: |",
+        ])
+
+        result = scan_log("meta.log", content.encode())
+        finding = next(item for item in result.recommendations if item["id"] == "legacy_mass_metadata_update")
+
+        self.assertEqual(finding["severity"], "warning")
+        self.assertEqual(finding["evidence_lines"], [2, 3, 4, 5])
+        self.assertIn("schema-compatible", finding["description"])
+        self.assertIn("`mass_metadata_update.genre`", finding["solution"])
+        self.assertIn("`mass_metadata_update.ratings`", finding["solution"])
+        self.assertIn("`episode_critic`", finding["solution"])
+        self.assertIn("`poster`", finding["solution"])
+        self.assertIn("https://www.kometa.wiki/en/develop/config/operations/#mass-metadata-update", finding["solution"])
     def test_pre_kometa_yaml_keeps_replacement_url_and_evidence(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",

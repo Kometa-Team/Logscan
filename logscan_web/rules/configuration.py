@@ -28,6 +28,7 @@ RULES = (
     _rule("mdblist_attribute", "mdblist_list attribute not allowed"),
     _rule("metadata_attribute", "metadata attribute is required"),
     _same_line_rule("config_subattribute_default", "Config Warning:", "sub-attribute", "not found using"),
+    _rule("legacy_mass_metadata_update", "mass_genre_update:", "mass_content_rating_update:", "mass_original_title_update:", "mass_studio_update:", "mass_originally_available_update:", "mass_added_at_update:", "mass_audience_rating_update:", "mass_critic_rating_update:", "mass_user_rating_update:", "mass_episode_audience_rating_update:", "mass_episode_critic_rating_update:", "mass_episode_user_rating_update:", "mass_poster_update:", "mass_background_update:", "mass_logo_update:", "mass_square_art_update:"),
     _rule("legacy_missing", "missing_path", "save_missing"),
     _rule("legacy_overlay_level", "overlay_level:"),
     _rule("yaml", "ruamel.yaml."),
