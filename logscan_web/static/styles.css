@@ -723,7 +723,8 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-login-error { padding: 10px 12px; border-left: 3px solid var(--critical); background: rgba(244,63,94,.1); color: #fecdd3 !important; }
 .support-logout { padding: 0; border: 0; background: transparent; color: #cbd2f2; font-size: .85rem; }
 .support-logout:hover { color: white; }
-.support-shell { width: min(1600px, calc(100% - 40px)); margin: 0 auto; padding-bottom: 70px; }
+.site-header-wide, .support-shell { width: calc(100% - 40px); max-width: none; }
+.support-shell { margin: 0 auto; padding-bottom: 70px; }
 .support-heading { display: flex; align-items: end; justify-content: space-between; gap: 30px; padding: 42px 0 30px; }
 .support-heading h1 { font-size: 2.25rem; letter-spacing: 0; }
 .support-heading .hero-copy { margin-top: 14px; font-size: .92rem; }
@@ -777,7 +778,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 .support-shell .pagination .secondary-button { display: inline-flex; min-width: 90px; height: 38px; padding: 0 12px; align-items: center; justify-content: center; border: 1px solid var(--border); color: var(--text); }
 @media (max-width: 900px) {
-  .support-shell { width: min(100% - 24px, 1600px); }
+  .site-header-wide, .support-shell { width: calc(100% - 24px); }
   .support-heading { align-items: flex-start; }
   .support-filters { grid-template-columns: 1fr 1fr; }
   .support-search { grid-column: 1 / -1; }

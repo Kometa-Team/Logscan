@@ -14,7 +14,7 @@
     {% set next_direction = 'asc' if sort_key != key or direction == 'desc' else 'desc' %}
     <a class="support-sort{% if sort_key == key %} active{% endif %}" href="{{ url_for('support.logs', view=view_mode, q=query, source=source_filter, launcher=launcher_filter, severity=severity_filter, page_size=page_size, sort=key, direction=next_direction) }}">{{ label }}{% if sort_key == key %}<span aria-hidden="true">{{ '↓' if direction == 'desc' else '↑' }}</span>{% endif %}</a>
   {%- endmacro %}
-  {% set active_page = 'support' %}{% include '_site_header.html' %}
+  {% set active_page = 'support' %}{% set wide_header = true %}{% include '_site_header.html' %}
   <main class="support-shell">
     <section class="support-heading"><div><p class="eyebrow">{{ 'Support console' if is_support_console else 'Discord uploads' }}</p><h1>{{ 'Active logs' if is_support_console else 'My uploads' }}</h1><p class="hero-copy">{{ 'Review every scan currently retained on this server.' if is_support_console else 'Review and manage web scans uploaded while signed in with Discord.' }} Logs disappear automatically at their displayed deletion time.</p></div><div class="support-heading-actions"><div class="support-total"><strong>{{ total_logs }}</strong><span>{{ 'on server' if is_support_console else 'yours' }}</span></div>{% if not is_support_console %}<button class="primary-button support-upload-open" type="button"><span aria-hidden="true">↑</span> Upload log</button>{% endif %}</div></section>
 

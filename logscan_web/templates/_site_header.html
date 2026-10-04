@@ -1,4 +1,4 @@
-<header class="site-header">
+<header class="site-header{% if wide_header|default(false) %} site-header-wide{% endif %}">
   <a class="brand" href="/" aria-label="Kometa Logscan home">
     <img class="brand-mark" src="{{ url_for('static', filename='logscan.png') }}" alt="">
     <span>Kometa Logscan</span>
