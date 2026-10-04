@@ -1760,6 +1760,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 document.querySelector("#view-log").addEventListener("click", () => openLogViewer(1));
+document.querySelector("#view-config").addEventListener("click", () => showConfigInViewer().catch((error) => alert(error.message)));
 document.querySelector("#toggle-viewer-content").addEventListener("click", () => {
   if (viewerMode === "config") openLogViewer(highlightedRange.start);
   else showConfigInViewer().catch((error) => alert(error.message));

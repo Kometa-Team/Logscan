@@ -1293,6 +1293,18 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn(".overview-validation-issue:hover", css)
         self.assertIn("box-shadow: inset 3px 0 0 var(--schema)", css)
 
+    def test_result_header_has_distinct_log_and_config_viewer_actions(self):
+        template = Path("logscan_web/templates/index.html").read_text(encoding="utf-8")
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="view-log"', template)
+        self.assertIn('title="Open raw log"', template)
+        self.assertIn('fa-solid fa-terminal', template)
+        self.assertIn('id="view-config"', template)
+        self.assertIn('title="Open extracted config"', template)
+        self.assertIn('fa-solid fa-file-code', template)
+        self.assertIn('document.querySelector("#view-config").addEventListener("click", () => showConfigInViewer()', script)
+
     def test_yaml_schema_directive_detection_uses_extracted_config(self):
         prefix = "[config.py:1] [INFO] |"
         without_directive = "\n".join([

@@ -317,6 +317,8 @@ h2 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.5rem); letter-spacing: -.04em;
 .icon-action { width: 42px; height: 42px; padding: 0; display: inline-grid; place-items: center; }
 #view-log { border-color: rgba(96, 165, 250, .46); background: rgba(96, 165, 250, .13); color: #bfdbfe; }
 #view-log:hover { border-color: rgba(96, 165, 250, .8); background: rgba(96, 165, 250, .23); color: #dbeafe; }
+#view-config { border-color: rgba(167, 139, 250, .46); background: rgba(167, 139, 250, .13); color: #ddd6fe; }
+#view-config:hover { border-color: rgba(167, 139, 250, .8); background: rgba(167, 139, 250, .23); color: #ede9fe; }
 #open-download-main, #open-download { border-color: rgba(251, 191, 36, .46); background: rgba(251, 191, 36, .13); color: #fde68a; }
 #open-download-main:hover, #open-download:hover { border-color: rgba(251, 191, 36, .8); background: rgba(251, 191, 36, .23); color: #fef3c7; }
 #toggle-viewer-content { border-color: rgba(167, 139, 250, .46); background: rgba(167, 139, 250, .13); color: #ddd6fe; }
