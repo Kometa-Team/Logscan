@@ -464,7 +464,7 @@ details[open] .chevron { transform: rotate(90deg); }
 .viewer-header > div { min-width: 0; flex: 1 1 auto; }
 .viewer-header .eyebrow { margin-bottom: 6px; }
 .viewer-header h2 { width: 100%; max-width: 100%; overflow: hidden; font-size: 1.35rem; text-overflow: ellipsis; white-space: nowrap; }
-.viewer-schema-branch { width: fit-content; margin: 9px 0 0; padding: 5px 9px; border: 1px solid #f0b429; border-radius: 6px; background: rgba(240,180,41,.14); color: #ffe28a; font-size: .78rem; font-weight: 700; text-transform: uppercase; }
+.viewer-schema-branch { width: fit-content; margin: 9px 0 0; padding: 5px 9px; border: 1px solid #4ade80; border-radius: 6px; background: rgba(74,222,128,.13); color: #bbf7d0; font-size: .78rem; font-weight: 700; text-transform: uppercase; }
 .viewer-schema-branch[data-branch="develop"] { border-color: #2dd4bf; background: rgba(45,212,191,.13); color: #99f6e4; }
 .viewer-actions { display: flex; align-items: center; gap: 8px; }
 .viewer-actions .icon-button { width: 42px; height: 42px; }
