@@ -396,6 +396,15 @@ def apply_documentation_branch(recommendations: list[dict], branch: str) -> None
                 recommendation[field] = pattern.sub(target, value)
 
 
+def kometa_branch_from_version(version: str | None) -> str:
+    match = re.search(
+        r"\((?:Branch|Git|Docker):\s*(master|develop|nightly)\)",
+        version or "",
+        re.IGNORECASE,
+    )
+    return match.group(1).casefold() if match else "unknown"
+
+
 def _log_message(line: str) -> str:
     """Return the readable message from a Kometa log line."""
     match = re.match(
@@ -796,8 +805,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     sample_content = "\n".join(sampled)
     version_match = re.search(r"\bVersion:\s*([^|\r\n]+)", sample_content)
     kometa_version = version_match.group(1).strip() if version_match else None
-    branch_match = re.search(r"\(Branch:\s*(master|develop|nightly)\)", sample_content, re.I)
-    kometa_branch = branch_match.group(1).casefold() if branch_match else "unknown"
+    kometa_branch = kometa_branch_from_version(kometa_version)
     quickstart_metadata = extract_quickstart_metadata(sample_content)
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", sample_content)
     detected_run_time = run_match.group(1).strip() if run_match else None
@@ -942,8 +950,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
 
     version_match = re.search(r"\bVersion:\s*([^|\r\n]+)", content)
     kometa_version = version_match.group(1).strip() if version_match else None
-    kometa_branch_match = re.search(r"\(Branch:\s*(master|develop|nightly)\)", content, re.IGNORECASE)
-    kometa_branch = kometa_branch_match.group(1).casefold() if kometa_branch_match else "unknown"
+    kometa_branch = kometa_branch_from_version(kometa_version)
     quickstart_metadata = extract_quickstart_metadata(content)
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", content)
     detected_run_time = run_match.group(1).strip() if run_match else None

@@ -1366,6 +1366,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["severity"], "warning")
         self.assertEqual(findings[0]["evidence_lines"], [1])
+        self.assertEqual(result.metadata["kometa_branch"], "nightly")
 
 
     def test_traceback_is_critical(self):
