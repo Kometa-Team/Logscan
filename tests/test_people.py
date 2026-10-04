@@ -1299,7 +1299,7 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn('id="view-log"', template)
         self.assertIn('title="Open raw log"', template)
-        self.assertIn('fa-solid fa-terminal', template)
+        self.assertIn('fa-solid fa-file-lines', template)
         self.assertIn('id="view-config"', template)
         self.assertIn('title="Open extracted config"', template)
         self.assertIn('fa-solid fa-file-code', template)
