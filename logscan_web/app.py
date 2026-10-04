@@ -21,7 +21,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_file, ur
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
-from .recommendations import has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
+from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_archive_path, scan_content_size, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
 from .support import ACCOUNT_SESSION_SECONDS, create_support_blueprint, discord_session_user, support_session_authorized
@@ -153,6 +153,21 @@ POPULAR_PEOPLE_LIMIT = 250
 POPULAR_PEOPLE_CHECK_SECONDS = 30 * 24 * 60 * 60
 KOMETA_VERSION_CACHE_SECONDS = 60 * 60
 KOMETA_VERSION_URL = "https://raw.githubusercontent.com/Kometa-Team/Kometa/{branch}/VERSION"
+
+
+def _schema_validation_is_fresh(metadata: dict) -> bool:
+    if metadata.get("schema_validation_version") != SCHEMA_VALIDATION_VERSION:
+        return False
+    try:
+        validated_at = datetime.fromisoformat(metadata["schema_validation_checked_at"])
+        if validated_at.tzinfo is None:
+            validated_at = validated_at.replace(tzinfo=UTC)
+    except (KeyError, TypeError, ValueError):
+        return False
+    age = datetime.now(UTC) - validated_at.astimezone(UTC)
+    return timedelta(0) <= age < timedelta(seconds=SCHEMA_CACHE_SECONDS)
+
+
 _kometa_version_cache = {"checked_at": None, "expires_at": 0.0, "versions": {}}
 _kometa_version_lock = threading.Lock()
 TMDB_FIND_CACHE_SECONDS = 7 * 24 * 60 * 60
@@ -867,7 +882,7 @@ def create_app() -> Flask:
     def backfill_schema_validation_counts():
         records = [
             record for record in store.list()
-            if (record.get("metadata") or {}).get("schema_validation_version") != SCHEMA_VALIDATION_VERSION
+            if not _schema_validation_is_fresh(record.get("metadata") or {})
         ]
         if not records:
             return
@@ -895,6 +910,7 @@ def create_app() -> Flask:
                 schema_validation_failures=failures,
                 schema_directive_missing=not has_yaml_language_server_directive(log_content),
                 schema_validation_version=SCHEMA_VALIDATION_VERSION,
+                schema_validation_checked_at=datetime.now(UTC).isoformat(),
             )
             completed += 1
             time.sleep(0.5)
@@ -1282,6 +1298,7 @@ def create_app() -> Flask:
                     result.metadata["schema_validation_failures"] = schema_failures
                     result.metadata["schema_directive_missing"] = not has_yaml_language_server_directive(log_content)
                     result.metadata["schema_validation_version"] = SCHEMA_VALIDATION_VERSION
+                    result.metadata["schema_validation_checked_at"] = datetime.now(UTC).isoformat()
                     result.metadata["counts"]["schema"] = len(schema_failures)
                 except ValueError:
                     result.metadata["schema_validation_count"] = 0
@@ -1565,7 +1582,7 @@ def create_app() -> Flask:
         cached_failures = metadata.get("schema_validation_failures")
         if (
             isinstance(cached_failures, list)
-            and metadata.get("schema_validation_version") == SCHEMA_VALIDATION_VERSION
+            and _schema_validation_is_fresh(metadata)
         ):
             return jsonify(
                 branch=metadata.get("schema_validation_branch", "master"),
@@ -1587,6 +1604,7 @@ def create_app() -> Flask:
                 schema_validation_failures=failures,
                 schema_directive_missing=directive_missing,
                 schema_validation_version=SCHEMA_VALIDATION_VERSION,
+                schema_validation_checked_at=datetime.now(UTC).isoformat(),
             )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

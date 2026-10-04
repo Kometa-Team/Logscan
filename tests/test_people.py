@@ -14,7 +14,7 @@ import threading
 import time
 import unittest
 from types import SimpleNamespace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,7 +31,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
     ],
 }), encoding="utf-8")
 
-from logscan_web.app import add_missing_people_recommendations, app, create_app
+from logscan_web.app import SCHEMA_VALIDATION_VERSION, _schema_validation_is_fresh, add_missing_people_recommendations, app, create_app
 from logscan_web.scanner import (
     MAX_FILE_BYTES,
     STREAM_SCAN_THRESHOLD,
@@ -1112,12 +1112,29 @@ class RuntimeMetadataTests(unittest.TestCase):
             with patch("logscan_web.recommendations.urlopen", side_effect=TimeoutError):
                 self.assertEqual(validate_redacted_config(log, schema_cache_dir=cache_dir), [])
 
+    def test_persisted_schema_validation_expires_with_schema_cache(self):
+        now = datetime.now(UTC)
+        base = {"schema_validation_version": SCHEMA_VALIDATION_VERSION}
+
+        self.assertTrue(_schema_validation_is_fresh({
+            **base, "schema_validation_checked_at": now.isoformat(),
+        }))
+        self.assertFalse(_schema_validation_is_fresh(base))
+        self.assertFalse(_schema_validation_is_fresh({
+            **base, "schema_validation_checked_at": (now - timedelta(hours=2)).isoformat(),
+        }))
+        self.assertFalse(_schema_validation_is_fresh({
+            **base, "schema_validation_checked_at": (now + timedelta(minutes=1)).isoformat(),
+        }))
+
     def test_schema_results_are_persisted_and_drive_the_page_count(self):
         source = Path("logscan_web/app.py").read_text(encoding="utf-8")
 
         self.assertIn('result.metadata["schema_validation_failures"] = schema_failures', source)
         self.assertIn('metadata.setdefault("counts", {})["schema"] = schema_count', source)
-        self.assertIn('metadata.get("schema_validation_version") == SCHEMA_VALIDATION_VERSION', source)
+        self.assertIn('if metadata.get("schema_validation_version") != SCHEMA_VALIDATION_VERSION', source)
+        self.assertIn('schema_validation_checked_at=datetime.now(UTC).isoformat()', source)
+        self.assertIn('if not _schema_validation_is_fresh(record.get("metadata") or {})', source)
 
     def test_config_viewer_marks_exact_schema_issue_ranges(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
