@@ -33,11 +33,11 @@ def support_session_authorized() -> bool:
     legacy_support_session = bool(session.get("support_user") and "support_access" not in session)
     if legacy_support_session:
         return True
-    if not session.get("support_access"):
-        return False
 
     bot_token = current_app.config.get("DISCORD_BOT_TOKEN", "")
     if not bot_token:
+        if not session.get("support_access"):
+            return False
         verified_at = session.get("support_role_verified_at", session.get("support_authorized_at", 0))
         return time.time() - verified_at <= SUPPORT_ROLE_FALLBACK_SECONDS
 

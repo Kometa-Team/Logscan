@@ -82,10 +82,11 @@ Developer Portal, register the configured callback under OAuth2 Redirects.
 Enable Discord Developer Mode to copy the server and role IDs. Sign-in requests
 only `identify` and `guilds.members.read` and store no Discord OAuth access token.
 Account sessions persist for 30 days. When `DISCORD_BOT_TOKEN` is configured,
-every privileged request revalidates support membership against Discord and denies
-access if validation fails; repeated checks within one request share a single lookup.
-Without a bot token, the role assertion expires after eight hours and requires a
-fresh OAuth sign-in.
+support membership is revalidated against Discord on each request (including users
+who gained a support role after signing in), and access is denied if validation
+fails; repeated checks within one request share a single lookup. Without a bot
+token, the role assertion expires after eight hours and requires a fresh OAuth
+sign-in.
 
 ## Production
 

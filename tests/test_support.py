@@ -104,6 +104,18 @@ class SupportConsoleTests(unittest.TestCase):
                     headers={"Authorization": "Bot bot-secret"},
                 )
 
+    def test_newly_granted_support_role_is_recognized_without_signing_in_again(self):
+        self.app.config["DISCORD_BOT_TOKEN"] = "bot-secret"
+        with self.app.test_request_context("/"):
+            from flask import session
+            from logscan_web.support import support_session_authorized
+
+            session["discord_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time()
+            session["support_access"] = False
+            with patch("logscan_web.support._discord_request", return_value={"roles": ["support-role"]}):
+                self.assertTrue(support_session_authorized())
+
     def test_live_role_removal_and_discord_errors_fail_closed(self):
         self.app.config["DISCORD_BOT_TOKEN"] = "bot-secret"
         with self.app.test_request_context("/"):
