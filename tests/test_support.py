@@ -67,6 +67,37 @@ class SupportConsoleTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_analysis_replacement_preserves_scan_identity_and_source_log(self):
+        before = self.store.get(self.scan_id)
+        log_before = self.store.log_path(self.scan_id).read_bytes()
+        replacement = SimpleNamespace(
+            filename="discord-example.log",
+            recommendations=[{"id": "new-rule", "severity": "advice", "title": "New result"}],
+            metadata={"analysis_version": 1, "counts": {"advice": 1}},
+            overview={"finding_count": 1},
+            categories=[{"key": "advice"}],
+        )
+
+        self.assertTrue(self.store.replace_analysis(self.scan_id, replacement))
+        after = self.store.get(self.scan_id)
+
+        self.assertEqual(after["id"], before["id"])
+        self.assertEqual(after["created_at"], before["created_at"])
+        self.assertEqual(after["delete_token_hash"], before["delete_token_hash"])
+        self.assertEqual(after["metadata"]["analysis_version"], 1)
+        self.assertEqual(after["recommendations"][0]["id"], "new-rule")
+        self.assertEqual(self.store.log_path(self.scan_id).read_bytes(), log_before)
+
+    def test_startup_migration_versions_and_reprocesses_retained_scans(self):
+        source = Path("logscan_web/app.py").read_text(encoding="utf-8")
+
+        self.assertIn("ANALYSIS_VERSION = 1", source)
+        self.assertIn('if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION', source)
+        self.assertIn("scan_archive_path(record.get(\"filename\") or \"kometa.log\", path)", source)
+        self.assertIn("backfill_scan_analysis()", source)
+        self.assertIn("backfill_schema_validation_counts()", source)
+        self.assertIn('name="retained-scan-migration"', source)
+
     def authorize_session(self):
         with self.client.session_transaction() as support_session:
             support_session["support_authorized_at"] = 9999999999

@@ -116,6 +116,24 @@ class ScanStore:
         temporary.replace(result_path)
         return True
 
+    def replace_analysis(self, scan_id: str, result) -> bool:
+        """Atomically replace derived scan output without changing record identity."""
+        record = self.get(scan_id)
+        if record is None:
+            return False
+        record.update({
+            "filename": result.filename,
+            "recommendations": result.recommendations,
+            "metadata": result.metadata,
+            "overview": result.overview,
+            "categories": result.categories,
+        })
+        result_path = self.root / scan_id / "result.json"
+        temporary = self.root / scan_id / "result.json.tmp"
+        temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(result_path)
+        return True
+
     def delete(self, scan_id: str, token: str) -> bool:
         record = self.get(scan_id)
         if record is None:

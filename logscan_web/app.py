@@ -136,6 +136,7 @@ def _stored_log_lines(path: Path, index: dict, start: int, count: int) -> list[s
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
+ANALYSIS_VERSION = 1
 SCHEMA_VALIDATION_VERSION = 4
 POPULAR_PEOPLE_PAGE_SIZE = 25
 TMDB_POPULAR_PAGE_SIZE = 20
@@ -915,6 +916,63 @@ def create_app() -> Flask:
             completed += 1
             time.sleep(0.5)
         app.logger.info("Backfilled schema validation counts for %d of %d retained scan(s).", completed, len(records))
+
+    def backfill_scan_analysis():
+        records = [
+            record for record in store.list()
+            if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION
+        ]
+        if not records:
+            return
+        app.logger.info("Reprocessing %d retained scan(s) with analysis version %d.", len(records), ANALYSIS_VERSION)
+        completed = 0
+        for record in records:
+            scan_id = record.get("id", "")
+            path = store.log_path(scan_id)
+            if path is None:
+                continue
+            try:
+                scans = scan_archive_path(record.get("filename") or "kometa.log", path)
+                if len(scans) != 1:
+                    raise ScanError("A retained scan must contain exactly one extracted log.")
+                _filename, _content, result = scans[0]
+            except (OSError, ScanError) as exc:
+                app.logger.warning("Retained scan reprocessing failed for %s: %s", scan_id, exc)
+                continue
+
+            previous_metadata = record.get("metadata") or {}
+            for key in (
+                "archive_compressed_size", "archive_uncompressed_size", "archive_compression_ratio",
+                "archive_reduction_percent", "schema_validation_count", "schema_validation_branch",
+                "schema_directive_missing",
+            ):
+                if key in previous_metadata:
+                    result.metadata[key] = previous_metadata[key]
+            result.metadata["analysis_version"] = ANALYSIS_VERSION
+
+            previous_overview = record.get("overview") or {}
+            for key in ("upload_source", "uploaded_by", "uploaded_by_id", "message_url"):
+                if key in previous_overview:
+                    result.overview[key] = previous_overview[key]
+
+            enriched_ids = {"missing_people_images_available", "missing_people_images_pending"}
+            current_ids = {item.get("id") for item in result.recommendations}
+            result.recommendations.extend(
+                item for item in (record.get("recommendations") or [])
+                if item.get("id") in enriched_ids and item.get("id") not in current_ids
+            )
+            result.recommendations.sort(
+                key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]]
+            )
+            _finalize_result_metrics(
+                result,
+                previous_metadata.get("archive_compressed_size"),
+                previous_metadata.get("archive_uncompressed_size"),
+            )
+            if store.replace_analysis(scan_id, result):
+                completed += 1
+        app.logger.info("Reprocessed %d of %d retained scan(s).", completed, len(records))
+
     def backfill_quickstart_metadata():
         records = [
             record for record in store.list()
@@ -940,6 +998,11 @@ def create_app() -> Flask:
                 completed += 1
         app.logger.info("Backfilled Quickstart metadata for %d of %d retained scan(s).", completed, len(records))
 
+    def backfill_retained_scans():
+        backfill_scan_analysis()
+        backfill_schema_validation_counts()
+        backfill_quickstart_metadata()
+
     def cleanup_loop():
         while True:
             try:
@@ -955,8 +1018,7 @@ def create_app() -> Flask:
     store.delete_expired(RETENTION_SECONDS)
     if not app.config.get("TESTING"):
         threading.Thread(target=cleanup_loop, name="logscan-cleanup", daemon=True).start()
-        threading.Thread(target=backfill_schema_validation_counts, name="schema-count-backfill", daemon=True).start()
-        threading.Thread(target=backfill_quickstart_metadata, name="quickstart-metadata-backfill", daemon=True).start()
+        threading.Thread(target=backfill_retained_scans, name="retained-scan-migration", daemon=True).start()
 
     @app.context_processor
     def service_usage():
@@ -1285,6 +1347,7 @@ def create_app() -> Flask:
             if archive_compressed_size is not None else None
         )
         for filename, content, result in scans:
+            result.metadata["analysis_version"] = ANALYSIS_VERSION
             if not app.config.get("TESTING"):
                 try:
                     log_content = (
