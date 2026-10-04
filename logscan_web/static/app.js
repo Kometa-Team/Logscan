@@ -698,8 +698,10 @@ function updateViewerMode(mode) {
   document.querySelector("#viewer-kind").textContent = isConfig ? "Extracted configuration" : "Log viewer";
   document.querySelector("#viewer-filename").textContent = isConfig ? "config.yml" : (currentFile?.name || document.querySelector("#results-title").textContent);
   const schemaBranch = document.querySelector("#viewer-schema-branch");
-  schemaBranch.textContent = `Validated against Kometa ${currentSchemaBranch} schema`;
-  schemaBranch.hidden = !isConfig;
+  if (schemaBranch) {
+    schemaBranch.textContent = `Validated against Kometa ${currentSchemaBranch} schema`;
+    schemaBranch.hidden = !isConfig;
+  }
   const toggle = document.querySelector("#toggle-viewer-content");
   toggle.setAttribute("aria-label", isConfig ? "View log" : "View config");
   toggle.title = isConfig ? "View log" : "View config";

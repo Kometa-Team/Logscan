@@ -1160,6 +1160,7 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn('id="viewer-schema-branch" hidden', template)
         self.assertIn("Validated against Kometa ${currentSchemaBranch} schema", script)
+        self.assertIn("if (schemaBranch)", script)
         self.assertIn("schemaBranch.hidden = !isConfig", script)
 
     def test_config_download_uses_yaml_extension(self):
