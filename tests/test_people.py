@@ -1313,6 +1313,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(schema_branch_for_log("Version: 2.2.0 (Branch: master)"), "master")
         self.assertEqual(schema_branch_for_log("Version: 2.3.0 (Branch: develop)"), "develop")
         self.assertEqual(schema_branch_for_log("Version: 2.1.0 (Branch: nightly)"), "develop")
+        self.assertEqual(schema_branch_for_log("""Version: 2.5.1 (Docker: master)
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kometa-team/kometa/nightly/json-schema/config-schema.json"""), "develop")
     def test_retired_nightly_branch_recommends_develop_or_master(self):
         content = "\n".join([
             "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",

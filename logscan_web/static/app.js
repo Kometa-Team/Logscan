@@ -1455,6 +1455,7 @@ async function loadSchemaValidation(data) {
     const validation = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(validation.error || "Schema validation could not run.");
     currentSchemaBranch = validation.branch === "master" ? "master" : "develop";
+    updated.metadata.schema_validation_branch = currentSchemaBranch;
     schemaValidationFailures = validation.failures || [];
     if (validation.schema_directive_missing) {
       const schemaUrl = `https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/${currentSchemaBranch}/json-schema/config-schema.json`;
@@ -1533,7 +1534,7 @@ function renderResults(data, runSchemaValidation = true) {
         ? "No schema issues detected"
         : "Live schema validation pending";
   currentRecommendations = recommendations;
-  currentSchemaBranch = metadata.kometa_branch === "master" ? "master" : "develop";
+  currentSchemaBranch = metadata.schema_validation_branch || (metadata.kometa_branch === "master" ? "master" : "develop");
   currentOverview = overview;
   if (data.expires_at) {
     overview.auto_delete = formatOverviewTimestamp(data.expires_at);
