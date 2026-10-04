@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -97,6 +98,26 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("backfill_scan_analysis()", source)
         self.assertIn("backfill_schema_validation_counts()", source)
         self.assertIn('name="retained-scan-migration"', source)
+
+    def test_concurrent_metadata_updates_are_serialized(self):
+        failures = []
+
+        def update(index):
+            try:
+                self.store.update_metadata(self.scan_id, **{f"migration_value_{index}": index})
+            except Exception as exc:
+                failures.append(exc)
+
+        workers = [threading.Thread(target=update, args=(index,)) for index in range(12)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+
+        self.assertEqual(failures, [])
+        metadata = self.store.get(self.scan_id)["metadata"]
+        for index in range(12):
+            self.assertEqual(metadata[f"migration_value_{index}"], index)
 
     def authorize_session(self):
         with self.client.session_transaction() as support_session:

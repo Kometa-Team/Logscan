@@ -16,6 +16,7 @@ from pathlib import Path
 class ScanStore:
     def __init__(self, root: str | os.PathLike[str]):
         self.root = Path(root)
+        self.lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def create(self, filename: str, content: bytes, result) -> tuple[str, str]:
@@ -106,33 +107,35 @@ class ScanStore:
 
     def update_metadata(self, scan_id: str, **values) -> bool:
         """Persist trusted derived metadata for an existing scan."""
-        record = self.get(scan_id)
-        if record is None:
-            return False
-        record.setdefault("metadata", {}).update(values)
-        result_path = self.root / scan_id / "result.json"
-        temporary = self.root / scan_id / "result.json.tmp"
-        temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(result_path)
-        return True
+        with self.lock:
+            record = self.get(scan_id)
+            if record is None:
+                return False
+            record.setdefault("metadata", {}).update(values)
+            result_path = self.root / scan_id / "result.json"
+            temporary = self.root / scan_id / "result.json.tmp"
+            temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(result_path)
+            return True
 
     def replace_analysis(self, scan_id: str, result) -> bool:
         """Atomically replace derived scan output without changing record identity."""
-        record = self.get(scan_id)
-        if record is None:
-            return False
-        record.update({
-            "filename": result.filename,
-            "recommendations": result.recommendations,
-            "metadata": result.metadata,
-            "overview": result.overview,
-            "categories": result.categories,
-        })
-        result_path = self.root / scan_id / "result.json"
-        temporary = self.root / scan_id / "result.json.tmp"
-        temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
-        temporary.replace(result_path)
-        return True
+        with self.lock:
+            record = self.get(scan_id)
+            if record is None:
+                return False
+            record.update({
+                "filename": result.filename,
+                "recommendations": result.recommendations,
+                "metadata": result.metadata,
+                "overview": result.overview,
+                "categories": result.categories,
+            })
+            result_path = self.root / scan_id / "result.json"
+            temporary = self.root / scan_id / "result.json.tmp"
+            temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(result_path)
+            return True
 
     def delete(self, scan_id: str, token: str) -> bool:
         record = self.get(scan_id)
