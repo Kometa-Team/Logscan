@@ -38,6 +38,38 @@ def _format_bytes(value: int) -> str:
         if size < 1024 or unit == "GB":
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
+
+
+def _download_filename_part(value: object, fallback: str, limit: int) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"\s+", "-", normalized.strip())
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", normalized)
+    normalized = re.sub(r"-+", "-", normalized).strip(" .-_")
+    return (normalized or fallback)[:limit].rstrip(" .-_") or fallback
+
+
+def _download_artifact_names(record: dict) -> dict[str, str]:
+    original_name = re.split(r"[\\/]", str(record.get("filename") or "kometa.log"))[-1]
+    original_stem = Path(original_name).stem
+    stem = _download_filename_part(original_stem, "kometa", 80)
+    overview = record.get("overview") or {}
+    source = str(overview.get("upload_source") or "web").casefold()
+    source = source if source in {"discord", "web"} else "web"
+    uploader = _download_filename_part(overview.get("uploaded_by"), "anonymous", 50)
+    try:
+        created = datetime.fromisoformat(str(record.get("created_at") or "").replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        timestamp = created.astimezone(UTC).strftime("%Y%m%d-%H%M%SZ")
+    except ValueError:
+        timestamp = "unknown-time"
+    base = f"{stem}--{source}-{uploader}--{timestamp}"
+    return {
+        "base": base,
+        "log": f"{base}.log",
+        "config": f"{base}-config.yml",
+        "archive": f"{base}-files.zip",
+    }
     return f"{size:.1f} GB"
 
 
@@ -1627,7 +1659,7 @@ def create_app() -> Flask:
                 config=index["config"],
             )
         record = store.get(scan_id)
-        download_name = record.get("filename") if record else "kometa.log"
+        download_name = _download_artifact_names(record or {})["log"]
         return send_file(
             path.resolve(),
             mimetype="text/plain; charset=utf-8",
@@ -1657,14 +1689,13 @@ def create_app() -> Flask:
             schema_url = f"https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/{branch}/json-schema/config-schema.json"
             config = f"# yaml-language-server: $schema={schema_url}\n{config}"
 
-        original_name = Path(record.get("filename") or "kometa.log").name
-        stem = Path(original_name).stem or "kometa"
+        names = _download_artifact_names(record)
         if kind == "config":
             return send_file(
                 BytesIO(config.encode("utf-8")),
                 mimetype="text/yaml; charset=utf-8",
                 as_attachment=True,
-                download_name=f"{stem}-config.yml",
+                download_name=names["config"],
             )
 
         temporary = tempfile.NamedTemporaryFile(prefix="logscan-download-", suffix=".zip", delete=False)
@@ -1672,13 +1703,13 @@ def create_app() -> Flask:
         temporary.close()
         try:
             with zipfile.ZipFile(temporary_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
-                archive.write(path, arcname=original_name)
-                archive.writestr("config.yml", config)
+                archive.write(path, arcname=names["log"])
+                archive.writestr(names["config"], config)
             response = send_file(
                 temporary_path,
                 mimetype="application/zip",
                 as_attachment=True,
-                download_name=f"{stem}-files.zip",
+                download_name=names["archive"],
             )
             response.call_on_close(lambda: temporary_path.unlink(missing_ok=True))
             return response

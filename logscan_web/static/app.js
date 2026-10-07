@@ -1867,8 +1867,8 @@ async function downloadLog() {
   } else {
     const lines = await loadLogLines();
     link.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" }));
+    link.download = downloadFilename();
   }
-  link.download = downloadFilename();
   link.click();
   if (!currentScanId) URL.revokeObjectURL(link.href);
 }

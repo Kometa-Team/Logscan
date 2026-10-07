@@ -3,6 +3,7 @@ import gzip
 import py7zr
 import json
 import lzma
+import re
 from io import BytesIO
 from jsonschema import Draft7Validator
 import zipfile
@@ -31,7 +32,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
     ],
 }), encoding="utf-8")
 
-from logscan_web.app import SCHEMA_VALIDATION_VERSION, _schema_validation_is_fresh, add_missing_people_recommendations, app, create_app
+from logscan_web.app import SCHEMA_VALIDATION_VERSION, _download_artifact_names, _schema_validation_is_fresh, add_missing_people_recommendations, app, create_app
 from logscan_web.scanner import (
     MAX_FILE_BYTES,
     STREAM_SCAN_THRESHOLD,
@@ -254,7 +255,10 @@ class StreamingScanTests(unittest.TestCase):
         download = app.test_client().get(f"/api/scans/{scan_id}/log")
         self.assertEqual(download.status_code, 200)
         self.assertEqual(download.data, content)
-        self.assertEqual(download.headers["Content-Disposition"], 'attachment; filename=large-meta.log')
+        self.assertRegex(
+            download.headers["Content-Disposition"],
+            r'attachment; filename=large-meta--web-anonymous--\d{8}-\d{6}Z\.log',
+        )
 
         missing_config = app.test_client().get(f"/api/scans/{scan_id}/download/config")
         self.assertEqual(missing_config.status_code, 409)
@@ -281,17 +285,46 @@ class StreamingScanTests(unittest.TestCase):
 
         config = client.get(f"/api/scans/{scan_id}/download/config")
         self.assertEqual(config.status_code, 200)
-        self.assertIn("download-meta-config.yml", config.headers["Content-Disposition"])
+        config_name = re.search(r"filename=([^;]+)", config.headers["Content-Disposition"]).group(1).strip('"')
+        self.assertRegex(config_name, r"download-meta--web-anonymous--\d{8}-\d{6}Z-config\.yml")
         self.assertIn(b"refs/heads/master/json-schema/config-schema.json", config.data)
         self.assertIn(b"libraries:\n  Movies:", config.data)
 
         combined = client.get(f"/api/scans/{scan_id}/download/both")
         self.assertEqual(combined.status_code, 200)
-        self.assertIn("download-meta-files.zip", combined.headers["Content-Disposition"])
+        archive_name = re.search(r"filename=([^;]+)", combined.headers["Content-Disposition"]).group(1).strip('"')
+        self.assertEqual(archive_name, config_name.removesuffix("-config.yml") + "-files.zip")
         with zipfile.ZipFile(BytesIO(combined.data)) as archive:
-            self.assertEqual(set(archive.namelist()), {"download-meta.log", "config.yml"})
-            self.assertEqual(archive.read("download-meta.log"), content)
-            self.assertEqual(archive.read("config.yml"), config.data)
+            log_name = config_name.removesuffix("-config.yml") + ".log"
+            self.assertEqual(set(archive.namelist()), {log_name, config_name})
+            self.assertEqual(archive.read(log_name), content)
+            self.assertEqual(archive.read(config_name), config.data)
+
+    def test_download_artifact_names_are_stable_across_upload_sources(self):
+        created_at = "2026-10-06T22:45:00-04:00"
+        cases = (
+            (
+                {"filename": "/home/elio/kometa/meta-4.log", "created_at": created_at, "overview": {"upload_source": "discord", "uploaded_by": "Elio"}},
+                "meta-4--discord-Elio--20261007-024500Z",
+            ),
+            (
+                {"filename": r"C:\\logs\\meta.log", "created_at": created_at, "overview": {"upload_source": "web", "uploaded_by": "Bull Moose"}},
+                "meta--web-Bull-Moose--20261007-024500Z",
+            ),
+            (
+                {"filename": "meta.log", "created_at": created_at, "overview": {"upload_source": "web"}},
+                "meta--web-anonymous--20261007-024500Z",
+            ),
+        )
+
+        for record, base in cases:
+            with self.subTest(base=base):
+                self.assertEqual(_download_artifact_names(record), {
+                    "base": base,
+                    "log": f"{base}.log",
+                    "config": f"{base}-config.yml",
+                    "archive": f"{base}-files.zip",
+                })
 
     def test_stored_config_download_preserves_existing_schema_directive(self):
         directive = "# yaml-language-server: $schema=https://example.test/config-schema.json"
@@ -1241,6 +1274,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("await fetchLogWindow(1, 1)", script)
         self.assertIn("/download/${kind}", script)
         self.assertIn('runDownload("both")', script)
+        self.assertIn('if (currentScanId) {\n    link.href = "/api/scans/"', script)
+        self.assertIn('} else {\n    const lines = await loadLogLines();', script)
         download_handlers = script[script.index("const downloadDialog"):script.index('document.querySelector("#close-recommendation")')]
         self.assertNotIn("alert(", download_handlers)
 
