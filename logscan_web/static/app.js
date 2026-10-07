@@ -1873,26 +1873,67 @@ async function downloadLog() {
   if (!currentScanId) URL.revokeObjectURL(link.href);
 }
 const downloadDialog = document.querySelector("#download-dialog");
-document.querySelector("#open-download").addEventListener("click", () => downloadDialog.showModal());
-document.querySelector("#open-download-main").addEventListener("click", () => downloadDialog.showModal());
-document.querySelector("#download-log-option").addEventListener("click", async () => {
-  try { await downloadLog(); document.querySelector("#download-dialog").close(); } catch (error) { alert(error.message); }
-});
-document.querySelector("#download-config-option").addEventListener("click", async () => {
+const downloadStatus = document.querySelector("#download-status");
+const downloadOptions = [...downloadDialog.querySelectorAll(".download-dialog-actions button")];
+
+function setDownloadStatus(message = "", state = "") {
+  downloadStatus.hidden = !message;
+  downloadStatus.textContent = message;
+  if (state) downloadStatus.dataset.state = state;
+  else delete downloadStatus.dataset.state;
+}
+
+function triggerDownload(href, filename = "") {
+  const link = document.createElement("a");
+  link.href = href;
+  if (filename) link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+async function ensureExtractedConfig() {
+  if (extractedConfig) return extractedConfig;
+  if (currentScanId) await fetchLogWindow(1, 1);
+  else extractedConfig = extractConfig(await loadLogLines());
+  return extractedConfig;
+}
+
+async function runDownload(kind) {
+  downloadOptions.forEach((button) => { button.disabled = true; });
+  setDownloadStatus(kind === "both" ? "Preparing log and config archive..." : `Preparing ${kind} download...`);
   try {
-    if (!extractedConfig && !currentScanId) extractedConfig = extractConfig(await loadLogLines());
-    if (!downloadConfig()) alert("No redacted config block was found in this log.");
-    else document.querySelector("#download-dialog").close();
-  } catch (error) { alert(error.message); }
-});
-document.querySelector("#download-both-option").addEventListener("click", async () => {
-  try {
-    if (!extractedConfig && !currentScanId) extractedConfig = extractConfig(await loadLogLines());
-    await downloadLog();
-    if (!downloadConfig()) alert("The log was downloaded, but it contains no redacted config block.");
-    document.querySelector("#download-dialog").close();
-  } catch (error) { alert(error.message); }
-});
+    if (kind !== "log" && !await ensureExtractedConfig()) {
+      throw new Error("No redacted config block was found in this log.");
+    }
+    if (currentScanId && kind !== "log") {
+      triggerDownload(`/api/scans/${encodeURIComponent(currentScanId)}/download/${kind}`);
+    } else if (kind === "log") {
+      await downloadLog();
+    } else if (kind === "config") {
+      downloadConfig();
+    } else {
+      await downloadLog();
+      downloadConfig();
+    }
+    setDownloadStatus(kind === "both" ? "Archive download started." : `${kind[0].toUpperCase()}${kind.slice(1)} download started.`, "success");
+  } catch (error) {
+    setDownloadStatus(error.message || "The download could not be prepared.", "error");
+  } finally {
+    downloadOptions.forEach((button) => { button.disabled = false; });
+  }
+}
+
+function openDownloadDialog() {
+  setDownloadStatus();
+  downloadDialog.showModal();
+}
+
+document.querySelector("#open-download").addEventListener("click", openDownloadDialog);
+document.querySelector("#open-download-main").addEventListener("click", openDownloadDialog);
+document.querySelector("#download-log-option").addEventListener("click", () => runDownload("log"));
+document.querySelector("#download-config-option").addEventListener("click", () => runDownload("config"));
+document.querySelector("#download-both-option").addEventListener("click", () => runDownload("both"));
 document.querySelector("#close-download").addEventListener("click", () => downloadDialog.close());
 document.querySelector("#close-recommendation").addEventListener("click", () => document.querySelector("#recommendation-dialog").close());
 document.querySelector("#delete-scan").addEventListener("click", async () => {

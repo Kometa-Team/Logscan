@@ -255,6 +255,68 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(download.status_code, 200)
         self.assertEqual(download.data, content)
         self.assertEqual(download.headers["Content-Disposition"], 'attachment; filename=large-meta.log')
+
+        missing_config = app.test_client().get(f"/api/scans/{scan_id}/download/config")
+        self.assertEqual(missing_config.status_code, 409)
+        self.assertEqual(missing_config.get_json()["error"], "No redacted config block was found in this log.")
+
+    def test_stored_config_and_combined_downloads_use_extracted_config(self):
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
+            "[config.py:2] [DEBUG] | Redacted Config |",
+            "[config.py:3] [DEBUG] | libraries: |",
+            "[config.py:4] [DEBUG] |   Movies: |",
+            "[config.py:5] [DEBUG] | |",
+            "[config.py:6] [WARNING] | Config Warning: test terminator |",
+            "[kometa.py:7] [INFO] | Finished: Run Time: 0:01:00 |",
+        ]).encode()
+        client = app.test_client()
+        response = client.post(
+            "/api/scan",
+            data={"log": (BytesIO(content), "download-meta.log")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 200)
+        scan_id = response.get_json()["id"]
+
+        config = client.get(f"/api/scans/{scan_id}/download/config")
+        self.assertEqual(config.status_code, 200)
+        self.assertIn("download-meta-config.yml", config.headers["Content-Disposition"])
+        self.assertIn(b"refs/heads/master/json-schema/config-schema.json", config.data)
+        self.assertIn(b"libraries:\n  Movies:", config.data)
+
+        combined = client.get(f"/api/scans/{scan_id}/download/both")
+        self.assertEqual(combined.status_code, 200)
+        self.assertIn("download-meta-files.zip", combined.headers["Content-Disposition"])
+        with zipfile.ZipFile(BytesIO(combined.data)) as archive:
+            self.assertEqual(set(archive.namelist()), {"download-meta.log", "config.yml"})
+            self.assertEqual(archive.read("download-meta.log"), content)
+            self.assertEqual(archive.read("config.yml"), config.data)
+
+    def test_stored_config_download_preserves_existing_schema_directive(self):
+        directive = "# yaml-language-server: $schema=https://example.test/config-schema.json"
+        content = "\n".join([
+            "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
+            "[config.py:2] [DEBUG] | Redacted Config |",
+            f"[config.py:3] [DEBUG] | {directive} |",
+            "[config.py:4] [DEBUG] | libraries: {} |",
+            "[config.py:5] [DEBUG] | |",
+            "[config.py:6] [WARNING] | Config Warning: test terminator |",
+        ]).encode()
+        client = app.test_client()
+        response = client.post(
+            "/api/scan",
+            data={"log": (BytesIO(content), "directed-meta.log")},
+            content_type="multipart/form-data",
+        )
+        scan_id = response.get_json()["id"]
+
+        config = client.get(f"/api/scans/{scan_id}/download/config")
+
+        self.assertEqual(config.status_code, 200)
+        self.assertEqual(config.data.decode().count("yaml-language-server:"), 1)
+        self.assertIn(directive, config.data.decode())
+
     def test_frontend_renders_anonymous_jobs_inline_and_follows_authenticated_redirects(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
         self.assertIn("function renderCompletedJob(result)", script)
@@ -1169,6 +1231,18 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('downloadFilename(kind = "log")', script)
         self.assertIn('kind === "config" ? ".yml" : ".log"', script)
         self.assertIn('downloadFilename("config")', script)
+
+    def test_download_dialog_uses_inline_status_and_single_combined_archive(self):
+        script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
+        template = Path("logscan_web/templates/index.html").read_text(encoding="utf-8")
+
+        self.assertIn('id="download-status" role="status" aria-live="polite"', template)
+        self.assertIn("async function ensureExtractedConfig()", script)
+        self.assertIn("await fetchLogWindow(1, 1)", script)
+        self.assertIn("/download/${kind}", script)
+        self.assertIn('runDownload("both")', script)
+        download_handlers = script[script.index("const downloadDialog"):script.index('document.querySelector("#close-recommendation")')]
+        self.assertNotIn("alert(", download_handlers)
 
     def test_mobile_viewer_disables_per_line_text_autosizing(self):
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")

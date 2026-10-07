@@ -1636,6 +1636,56 @@ def create_app() -> Flask:
             download_name=download_name,
         )
 
+    @app.get("/api/scans/<scan_id>/download/<kind>")
+    def download_stored_scan(scan_id, kind):
+        if kind not in {"config", "both"}:
+            abort(404)
+        record = store.get(scan_id)
+        path = store.log_path(scan_id)
+        if record is None or path is None:
+            abort(404)
+
+        config = _stored_log_index(path)["config"]
+        if not config:
+            return jsonify(error="No redacted config block was found in this log."), 409
+
+        metadata = record.get("metadata") or {}
+        branch = metadata.get("schema_validation_branch")
+        if branch not in {"master", "develop"}:
+            branch = "master" if metadata.get("kometa_branch") == "master" else "develop"
+        if not re.search(r"^\s*#\s*yaml-language-server:\s*\$schema=", config, re.IGNORECASE | re.MULTILINE):
+            schema_url = f"https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/{branch}/json-schema/config-schema.json"
+            config = f"# yaml-language-server: $schema={schema_url}\n{config}"
+
+        original_name = Path(record.get("filename") or "kometa.log").name
+        stem = Path(original_name).stem or "kometa"
+        if kind == "config":
+            return send_file(
+                BytesIO(config.encode("utf-8")),
+                mimetype="text/yaml; charset=utf-8",
+                as_attachment=True,
+                download_name=f"{stem}-config.yml",
+            )
+
+        temporary = tempfile.NamedTemporaryFile(prefix="logscan-download-", suffix=".zip", delete=False)
+        temporary_path = Path(temporary.name)
+        temporary.close()
+        try:
+            with zipfile.ZipFile(temporary_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+                archive.write(path, arcname=original_name)
+                archive.writestr("config.yml", config)
+            response = send_file(
+                temporary_path,
+                mimetype="application/zip",
+                as_attachment=True,
+                download_name=f"{stem}-files.zip",
+            )
+            response.call_on_close(lambda: temporary_path.unlink(missing_ok=True))
+            return response
+        except Exception:
+            temporary_path.unlink(missing_ok=True)
+            raise
+
     @app.post("/api/scans/<scan_id>/validate-config")
     def validate_stored_config(scan_id):
         record = store.get(scan_id)

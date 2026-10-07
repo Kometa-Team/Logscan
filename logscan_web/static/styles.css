@@ -476,6 +476,9 @@ details[open] .chevron { transform: rotate(90deg); }
 .download-dialog-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 24px; }
 .download-dialog-actions button { min-height: 84px; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
 .download-dialog-actions i { font-size: 1.2rem; }
+.download-dialog-status { margin: 0 24px 24px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: .82rem; }
+.download-dialog-status[data-state="error"] { border-color: rgba(251,113,133,.55); color: #fda4af; background: rgba(136,19,55,.16); }
+.download-dialog-status[data-state="success"] { border-color: rgba(52,211,153,.45); color: #a7f3d0; background: rgba(6,95,70,.14); }
 .batch-results-actions { display: flex; align-items: center; gap: 8px; }
 .batch-results-actions .compact { min-height: 38px; padding: 0 12px; display: inline-flex; align-items: center; }
 #results, #batch-results { scroll-margin-top: 28px; }
