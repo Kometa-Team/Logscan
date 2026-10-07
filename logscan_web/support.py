@@ -26,6 +26,19 @@ def discord_session_user() -> dict | None:
     return session.get("discord_user") or session.get("support_user")
 
 
+def support_session_role_hint() -> bool:
+    """Return the last verified role for navigation only, never authorization."""
+    return bool(discord_session_user() and (session.get("support_access") or session.get("support_user")))
+
+
+def support_role_refresh_required() -> bool:
+    """Return whether a cached support member must repeat the OAuth role check."""
+    if not support_session_role_hint() or current_app.config.get("DISCORD_BOT_TOKEN", ""):
+        return False
+    verified_at = session.get("support_role_verified_at", session.get("support_authorized_at", 0))
+    return time.time() - verified_at > SUPPORT_ROLE_FALLBACK_SECONDS
+
+
 def support_session_authorized() -> bool:
     """Return whether the current Discord member still has a support role."""
     user = discord_session_user()

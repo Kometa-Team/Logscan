@@ -2138,6 +2138,23 @@ class PeopleUnionTests(unittest.TestCase):
                 self.assertIn("Uploading as Support Person", body)
                 self.assertIn("New scans will appear in My uploads for 48 hours.", body)
 
+    def test_stale_support_role_keeps_menu_with_oauth_refresh_link(self):
+        previous_bot_token = app.config.get("DISCORD_BOT_TOKEN", "")
+        app.config["DISCORD_BOT_TOKEN"] = ""
+        try:
+            with self.client.session_transaction() as support_session:
+                support_session["discord_user"] = {"id": "42", "username": "Support Person", "avatar": ""}
+                support_session["support_authorized_at"] = time.time() - (2 * 24 * 60 * 60)
+                support_session["support_access"] = True
+                support_session["support_role_verified_at"] = time.time() - (9 * 60 * 60)
+
+            body = self.client.get("/").get_data(as_text=True)
+
+            self.assertIn("Support Console", body)
+            self.assertIn("/support/authorize?next=/support/logs?view%3Dall", body)
+        finally:
+            app.config["DISCORD_BOT_TOKEN"] = previous_bot_token
+
     def test_people_actions_are_hidden_and_rejected_without_support_session(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
             payload = self.client.get("/api/people", query_string={"sources": "trending"}).get_json()

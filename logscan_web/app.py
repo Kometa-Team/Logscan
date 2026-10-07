@@ -24,7 +24,7 @@ from .models import Finding
 from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_archive_path, scan_content_size, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
-from .support import ACCOUNT_SESSION_SECONDS, create_support_blueprint, discord_session_user, support_session_authorized
+from .support import ACCOUNT_SESSION_SECONDS, create_support_blueprint, discord_session_user, support_role_refresh_required, support_session_authorized, support_session_role_hint
 
 LOG_INDEX_STRIDE = 1000
 LOG_VIEW_MAX_LINES = 2000
@@ -1068,10 +1068,17 @@ def create_app() -> Flask:
             stats["tracking_since"] = started.strftime("%B %d, %Y").replace(" 0", " ")
         except (KeyError, TypeError, ValueError):
             stats["tracking_since"] = "tracking began"
+        support_access = support_session_authorized()
+        support_menu_access = support_access or support_session_role_hint()
+        support_refresh_url = None
+        if support_menu_access and support_role_refresh_required():
+            support_refresh_url = url_for("support.authorize", next=url_for("support.logs", view="all"))
         return {
             "usage_stats": stats,
             "discord_user": discord_session_user(),
-            "support_access": support_session_authorized(),
+            "support_access": support_access,
+            "support_menu_access": support_menu_access,
+            "support_refresh_url": support_refresh_url,
         }
 
     @app.get("/")

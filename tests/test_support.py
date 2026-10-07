@@ -202,6 +202,32 @@ class SupportConsoleTests(unittest.TestCase):
             session["support_role_verified_at"] = time.time() - (9 * 60 * 60)
             self.assertFalse(support_session_authorized())
 
+    def test_stale_support_role_remains_a_navigation_hint_and_requires_oauth_refresh(self):
+        with self.app.test_request_context("/"):
+            from flask import session
+            from logscan_web.support import support_role_refresh_required, support_session_role_hint
+
+            session["discord_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time() - (2 * 24 * 60 * 60)
+            session["support_access"] = True
+            session["support_role_verified_at"] = time.time() - (9 * 60 * 60)
+
+            self.assertTrue(support_session_role_hint())
+            self.assertTrue(support_role_refresh_required())
+
+    def test_bot_revalidation_does_not_require_oauth_refresh_link(self):
+        self.app.config["DISCORD_BOT_TOKEN"] = "bot-secret"
+        with self.app.test_request_context("/"):
+            from flask import session
+            from logscan_web.support import support_role_refresh_required
+
+            session["discord_user"] = {"id": "42"}
+            session["support_authorized_at"] = time.time() - (2 * 24 * 60 * 60)
+            session["support_access"] = True
+            session["support_role_verified_at"] = time.time() - (9 * 60 * 60)
+
+            self.assertFalse(support_role_refresh_required())
+
     def test_regular_user_console_only_lists_owned_uploads(self):
         with self.client.session_transaction() as support_session:
             support_session["support_authorized_at"] = 9999999999

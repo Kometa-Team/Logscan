@@ -14,7 +14,7 @@
         <a class="site-nav-primary-item" href="/"{% if active_page == 'scanner' %} aria-current="page"{% endif %}>Log Scanner</a>
         <a class="site-nav-primary-item" href="/people"{% if active_page == 'people' %} aria-current="page"{% endif %}>People</a>
         <a class="site-nav-primary-item" href="/analytics"{% if active_page == 'analytics' %} aria-current="page"{% endif %}>Analytics</a>
-        {% if discord_user and support_access %}<a href="{{ url_for('support.logs', view='all') }}"{% if active_page == 'support' and view_mode|default('mine') == 'all' %} aria-current="page"{% endif %}>Support Console</a>{% endif %}
+        {% if discord_user and support_menu_access|default(support_access) %}<a href="{{ support_refresh_url or url_for('support.logs', view='all') }}"{% if active_page == 'support' and view_mode|default('mine') == 'all' %} aria-current="page"{% endif %}>Support Console</a>{% endif %}
       </nav>
       <nav class="site-nav-external" aria-label="Kometa website">
         <a href="https://utilities.kometa.wiki/" rel="external">Kometa Utilities Home <span aria-hidden="true">&#8599;</span></a>
