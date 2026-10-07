@@ -1140,6 +1140,60 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(failures[0]["config_column"], 3)
         self.assertEqual(failures[0]["config_end_column"], 16)
 
+    def test_schema_validation_selects_matching_collection_file_alternative(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "libraries": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "collection_files": {
+                                "type": "array",
+                                "items": {
+                                    "oneOf": [
+                                        {
+                                            "type": "object",
+                                            "properties": {"default": {"const": "seasonal"}},
+                                            "required": ["default"],
+                                            "additionalProperties": False,
+                                        },
+                                        {
+                                            "type": "object",
+                                            "properties": {"default": {"const": "streaming"}},
+                                            "required": ["default"],
+                                            "additionalProperties": False,
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        log = "\n".join([
+            "Redacted Config",
+            "[config.py:1] [INFO] | libraries: |",
+            "[config.py:2] [INFO] |   Anime: |",
+            "[config.py:3] [INFO] |     collection_files: |",
+            "[config.py:4] [INFO] |     - default: streaming |",
+            "[config.py:5] [INFO] |       exclude: showtime |",
+            "[config.py:6] [INFO] | end |",
+            "Initializing cache database at /config/cache",
+        ])
+
+        with patch("logscan_web.recommendations.urlopen", return_value=Response(schema)):
+            failures = validate_redacted_config(log)
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["title"], "Unknown setting: exclude")
+        self.assertEqual(failures[0]["path"], "libraries.Anime.collection_files.0.exclude")
+        self.assertEqual(failures[0]["config_line"], 5)
+        self.assertEqual(failures[0]["config_column"], 7)
+        self.assertEqual(failures[0]["config_end_column"], 14)
+
     def test_schema_validation_stops_before_post_config_error(self):
         schema = {"type": "object", "properties": {"plex": {"type": "object"}}}
         log = "\n".join([

@@ -103,21 +103,31 @@ def _specific_schema_errors(error: object) -> list:
     """Prefer concrete nested failures over a vague composite parent error."""
     if error.validator not in {"anyOf", "oneOf"} or not error.context:
         return [error]
-    leaves = []
 
-    def collect(candidate: object) -> None:
-        if candidate.validator in {"anyOf", "oneOf"} and candidate.context:
-            for child in candidate.context:
-                collect(child)
-        else:
-            leaves.append(candidate)
+    branches: dict[object, list] = {}
+    for child in error.context:
+        schema_path = list(child.schema_path)
+        branch = schema_path[0] if schema_path and isinstance(schema_path[0], int) else None
+        branches.setdefault(branch, []).extend(_specific_schema_errors(child))
 
-    collect(error)
-    deeper = [candidate for candidate in leaves if len(candidate.absolute_path) > len(error.absolute_path)]
-    if not deeper:
-        return [error]
-    deepest = max(len(candidate.absolute_path) for candidate in deeper)
-    return [candidate for candidate in deeper if len(candidate.absolute_path) == deepest]
+    if len(branches) > 1 and None not in branches:
+        penalties = {
+            "type": 8,
+            "const": 8,
+            "enum": 6,
+            "required": 5,
+            "additionalProperties": 1,
+        }
+
+        def branch_score(item: tuple[object, list]) -> tuple[int, int, str]:
+            branch, failures = item
+            score = sum(penalties.get(candidate.validator, 3) for candidate in failures)
+            return score, len(failures), str(branch)
+
+        return min(branches.items(), key=branch_score)[1]
+
+    leaves = [candidate for failures in branches.values() for candidate in failures]
+    return leaves or [error]
 
 
 def _actionable_schema_errors(schema: dict, config: object) -> list:
