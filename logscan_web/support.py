@@ -414,6 +414,10 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     schema_count_available = isinstance(persisted_schema_count, int)
     if schema_count_available:
         counts["schema"] = persisted_schema_count
+    if metadata.get("schema_directive_missing") and not any(
+        item.get("id") == "live_schema_directive_advice" for item in recommendations
+    ):
+        counts["advice"] += 1
     created = _parsed_datetime(record.get("created_at"))
     updated = _parsed_datetime(record.get("updated_at"), created)
     expires = created + timedelta(seconds=retention_seconds)

@@ -439,6 +439,14 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("discord-example.log", body)
         self.assertIn('<span class="severity-chip schema" title="Schema: 3">3</span>', body)
         self.assertIn('<span class="severity-chip error" title="Error: 0">0</span>', body)
+
+    def test_inventory_counts_derived_schema_directive_advice(self):
+        self.store.update_metadata(self.scan_id, schema_directive_missing=True)
+        self.authorize_session()
+
+        body = self.client.get("/support/logs?view=all").get_data(as_text=True)
+
+        self.assertIn('<span class="severity-chip advice" title="Advice: 1">1</span>', body)
     @patch("logscan_web.support.urlopen")
     def test_discord_requests_send_explicit_user_agent(self, mocked_urlopen):
         response = mocked_urlopen.return_value.__enter__.return_value

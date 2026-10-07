@@ -70,6 +70,29 @@ def _download_artifact_names(record: dict) -> dict[str, str]:
         "config": f"{base}-config.yml",
         "archive": f"{base}-files.zip",
     }
+
+
+def _schema_directive_advice(metadata: dict) -> dict | None:
+    if not metadata.get("schema_directive_missing"):
+        return None
+    branch = metadata.get("schema_validation_branch")
+    if branch not in {"master", "develop"}:
+        branch = "master" if metadata.get("kometa_branch") == "master" else "develop"
+    schema_url = f"https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/{branch}/json-schema/config-schema.json"
+    return {
+        "id": "live_schema_directive_advice",
+        "severity": "advice",
+        "title": "Enable config.yml validation in VS Code",
+        "message": (
+            "Enable config.yml validation in VS Code\n"
+            "Your config.yml does not include a YAML language-server schema directive, so supported editors cannot "
+            "provide Kometa-aware validation and available-value suggestions while you edit.\n\n"
+            "Proposed solution: Add this as the first line of your original config.yml:\n\n"
+            f"`# yaml-language-server: $schema={schema_url}`\n\n"
+            "The downloaded config from Logscan includes this line automatically."
+        ),
+        "evidence_lines": [],
+    }
     return f"{size:.1f} GB"
 
 
@@ -1103,17 +1126,23 @@ def create_app() -> Flask:
         if record is None:
             abort(404)
         public = {key: value for key, value in record.items() if key != "delete_token_hash"}
-        metadata = public.setdefault("metadata", {})
+        metadata = dict(public.get("metadata") or {})
+        public["metadata"] = metadata
         schema_count = metadata.get("schema_validation_count")
         if isinstance(schema_count, int):
             metadata.setdefault("counts", {})["schema"] = schema_count
-        recommendations = public.get("recommendations") or []
+        recommendations = list(public.get("recommendations") or [])
+        directive_advice = _schema_directive_advice(metadata)
+        if directive_advice and not any(item.get("id") == directive_advice["id"] for item in recommendations):
+            recommendations.append(directive_advice)
+        public["recommendations"] = recommendations
         counts = {
             severity: sum(item.get("severity") == severity for item in recommendations)
             for severity in ("critical", "error", "warning", "schema", "advice")
         }
         if isinstance(schema_count, int):
             counts["schema"] = schema_count
+        metadata["counts"] = counts
         overview = public.setdefault("overview", {})
         overview["finding_count"] = sum(counts.values())
         overview["line_count"] = int(metadata.get("line_count") or 0)

@@ -32,7 +32,7 @@ Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
     ],
 }), encoding="utf-8")
 
-from logscan_web.app import SCHEMA_VALIDATION_VERSION, _download_artifact_names, _schema_validation_is_fresh, add_missing_people_recommendations, app, create_app
+from logscan_web.app import SCHEMA_VALIDATION_VERSION, _download_artifact_names, _schema_directive_advice, _schema_validation_is_fresh, add_missing_people_recommendations, app, create_app
 from logscan_web.scanner import (
     MAX_FILE_BYTES,
     STREAM_SCAN_THRESHOLD,
@@ -1302,6 +1302,17 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("refs/heads/${currentSchemaBranch}/json-schema/config-schema.json", script)
         self.assertIn('metadata.kometa_branch === "master" ? "master" : "develop"', script)
         self.assertIn("new Blob([configForDownload()]", script)
+
+    def test_schema_directive_advice_is_available_before_live_validation(self):
+        advice = _schema_directive_advice({
+            "schema_directive_missing": True,
+            "schema_validation_branch": "develop",
+        })
+
+        self.assertEqual(advice["id"], "live_schema_directive_advice")
+        self.assertEqual(advice["severity"], "advice")
+        self.assertIn("refs/heads/develop/json-schema/config-schema.json", advice["message"])
+        self.assertIsNone(_schema_directive_advice({"schema_directive_missing": False}))
 
     def test_config_viewer_identifies_schema_branch(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
