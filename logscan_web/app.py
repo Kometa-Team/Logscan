@@ -207,6 +207,8 @@ KOMETA_IMAGE_CACHE_SECONDS = 60 * 60
 POPULAR_PEOPLE_CACHE_SECONDS = 24 * 60 * 60
 POPULAR_PEOPLE_LIMIT = 250
 POPULAR_PEOPLE_CHECK_SECONDS = 30 * 24 * 60 * 60
+AUTOMATED_TOP_PEOPLE_REQUESTER = {"name": "Automation", "id": "automation:top-250"}
+AUTOMATED_TOP_PEOPLE_TAG = "Automated Top 250"
 KOMETA_VERSION_CACHE_SECONDS = 60 * 60
 KOMETA_VERSION_URL = "https://raw.githubusercontent.com/Kometa-Team/Kometa/{branch}/VERSION"
 
@@ -561,15 +563,44 @@ def create_app() -> Flask:
                 break
         return popular
 
+    def record_automated_popular_requests(people: list[dict]) -> int:
+        images = kometa_image_urls()
+        if "Kometa Repo Image" not in images:
+            app.logger.warning("Automated Top 250 requests skipped; primary people-image source is unavailable.")
+            return 0
+        primary_images = images["Kometa Repo Image"]
+        created = 0
+        for person in _filtered_popular_people(people):
+            person_id = person.get("id")
+            name = person.get("name", "Unknown person")
+            if not person_id or not _has_current_tmdb_image(person) or _person_name_key(name) in primary_images:
+                continue
+            _record, is_new = people_store.upsert_with_status({
+                "key": f"tmdb-{person_id}",
+                "name": name,
+                "original_name": name,
+                "tmdb_id": person_id,
+                "tmdb_image_found": True,
+                "requested_by": [AUTOMATED_TOP_PEOPLE_REQUESTER],
+                "provenance_tags": [AUTOMATED_TOP_PEOPLE_TAG],
+            })
+            created += int(is_new)
+        if created:
+            analytics.record_people_submitted(created)
+        return created
+
     def _refresh_popular_people() -> None:
         nonlocal popular_people_refreshing
         try:
             people = _build_popular_people()
             if people:
+                created = record_automated_popular_requests(people)
                 snapshot = popular_people_store.save(people)
                 _install_popular_people_snapshot(snapshot)
                 with popular_people_payload_lock:
                     popular_people_payload_cache.clear()
+                if created:
+                    app.logger.info("Recorded %d automated Top 250 people request(s).", created)
         except Exception:
             app.logger.exception("Unable to refresh the Trending People snapshot.")
         finally:
@@ -834,7 +865,7 @@ def create_app() -> Flask:
                 person_key=f"tmdb-{person['id']}" if person.get("id") else record.get("key"),
                 sources=sources,
                 metadata_tags=metadata_tags,
-                provenance_tags=["Log Upload"] if record else [],
+                provenance_tags=record.get("provenance_tags", ["Log Upload"] if record else []),
                 log_url=record.get("log_url"),
                 source_url=record.get("source_url"),
                 original_name=record.get("original_name", record.get("name", item["name"])),
@@ -869,6 +900,7 @@ def create_app() -> Flask:
                 "log_url": log_url,
                 "source_url": source_url,
                 "requested_by": [{"name": uploaded_by, "id": uploaded_by_id}] if uploaded_by else [],
+                "provenance_tags": ["Log Upload"],
             })
             person["people_url"] = url_for("people_page", tags="Missing Kometa", _external=True)
             person["is_new"] = is_new

@@ -2047,13 +2047,22 @@ class PeopleUnionTests(unittest.TestCase):
     def test_requesters_accumulate_without_duplicates(self):
         with tempfile.TemporaryDirectory() as directory:
             store = PeopleStore(directory)
-            store.upsert({"key": "tmdb-9", "name": "Person", "requested_by": [{"name": "First Name", "id": "1"}]})
+            store.upsert({
+                "key": "tmdb-9", "name": "Person",
+                "requested_by": [{"name": "First Name", "id": "1"}],
+                "provenance_tags": ["Log Upload"],
+            })
             store.upsert({"key": "tmdb-9", "name": "Person", "requested_by": [{"name": "Updated Name", "id": "1"}]})
-            person = store.upsert({"key": "tmdb-9", "name": "Person", "requested_by": [{"name": "Second User", "id": "2"}]})
+            person = store.upsert({
+                "key": "tmdb-9", "name": "Person",
+                "requested_by": [{"name": "Second User", "id": "2"}],
+                "provenance_tags": ["Automated Top 250"],
+            })
         self.assertEqual(person["requested_by"], [
             {"name": "Updated Name", "id": "1"},
             {"name": "Second User", "id": "2"},
         ])
+        self.assertEqual(person["provenance_tags"], ["Log Upload", "Automated Top 250"])
 
     def test_api_supports_smaller_mobile_page_size(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
@@ -2100,6 +2109,37 @@ class PeopleUnionTests(unittest.TestCase):
         people = self.request_people(selected_tags=("Missing Kometa",))
         self.assertEqual([person["tmdb_id"] for person in people], [1])
         self.assertEqual(people[0]["sources"], ["missing", "trending"])
+
+    def test_refresh_records_top_250_ready_people_as_automation_requests(self):
+        def automated_urlopen(request, timeout=0):
+            url = request.full_url
+            if "raw.githubusercontent.com" in url:
+                readme = "* [Completed Person](https://example.test/completed.jpg)\n" if "People-Images/refs" in url else ""
+                return Response(readme, "text/plain")
+            if "caching.graphql.imdb.com" in url:
+                return Response({"data": {"chartNames": {"edges": []}}})
+            if "/person/popular?" in url:
+                return Response({
+                    "total_pages": 1,
+                    "results": [
+                        {"id": 1, "name": "Alice Person", "profile_path": "/alice.jpg", "known_for_department": "Acting"},
+                        {"id": 2, "name": "Completed Person", "profile_path": "/complete.jpg", "known_for_department": "Acting"},
+                    ],
+                })
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"SCAN_STORE": directory, "TMDB_API_KEY": "test-key"}):
+                client = create_app().test_client()
+                with patch("logscan_web.app.urlopen", side_effect=automated_urlopen):
+                    response = client.get("/api/people")
+                self.assertEqual(response.status_code, 200)
+                people = response.get_json()["people"]
+                alice = next(person for person in people if person["tmdb_id"] == 1)
+                self.assertEqual(alice["requested_by"], [{"name": "Automation", "id": "automation:top-250"}])
+                self.assertEqual(alice["provenance_tags"], ["Automated Top 250"])
+                self.assertNotIn("Completed Person", [record["name"] for record in PeopleStore(directory).list()])
+                self.assertEqual(AnonymousAnalyticsStore(directory).snapshot()["totals"]["people_submitted"], 1)
 
     def test_missing_tmdb_is_searchable_and_excluded_from_processing_export(self):
         Path(STORE.name, "people.json").write_text(json.dumps([

@@ -279,6 +279,13 @@ class AnonymousAnalyticsStore:
                 self._increment(day["recommendations_by_severity"], finding.get("severity", "unknown"))
             self._write(data)
 
+    def record_people_submitted(self, people: int) -> None:
+        with self.lock:
+            data = self._read()
+            day = self._day(data)
+            day["people_submitted"] += max(0, int(people))
+            self._write(data)
+
     def record_addressed(self, records: list[dict]) -> None:
         now = datetime.now(UTC)
         with self.lock:
@@ -498,7 +505,12 @@ class PeopleStore:
             existing = next((item for item in people if item["key"] == person["key"]), None)
             if existing:
                 incoming_requesters = person.get("requested_by", [])
-                existing.update({key: value for key, value in person.items() if value is not None and key != "requested_by"})
+                incoming_provenance_tags = person.get("provenance_tags", [])
+                existing.update({
+                    key: value
+                    for key, value in person.items()
+                    if value is not None and key not in {"requested_by", "provenance_tags"}
+                })
                 requesters = list(existing.get("requested_by", []))
                 for requester in incoming_requesters:
                     requester_id = requester.get("id")
@@ -514,6 +526,15 @@ class PeopleStore:
                         requesters.append(requester)
                 if requesters:
                     existing["requested_by"] = requesters
+                provenance_tags = [
+                    str(tag) for tag in existing.get("provenance_tags", [])
+                    if isinstance(tag, str) and tag
+                ]
+                for tag in incoming_provenance_tags:
+                    if isinstance(tag, str) and tag and tag not in provenance_tags:
+                        provenance_tags.append(tag)
+                if provenance_tags:
+                    existing["provenance_tags"] = provenance_tags
                 existing["last_seen_at"] = datetime.now(UTC).isoformat()
                 result = existing
                 created = False
