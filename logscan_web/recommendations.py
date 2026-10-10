@@ -322,7 +322,7 @@ def validate_redacted_config(
     schema_cache: dict[str, dict] | None = None,
     schema_cache_dir: str | Path | None = None,
     schema_cache_lock=None,
-) -> list[dict[str, str | int]]:
+) -> list[dict[str, object]]:
     """Validate a log's extracted config against its matching Kometa schema.
 
     A caller may provide an in-memory cache and a persistent cache directory.
@@ -376,6 +376,7 @@ def validate_redacted_config(
         raise RuntimeError(f"The Kometa {schema_branch} configuration schema could not be fetched.") from exc
 
     failures = []
+    failures_by_source = {}
     for error in _actionable_schema_errors(schema, config):
         unexpected_properties = _unexpected_properties(error)
         targets = unexpected_properties or [None]
@@ -384,6 +385,18 @@ def validate_redacted_config(
             config_line = node.start_mark.line if node is not None else 0
             log_line = log_lines[config_line] if config_line < len(log_lines) else log_lines[0]
             path = _schema_path(error, unexpected)
+            # Aliases can report one source error through multiple schema paths.
+            source = (node.start_mark.index, node.end_mark.index) if node is not None else tuple(error.absolute_path)
+            identity = (
+                source, error.validator, json.dumps(error.validator_value, sort_keys=True),
+                unexpected if unexpected is not None else error.message,
+            )
+            existing = failures_by_source.get(identity)
+            if existing is not None:
+                paths = existing.setdefault("paths", [existing["path"]])
+                if path not in paths:
+                    paths.append(path)
+                continue
             guidance = _schema_failure_guidance(error, path, unexpected)
             failure = {
                 "line": log_line,
@@ -397,6 +410,7 @@ def validate_redacted_config(
                 failure["config_column"] = node.start_mark.column + 1
                 failure["config_end_column"] = max(node.start_mark.column + 2, node.end_mark.column + 1)
             failures.append(failure)
+            failures_by_source[identity] = failure
     return failures
 
 # Each record contains its category, issue description, proposed solution, and capture text.

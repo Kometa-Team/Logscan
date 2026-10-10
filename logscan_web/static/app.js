@@ -1534,7 +1534,7 @@ async function loadSchemaValidation(data) {
         id: `live_schema_${index}`,
         severity: "schema",
         title: failure.title || `Invalid configuration: ${failure.path || "config root"}`,
-        message: `${failure.title || "Schema validation issue"}\nImpact: ${failure.urgency || "Action required"}. Kometa may reject this setting or skip the affected functionality.\n\nLocation: ${failure.location || failure.path || "config root"}\n\nIssue: ${failure.explanation || failure.message}${failure.accepted ? `\n\n${failure.accepted}` : ""}\n\nHow to fix: ${failure.action || "Correct this setting using the Kometa documentation."}\n\nSchema path: ${failure.path || "config root"}\nSource log line: ${failure.line}\nValidated against: Kometa ${validation.branch} schema`,
+        message: `${failure.title || "Schema validation issue"}\nImpact: ${failure.urgency || "Action required"}. Kometa may reject this setting or skip the affected functionality.\n\nLocation: ${failure.location || failure.path || "config root"}\n\nIssue: ${failure.explanation || failure.message}${failure.accepted ? `\n\n${failure.accepted}` : ""}\n\nHow to fix: ${failure.action || "Correct this setting using the Kometa documentation."}\n\nSchema path: ${failure.path || "config root"}${failure.paths?.length > 1 ? `\n\nAffected locations:\n${failure.paths.join("\n")}` : ""}\nSource log line: ${failure.line}\nValidated against: Kometa ${validation.branch} schema`,
         evidence_lines: [],
         config_line: failure.config_line,
         config_column: failure.config_column,
