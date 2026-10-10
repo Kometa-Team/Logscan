@@ -711,7 +711,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     findings = evaluate_text_rules_bytes(text_rules, content_bytes)
 
     sample_terms = (
-        b"version:", b"branch:",
+        b"version:", b"branch:", b"kometa integrity:",
         b"[quickstart]", b"config created by quickstart", b"quickstart:",
         b"kometa runtime mode:", b"libraries configured with quickstart:",
         b"information on library:", b"content count:",
@@ -741,7 +741,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     chunk_start = 0
     lines_before_chunk = 0
     sample_hits = {term: 0 for term in sample_terms}
-    unlimited_sample_terms = {b"finished ", b"run time:"}
+    unlimited_sample_terms = {b"finished ", b"run time:", b"kometa integrity:"}
 
     def decoded_line(start: int) -> tuple[str, int]:
         end = content_bytes.find(b"\n", start)
@@ -781,6 +781,14 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
                 if lowered_term == b"run_order:" and line_end < content_length:
                     next_line, _next_end = decoded_line(line_end + 1)
                     sampled_lines.setdefault(current_line + 1, next_line)
+                if lowered_term == b"kometa integrity:":
+                    # Quickstart reports up to 20 diagnostics per file category.
+                    report_end = line_end
+                    for offset in range(1, 101):
+                        if report_end >= content_length:
+                            break
+                        next_line, report_end = decoded_line(report_end + 1)
+                        sampled_lines.setdefault(current_line + offset, next_line)
                 encoded_line = line.lower().encode()
                 complete_log |= b"finished:" in encoded_line and b"run time:" in encoded_line
             if lowered_term in missing_terms:
@@ -822,6 +830,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         "kometa_version": kometa_version,
         "newest_version_at_run": _first_value(sample_content, "Newest Version"),
         "kometa_branch": kometa_branch,
+        "kometa_integrity": extract_kometa_integrity(sample_content),
         **quickstart_metadata,
         "runtime_platform": normalized_platform(runtime_platform),
         "installation_method": normalized_installation(kometa_version),
@@ -846,6 +855,72 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         categories=category_configuration(),
         missing_people=extract_missing_people("\n".join(missing_lines)),
     )
+
+
+def extract_kometa_integrity(content: str) -> dict:
+    """Read Quickstart's integrity report, preferring run markers over config comments."""
+    states = {"clean", "modified", "not_verified", "not_applicable", "check_failed"}
+    result = {"detected": False, "state": "not_reported"}
+    current = None
+    selected_priority = (-1, -1)
+    for number, line in enumerate(content.splitlines(), 1):
+        message = _log_message(line)
+        comment = message.startswith("#")
+        message = message.lstrip("# ").strip()
+        marker = re.match(r"\[Quickstart\]\s*(.*)", message, re.I)
+        if marker:
+            message = marker.group(1)
+        header = re.fullmatch(r"Kometa Integrity:\s*(.+)", message, re.I)
+        if header:
+            state = re.sub(r"\s+", "_", header.group(1).strip().casefold())
+            current = {
+                "detected": True,
+                "state": state if state in states else "unknown",
+                "reported_state": header.group(1).strip(),
+                "checked_at": None,
+                "commit": None,
+                "counts": {"modified": 0, "missing": 0, "added": 0},
+                "modified": [], "missing": [], "added": [], "errors": [],
+                "details": [],
+                "source": "config" if comment else "run",
+                "evidence_lines": [number],
+            }
+            priority = (int(not comment), number)
+            if priority > selected_priority:
+                result = current
+                selected_priority = priority
+            current_comment = comment
+            current_marker = bool(marker)
+            continue
+        if current is None:
+            continue
+        if comment != current_comment or bool(marker) != current_marker:
+            current = None
+            continue
+        field = re.fullmatch(r"(Checked At|Installed Commit|Changes|Modified|Missing|Added|Errors):\s*(.*)", message, re.I)
+        if field:
+            key, value = field.group(1).casefold(), field.group(2).strip()
+            if key == "checked at":
+                current["checked_at"] = value
+            elif key == "installed commit":
+                current["commit"] = value
+            elif key == "changes":
+                for count, category in re.findall(r"(\d+)\s+(modified|missing|added)\b", value, re.I):
+                    current["counts"][category.casefold()] = int(count)
+            elif value and value not in current[key]:
+                current[key].append(value)
+        elif message.startswith((
+            "WARNING: Installed Kometa files", "Use Force update", "No pristine baseline.",
+            "Integrity checking is limited", "Unable to verify the pristine baseline",
+            "Unable to resolve the managed Kometa",
+        )):
+            current["details"].append(message)
+        else:
+            current = None
+            continue
+        current["evidence_lines"].append(number)
+    return result
+
 
 def extract_quickstart_metadata(content: str) -> dict:
     """Extract structured, non-sensitive Quickstart launcher metadata."""
@@ -973,6 +1048,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "kometa_version": kometa_version,
         "newest_version_at_run": _first_value(content, "Newest Version"),
         "kometa_branch": kometa_branch,
+        "kometa_integrity": extract_kometa_integrity(content),
         **quickstart_metadata,
         "runtime_platform": normalized_platform(runtime_platform),
         "installation_method": normalized_installation(kometa_version),

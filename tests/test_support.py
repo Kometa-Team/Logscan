@@ -90,9 +90,11 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertEqual(self.store.log_path(self.scan_id).read_bytes(), log_before)
 
     def test_startup_migration_versions_and_reprocesses_retained_scans(self):
+        from logscan_web.app import ANALYSIS_VERSION
+
         source = Path("logscan_web/app.py").read_text(encoding="utf-8")
 
-        self.assertIn("ANALYSIS_VERSION = 3", source)
+        self.assertGreaterEqual(ANALYSIS_VERSION, 4)
         self.assertIn('if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION', source)
         self.assertIn("scan_archive_path(record.get(\"filename\") or \"kometa.log\", path)", source)
         self.assertIn("backfill_scan_analysis()", source)

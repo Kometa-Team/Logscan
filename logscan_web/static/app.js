@@ -1245,6 +1245,56 @@ function plexConfigurationList(configurations) {
   wrapper.append(heading, description, list);
   return wrapper;
 }
+function addKometaIntegrity(section, integrity = {}) {
+  const counts = integrity.counts || {};
+  const categories = ["modified", "missing", "added"];
+  const deviations = categories.some((key) => Number(counts[key]) > 0 || integrity[key]?.length);
+  const failed = integrity.state === "check_failed" || integrity.errors?.length;
+  const clean = integrity.state === "clean" && !deviations && !failed;
+  const labels = {
+    clean: "Clean", modified: "Deviations detected", check_failed: "Check failed",
+    not_verified: "Not verified", not_applicable: "Not applicable", not_reported: "Not reported",
+    unknown: "Unknown result",
+  };
+  const label = failed ? "Check failed" : deviations ? "Deviations detected"
+    : labels[integrity.state] || "Not reported";
+  const status = failed || deviations || integrity.state === "modified" ? "error" : clean ? "clean" : "unknown";
+  const diagnostics = document.createElement("div");
+  diagnostics.className = "integrity-diagnostics";
+  [...categories, "errors"].forEach((key) => {
+    if (!integrity[key]?.length) return;
+    const heading = document.createElement("h4");
+    heading.textContent = key[0].toUpperCase() + key.slice(1);
+    const list = document.createElement("ul");
+    integrity[key].forEach((value) => {
+      const item = document.createElement("li");
+      item.textContent = value;
+      list.append(item);
+    });
+    diagnostics.append(heading, list);
+  });
+  (integrity.details || []).forEach((value) => {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = value;
+    diagnostics.append(paragraph);
+  });
+  const indicator = document.createElement("span");
+  indicator.className = "integrity-status";
+  indicator.textContent = `Integrity: ${label}`;
+  section.querySelector(".environment-identity").append(indicator);
+  const rows = detailRows([
+    ["Integrity result", integrity.reported_state || label],
+    ["Integrity checked at", integrity.checked_at],
+    ["Installed commit", integrity.commit],
+    ...categories.map((key) => [key[0].toUpperCase() + key.slice(1), counts[key]]),
+    ["Report source", integrity.source === "config" ? "Configuration header" : integrity.source === "run" ? "Run marker" : null],
+    ["Integrity log lines", integrity.evidence_lines?.length ? integrity.evidence_lines : null],
+  ]);
+  section.querySelector(".environment-details").append(...rows.children);
+  if (diagnostics.childElementCount) section.append(diagnostics);
+  section.classList.add(`integrity-${status}`);
+  return section;
+}
 function findingTile(label, severity, count) {
   const tile = document.createElement("button");
   tile.type = "button";
@@ -1306,7 +1356,7 @@ function renderSummary(metadata, overview) {
   const heading = document.createElement("h3");
   heading.textContent = "Environment";
   environment.append(heading);
-  environment.append(environmentSection("kometa", "Kometa", [
+  const kometa = environmentSection("kometa", "Kometa", [
     metadata.kometa_version,
     metadata.kometa_branch && metadata.kometa_branch !== "unknown" ? metadata.kometa_branch : null,
     metadata.installation_method,
@@ -1318,7 +1368,8 @@ function renderSummary(metadata, overview) {
     ["Total memory", overview.total_memory],
     ["Available memory", overview.available_memory],
     ["Run command", overview.run_command],
-  ]));
+  ]);
+  environment.append(addKometaIntegrity(kometa, metadata.kometa_integrity));
 
   const configurations = overview.plex_configurations || [];
   const plexLines = configurations.flatMap((section) => section.lines || []);
