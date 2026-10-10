@@ -43,6 +43,7 @@ let viewerFirstLine = 1;
 let viewerLastLine = 1;
 let loadingViewerChunk = false;
 let extractedConfig = "";
+const configOptimizationCache = new Map();
 let viewerMode = "log";
 let currentRecommendations = [];
 let schemaValidationFailures = [];
@@ -1068,6 +1069,8 @@ async function openRuntimeLine(runtime, rankedRunTimes = [runtime]) {
 }
 
 function showGroup(group, recommendations) {
+  const overviewPanel = document.querySelector(".log-overview-details");
+  if (overviewPanel) overviewPanel.open = true;
   document.querySelectorAll(".nav-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.group === group.key);
   });
@@ -1085,6 +1088,7 @@ function showGroup(group, recommendations) {
   copy.textContent = group.description;
   header.append(title, copy);
   sectionContent.append(header);
+  if (group.key === "schema") sectionContent.append(configOptimizationCard());
 
   const matches = (group.key === "schema"
     ? schemaIssueRecommendations(recommendations)
@@ -1099,7 +1103,7 @@ function showGroup(group, recommendations) {
       }
       return left.title.localeCompare(right.title);
     });
-  if (!matches.length) {
+  if (!matches.length && group.key !== "schema") {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.textContent = `No ${group.label.toLowerCase()} were found.`;
@@ -1150,6 +1154,117 @@ function showGroup(group, recommendations) {
     list.append(details);
   });
   sectionContent.append(list);
+}
+
+function optimizationLineSummary(counts) {
+  if (!counts) return "";
+  const number = (value) => Number(value).toLocaleString();
+  const comparison = `Before: ${number(counts.before)} lines | After: ${number(counts.after)} lines`;
+  if (counts.saved > 0) return `${comparison} | Saved: ${number(counts.saved)} (${number(counts.reduction_percent)}%)`;
+  if (counts.saved < 0) return `${comparison} | ${number(-counts.saved)} additional lines`;
+  return `${comparison} | Same line count`;
+}
+
+function configOptimizationCard() {
+  const scanId = currentScanId;
+  const card = document.createElement("section");
+  card.className = "config-optimization";
+  const heading = document.createElement("h4");
+  heading.textContent = "Config Optimization";
+  const optional = document.createElement("span");
+  optional.className = "optimization-optional";
+  optional.textContent = "Optional";
+  heading.append(optional);
+  const status = document.createElement("p");
+  status.setAttribute("role", "status");
+  status.textContent = "Checking repeated settings...";
+  const metrics = document.createElement("p");
+  metrics.className = "optimization-line-counts";
+  metrics.hidden = true;
+  const actions = document.createElement("div");
+  actions.className = "optimization-actions";
+  const review = document.createElement("button");
+  review.type = "button";
+  review.className = "secondary-button compact";
+  review.innerHTML = '<i class="fa-solid fa-code-compare" aria-hidden="true"></i> Review Changes';
+  review.disabled = true;
+  const download = document.createElement("button");
+  download.type = "button";
+  download.className = "primary-button compact";
+  download.innerHTML = '<i class="fa-solid fa-download" aria-hidden="true"></i> Download Anchored YAML';
+  download.disabled = true;
+  actions.append(review, download);
+  card.append(heading, status, metrics, actions);
+  let result;
+  const load = async () => {
+    if (!scanId) throw new Error("No stored config is available.");
+    if (!configOptimizationCache.has(scanId)) {
+      const pending = fetch(`/api/scans/${encodeURIComponent(scanId)}/optimize-config`, { method: "POST" })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "Unable to review this config.");
+          return payload;
+        });
+      configOptimizationCache.set(scanId, pending);
+    }
+    result = await configOptimizationCache.get(scanId);
+    metrics.textContent = optimizationLineSummary(result.line_counts);
+    metrics.hidden = !metrics.textContent;
+    if (result.status === "optimized") {
+      const uses = result.changes.reduce((total, change) => total + change.locations.length - 1, 0);
+      status.textContent = `${result.changes.length} shared block${result.changes.length === 1 ? "" : "s"}, ${uses} repeated location${uses === 1 ? "" : "s"}. ${result.message}`;
+      review.disabled = false;
+      download.disabled = false;
+    } else status.textContent = result.message;
+  };
+  const failed = (error) => {
+    configOptimizationCache.delete(scanId);
+    status.textContent = error.message;
+    review.disabled = false;
+    review.innerHTML = '<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry Review';
+  };
+  review.addEventListener("click", () => {
+    if (!result) {
+      review.disabled = true;
+      status.textContent = "Checking repeated settings...";
+      load().then(() => {
+        review.innerHTML = '<i class="fa-solid fa-code-compare" aria-hidden="true"></i> Review Changes';
+      }).catch(failed);
+      return;
+    }
+    const locations = document.querySelector("#optimization-locations");
+    document.querySelector("#optimization-line-counts").textContent = optimizationLineSummary(result.line_counts);
+    locations.replaceChildren();
+    result.changes.forEach((change) => {
+      const item = document.createElement("li");
+      item.textContent = `&${change.anchor}: ${change.locations.join("; ")}`;
+      locations.append(item);
+    });
+    const diff = document.querySelector("#optimization-diff");
+    diff.replaceChildren();
+    result.diff.split("\n").forEach((line) => {
+      const row = document.createElement("span");
+      row.className = line.startsWith("+") ? "diff-added" : line.startsWith("-") ? "diff-removed" : "";
+      row.textContent = line + "\n";
+      diff.append(row);
+    });
+    document.querySelector("#optimization-dialog").showModal();
+    document.querySelector("#download-optimized-dialog").onclick = () => download.click();
+  });
+  download.addEventListener("click", () => {
+    if (!result?.optimized_config) return;
+    const link = document.createElement("a");
+    const config = result.optimized_config;
+    const schemaUrl = `https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/${currentSchemaBranch}/json-schema/config-schema.json`;
+    const content = /^\s*#\s*yaml-language-server:\s*\$schema=/im.test(config)
+      ? config : `# yaml-language-server: $schema=${schemaUrl}\n${config}`;
+    link.href = URL.createObjectURL(new Blob([content], { type: "text/yaml;charset=utf-8" }));
+    link.download = downloadFilename("config").replace(/\.yml$/, "-anchored.yml");
+    link.click();
+    URL.revokeObjectURL(link.href);
+  });
+  load().catch(failed);
+  return card;
 }
 
 function summaryCard(label, value, small = false) {
@@ -1302,7 +1417,7 @@ function findingTile(label, severity, count) {
   const hasFindings = Number(count) > 0;
   tile.disabled = !hasFindings && severity !== "schema";
   if (severity === "schema" && !hasFindings) {
-    tile.title = "No schema issues detected. Open extracted config";
+    tile.title = "No schema issues detected. Review config optimization";
     tile.setAttribute("aria-label", tile.title);
   }
   const value = document.createElement("strong");
@@ -1311,10 +1426,6 @@ function findingTile(label, severity, count) {
   name.textContent = label;
   tile.append(value, name);
   tile.addEventListener("click", () => {
-    if (severity === "schema" && !hasFindings) {
-      showConfigInViewer().catch((error) => alert(error.message));
-      return;
-    }
     const overviewPanel = document.querySelector(".log-overview-details");
     if (overviewPanel) overviewPanel.open = true;
     document.querySelector(`.nav-button[data-group="${severity}"]`)?.click();
@@ -1621,7 +1732,7 @@ function renderResults(data, runSchemaValidation = true) {
     const recommendationCount = group.key === "schema"
       ? schemaIssueRecommendations(recommendations).length
       : recommendations.filter((item) => item.severity === group.key).length;
-    if (recommendationCount === 0) return;
+    if (recommendationCount === 0 && group.key !== "schema") return;
     const option = document.createElement("option");
     option.value = group.key;
     option.dataset.severity = group.key;
@@ -1992,6 +2103,10 @@ document.querySelector("#download-config-option").addEventListener("click", () =
 document.querySelector("#download-both-option").addEventListener("click", () => runDownload("both"));
 document.querySelector("#close-download").addEventListener("click", () => downloadDialog.close());
 document.querySelector("#close-recommendation").addEventListener("click", () => document.querySelector("#recommendation-dialog").close());
+document.querySelector("#close-optimization").addEventListener("click", () => document.querySelector("#optimization-dialog").close());
+document.querySelector("#optimization-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) event.currentTarget.close();
+});
 document.querySelector("#delete-scan").addEventListener("click", async () => {
   if (!currentScanId || !deleteToken || !await ConfirmDialog.show({ title: "Delete this scan?", message: "This permanently deletes the log and its scan results.", confirmText: "Delete scan" })) return;
   const response = await fetch(`/api/scans/${encodeURIComponent(currentScanId)}`, {

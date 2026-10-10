@@ -21,6 +21,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_file, ur
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
+from .config_optimizer import optimize_config
 from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_archive_path, scan_content_size, scan_log
 from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
@@ -211,6 +212,16 @@ AUTOMATED_TOP_PEOPLE_REQUESTER = {"name": "Automation", "id": "automation:top-25
 AUTOMATED_TOP_PEOPLE_TAG = "Automated Top 250"
 KOMETA_VERSION_CACHE_SECONDS = 60 * 60
 KOMETA_VERSION_URL = "https://raw.githubusercontent.com/Kometa-Team/Kometa/{branch}/VERSION"
+
+
+def _config_with_schema_directive(config: str, metadata: dict) -> str:
+    branch = metadata.get("schema_validation_branch")
+    if branch not in {"master", "develop"}:
+        branch = "master" if metadata.get("kometa_branch") == "master" else "develop"
+    if not re.search(r"^\s*#\s*yaml-language-server:\s*\$schema=", config, re.IGNORECASE | re.MULTILINE):
+        schema_url = f"https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/{branch}/json-schema/config-schema.json"
+        return f"# yaml-language-server: $schema={schema_url}\n{config}"
+    return config
 
 
 def _schema_validation_is_fresh(metadata: dict) -> bool:
@@ -1749,13 +1760,7 @@ def create_app() -> Flask:
         if not config:
             return jsonify(error="No redacted config block was found in this log."), 409
 
-        metadata = record.get("metadata") or {}
-        branch = metadata.get("schema_validation_branch")
-        if branch not in {"master", "develop"}:
-            branch = "master" if metadata.get("kometa_branch") == "master" else "develop"
-        if not re.search(r"^\s*#\s*yaml-language-server:\s*\$schema=", config, re.IGNORECASE | re.MULTILINE):
-            schema_url = f"https://raw.githubusercontent.com/Kometa-Team/Kometa/refs/heads/{branch}/json-schema/config-schema.json"
-            config = f"# yaml-language-server: $schema={schema_url}\n{config}"
+        config = _config_with_schema_directive(config, record.get("metadata") or {})
 
         names = _download_artifact_names(record)
         if kind == "config":
@@ -1784,6 +1789,20 @@ def create_app() -> Flask:
         except Exception:
             temporary_path.unlink(missing_ok=True)
             raise
+
+    @app.post("/api/scans/<scan_id>/optimize-config")
+    def optimize_stored_config(scan_id):
+        record = store.get(scan_id)
+        path = store.log_path(scan_id)
+        if record is None or path is None:
+            abort(404)
+        try:
+            config = _stored_log_index(path)["config"]
+            if config:
+                config = _config_with_schema_directive(config, record.get("metadata") or {})
+            return jsonify(optimize_config(config))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
 
     @app.post("/api/scans/<scan_id>/validate-config")
     def validate_stored_config(scan_id):

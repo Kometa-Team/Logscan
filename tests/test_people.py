@@ -1483,13 +1483,14 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('fa-solid fa-file-code', template)
         self.assertIn('document.querySelector("#view-config").addEventListener("click", () => showConfigInViewer()', script)
 
-    def test_zero_schema_finding_tile_opens_extracted_config(self):
+    def test_zero_schema_finding_tile_keeps_optimization_review_available(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 
         self.assertIn('tile.disabled = !hasFindings && severity !== "schema"', script)
-        self.assertIn('tile.title = "No schema issues detected. Open extracted config"', script)
+        self.assertIn('tile.title = "No schema issues detected. Review config optimization"', script)
         self.assertIn('if (severity === "schema" && !hasFindings)', script)
-        self.assertIn('showConfigInViewer().catch((error) => alert(error.message))', script)
+        self.assertIn('if (recommendationCount === 0 && group.key !== "schema") return', script)
+        self.assertIn('if (group.key === "schema") sectionContent.append(configOptimizationCard())', script)
 
     def test_yaml_schema_directive_detection_uses_extracted_config(self):
         prefix = "[config.py:1] [INFO] |"

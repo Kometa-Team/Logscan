@@ -394,6 +394,20 @@ h2 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.5rem); letter-spacing: -.04em;
 .section-header { margin: 4px 0 18px; }
 .section-header h3 { margin: 0 0 7px; font-size: 1.25rem; }
 .section-header p { margin: 0; color: var(--muted); font-size: .85rem; }
+.config-optimization { padding: 18px 0; margin-bottom: 20px; border-block: 1px solid var(--border); }
+.config-optimization h4 { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 1rem; }
+.optimization-optional { color: var(--muted); font-size: .75rem; font-weight: 500; }
+.config-optimization p { margin: 10px 0 14px; color: var(--muted); font-size: .85rem; overflow-wrap: anywhere; }
+.optimization-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.optimization-actions button { min-height: 40px; max-width: 100%; white-space: normal; }
+#optimization-dialog { width: min(1000px, calc(100% - 32px)); max-height: calc(100dvh - 32px); border-radius: 8px; }
+.optimization-content { padding: 18px 24px 24px; }
+.optimization-line-counts { margin: 0 0 16px; color: #bbf7d0; font-size: .82rem; line-height: 1.6; overflow-wrap: anywhere; }
+.config-optimization .optimization-line-counts { color: #bbf7d0; }
+#optimization-locations { margin: 0 0 16px; padding-left: 20px; font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+#optimization-diff { max-height: 48dvh; overflow: auto; margin: 0 0 18px; padding: 12px; border: 1px solid var(--border); border-radius: 4px; background: #080b16; color: var(--text); font: .78rem/1.6 "JetBrains Mono", monospace; tab-size: 2; }
+.diff-added { color: #bbf7d0; background: rgba(34,197,94,.12); }
+.diff-removed { color: #fecdd3; background: rgba(244,63,94,.12); }
 .recommendation-list { display: grid; gap: 12px; }
 .recommendation {
   overflow: hidden;

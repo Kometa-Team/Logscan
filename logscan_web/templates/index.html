@@ -10,10 +10,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261010-2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261010-4') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
-  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20261010-4') }}" defer></script>
+  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20261010-6') }}" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -171,6 +171,17 @@
     <div class="help-dialog-shell">
       <header class="viewer-header"><div><p class="eyebrow" id="recommendation-severity">Recommendation</p><h2 id="recommendation-title">Recommendation</h2></div><button class="icon-button" id="close-recommendation" type="button" aria-label="Close recommendation">×</button></header>
       <div class="recommendation-dialog-content" id="recommendation-content"></div>
+    </div>
+  </dialog>
+  <dialog class="help-dialog" id="optimization-dialog">
+    <div class="help-dialog-shell">
+      <header class="viewer-header"><div><p class="eyebrow">Optional Review</p><h2>Config Optimization</h2></div><button class="icon-button" id="close-optimization" type="button" aria-label="Close config optimization" title="Close config optimization"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></header>
+      <div class="optimization-content">
+        <p class="optimization-line-counts" id="optimization-line-counts"></p>
+        <ul id="optimization-locations"></ul>
+        <pre id="optimization-diff" tabindex="0" aria-label="Original and anchored YAML diff"></pre>
+        <button class="primary-button" id="download-optimized-dialog" type="button"><i class="fa-solid fa-download" aria-hidden="true"></i> Download Anchored YAML</button>
+      </div>
     </div>
   </dialog>
   <dialog class="help-dialog" id="download-dialog">
