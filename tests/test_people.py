@@ -1268,6 +1268,10 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertTrue(_schema_validation_is_fresh({
             **base, "schema_validation_checked_at": now.isoformat(),
         }))
+        self.assertFalse(_schema_validation_is_fresh({
+            "schema_validation_version": SCHEMA_VALIDATION_VERSION - 1,
+            "schema_validation_checked_at": now.isoformat(),
+        }))
         self.assertFalse(_schema_validation_is_fresh(base))
         self.assertFalse(_schema_validation_is_fresh({
             **base, "schema_validation_checked_at": (now - timedelta(hours=2)).isoformat(),

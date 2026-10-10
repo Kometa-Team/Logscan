@@ -1554,6 +1554,11 @@ async function loadSchemaValidation(data) {
   updated.metadata.counts.advice = updated.recommendations.filter((item) => item.severity === "advice").length;
   updated.overview = { ...updated.overview, finding_count: updated.recommendations.length };
   renderResults(updated, false);
+  if (logViewer.open && viewerMode === "config") {
+    const scrollTop = logCode.scrollTop;
+    await showConfigInViewer();
+    logCode.scrollTop = scrollTop;
+  }
 }
 function applySupportDestination(data, groups, recommendations) {
   const fragment = new URLSearchParams(location.hash.slice(1));

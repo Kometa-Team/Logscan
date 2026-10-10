@@ -74,7 +74,7 @@ def _node_at_path(node, path, unexpected_property: str | None = None):
     """Find the YAML node corresponding to a JSON Schema validation path."""
     for component in path:
         if isinstance(node, yaml.MappingNode):
-            pair = next((pair for pair in node.value if pair[0].value == str(component)), None)
+            pair = next((pair for pair in reversed(node.value) if pair[0].value == str(component)), None)
             if pair is None:
                 break
             node = pair[1]
@@ -83,7 +83,7 @@ def _node_at_path(node, path, unexpected_property: str | None = None):
         else:
             break
     if unexpected_property and isinstance(node, yaml.MappingNode):
-        pair = next((pair for pair in node.value if pair[0].value == unexpected_property), None)
+        pair = next((pair for pair in reversed(node.value) if pair[0].value == unexpected_property), None)
         if pair is not None:
             return pair[0]
     return node
@@ -332,8 +332,13 @@ def validate_redacted_config(
     if not config_text.strip():
         raise ValueError("No redacted configuration block was found in this log.")
     try:
-        config = yaml.safe_load(config_text)
-        config_node = yaml.compose(config_text)
+        loader = yaml.SafeLoader(config_text)
+        try:
+            config_node = loader.get_single_node()
+            # Construction resolves merges in place without losing the source marks.
+            config = loader.construct_document(config_node) if config_node is not None else None
+        finally:
+            loader.dispose()
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         config_line = mark.line + 1 if mark else 1
