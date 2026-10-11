@@ -638,6 +638,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .summary-grid { display: grid; grid-template-columns: 1fr; gap: 18px; margin: 30px 0; }
 .scan-metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .summary-section-heading { grid-column: 1 / -1; margin: 2px 0 0; font-size: 1rem; }
+.log-occurrence-description { grid-column: 1 / -1; margin: 0; }
 .scan-metric-grid .summary-card { min-height: 96px; }
 .scan-metric-grid .summary-value { margin-top: 9px; font-size: 1.35rem; letter-spacing: 0; }
 .finding-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }

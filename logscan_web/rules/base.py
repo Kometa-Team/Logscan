@@ -120,26 +120,24 @@ def evaluate_text_rules_bytes(rules: list[TextRule], content: bytes) -> list[Fin
     newline = bytes((10,))
     evidence_limit = 10_000
 
-    def variants(value: str) -> tuple[bytes, ...]:
-        encoded = value.encode()
-        return tuple(dict.fromkeys((encoded, encoded.lower(), encoded.upper())))
-
     def matching_positions(value: str, word_bounded: bool = False) -> list[int]:
-        matches = set()
-        for candidate in variants(value):
-            position = content.find(candidate)
-            while position >= 0 and len(matches) < evidence_limit:
-                before = content[position - 1] if position else None
-                end = position + len(candidate)
-                after = content[end] if end < len(content) else None
-                bounded = not (
-                    (before is not None and (chr(before).isalnum() or before == 95))
-                    or (after is not None and (chr(after).isalnum() or after == 95))
-                )
-                if not word_bounded or bounded:
-                    matches.add(position)
-                position = content.find(candidate, position + max(1, len(candidate)))
-        return sorted(matches)
+        # Search the bytes/mmap directly: casing variants miss mixed-case
+        # messages, while lowercasing the entire buffer copies large logs.
+        pattern = re.compile(re.escape(value.encode()), re.I)
+        matches = []
+        for match in pattern.finditer(content):
+            position, end = match.span()
+            before = content[position - 1] if position else None
+            after = content[end] if end < len(content) else None
+            bounded = not (
+                (before is not None and (chr(before).isalnum() or before == 95))
+                or (after is not None and (chr(after).isalnum() or after == 95))
+            )
+            if not word_bounded or bounded:
+                matches.append(position)
+                if len(matches) >= evidence_limit:
+                    break
+        return matches
 
     pending = []
     for rule in rules:
