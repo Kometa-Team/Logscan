@@ -201,6 +201,26 @@ proxy_pass http://127.0.0.1:8000;
 
 If Cloudflare proxies the hostname, its plan-specific request-body limit still applies to the compressed upload. Use a higher-limit plan or DNS-only routing when uploads must exceed that limit.
 
+## Scan results
+
+Scan results retain the findings count and separately show **Log occurrences**:
+the number of critical, error, and warning log entries. Repeated entries count
+separately, while one entry may produce more than one finding. These counts
+are calculated from the full log, including large logs, rather than from the
+displayed evidence lines.
+
+Large-file text rules match arbitrary mixed case, just like the normal scanner,
+without lowercasing or decoding the entire log into memory.
+
+Validation-only Kometa runs are complete when `validator.py` logs a terminal
+`Result:`. The result (including `PASSED`, `FAILED`, or `SKIPPED`) and validation
+level are displayed separately. A completed validation command can have a
+failed outcome; a report without a terminal result remains incomplete. No
+normal runtime footer is required, and no runtime is fabricated.
+
+Analysis version 5 reprocesses retained scans through the existing startup
+backfill, preserving scan IDs, source logs, deletion tokens and upload attribution.
+
 ## Tests
 
 Run the regression suite from the repository root:

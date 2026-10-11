@@ -1448,6 +1448,27 @@ function renderSummary(metadata, overview) {
     summaryCard("Run time", overview.run_time || metadata.run_time || "Unknown", true),
     summaryCard("Findings", Object.values(metadata.counts).reduce((total, count) => total + Number(count || 0), 0).toLocaleString()),
   );
+  if (metadata.validation_run) {
+    const outcome = metadata.validation_result ? metadata.validation_result.toUpperCase() : "Incomplete";
+    metricGrid.append(summaryCard("Validation run", `${outcome}${metadata.validation_level ? ` (${metadata.validation_level})` : ""}`));
+  }
+  let occurrences;
+  if (metadata.log_counts) {
+    occurrences = document.createElement("section");
+    occurrences.className = "scan-metric-grid";
+    occurrences.setAttribute("aria-label", "Log occurrences");
+    const heading = document.createElement("h3");
+    heading.className = "summary-section-heading";
+    heading.textContent = "Log occurrences";
+    const explanation = document.createElement("p");
+    explanation.className = "log-occurrence-description";
+    explanation.textContent = "Counts of tagged log entries. Repeated entries are counted separately; one entry can produce multiple findings.";
+    occurrences.append(heading, explanation,
+      summaryCard("Critical entries", Number(metadata.log_counts.critical || 0).toLocaleString()),
+      summaryCard("Error entries", Number(metadata.log_counts.error || 0).toLocaleString()),
+      summaryCard("Warning entries", Number(metadata.log_counts.warning || 0).toLocaleString()),
+    );
+  }
   const findings = document.createElement("section");
   findings.className = "finding-grid";
   findings.setAttribute("aria-label", "Findings");
@@ -1550,7 +1571,7 @@ function renderSummary(metadata, overview) {
       ["Episodes", quickstart.library_totals?.episodes],
     ]));
   }
-  summaryGrid.replaceChildren(metricGrid, findings, environment);
+  summaryGrid.replaceChildren(metricGrid, ...(occurrences ? [occurrences] : []), findings, environment);
 }
 function renderBatchResults(scans, admin = false) {
   if (!scans.length) {

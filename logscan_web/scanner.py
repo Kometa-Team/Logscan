@@ -20,6 +20,7 @@ from .models import ScanContext
 from .rules import RuleRegistry, migrated_rules
 from .rules.base import TextRule, evaluate_text_rules_bytes
 from .categories import category_configuration
+from .log_facts import count_log_occurrences, extract_validation_summary
 
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024
@@ -817,6 +818,8 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     quickstart_metadata = extract_quickstart_metadata(sample_content)
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", sample_content)
     detected_run_time = run_match.group(1).strip() if run_match else None
+    validation_summary = extract_validation_summary(content_bytes)
+    complete_log = complete_log or bool(validation_summary.get("validation_result"))
     context = ScanContext.from_content(
         filename, sample_content, kometa_version=kometa_version,
         run_time=detected_run_time, complete=complete_log,
@@ -836,6 +839,8 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         "installation_method": normalized_installation(kometa_version),
         "run_time": str(detected_run_time) if detected_run_time else None,
         "complete": complete_log,
+        **validation_summary,
+        "log_counts": count_log_occurrences(content_bytes),
         "header_found": kometa_version is not None,
         "line_count": line_count,
         "size_bytes": len(content_bytes),
@@ -1029,12 +1034,14 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     quickstart_metadata = extract_quickstart_metadata(content)
     run_match = re.search(r"\bFinished:.*?\bRun Time:\s*([^|\r\n]+)", content)
     detected_run_time = run_match.group(1).strip() if run_match else None
+    validation_summary = extract_validation_summary(content)
+    complete_log = detected_run_time is not None or bool(validation_summary.get("validation_result"))
     context = ScanContext.from_content(
         filename,
         content,
         kometa_version=kometa_version,
         run_time=detected_run_time,
-        complete=detected_run_time is not None,
+        complete=complete_log,
     )
     registry = RuleRegistry()
     for rule in migrated_rules():
@@ -1053,7 +1060,9 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "runtime_platform": normalized_platform(runtime_platform),
         "installation_method": normalized_installation(kometa_version),
         "run_time": str(detected_run_time) if detected_run_time else None,
-        "complete": detected_run_time is not None,
+        "complete": complete_log,
+        **validation_summary,
+        "log_counts": count_log_occurrences(content_bytes),
         "header_found": kometa_version is not None,
         "line_count": content.count("\n") + int(bool(content) and not content.endswith("\n")),
         "size_bytes": len(content_bytes),
