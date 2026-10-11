@@ -1455,7 +1455,7 @@ function renderSummary(metadata, overview) {
   let occurrences;
   if (metadata.log_counts) {
     occurrences = document.createElement("section");
-    occurrences.className = "scan-metric-grid";
+    occurrences.className = "scan-metric-grid log-occurrence-grid";
     occurrences.setAttribute("aria-label", "Log occurrences");
     const heading = document.createElement("h3");
     heading.className = "summary-section-heading";
@@ -1463,11 +1463,15 @@ function renderSummary(metadata, overview) {
     const explanation = document.createElement("p");
     explanation.className = "log-occurrence-description";
     explanation.textContent = "Counts of tagged log entries. Repeated entries are counted separately; one entry can produce multiple findings.";
-    occurrences.append(heading, explanation,
-      summaryCard("Critical entries", Number(metadata.log_counts.critical || 0).toLocaleString()),
-      summaryCard("Error entries", Number(metadata.log_counts.error || 0).toLocaleString()),
-      summaryCard("Warning entries", Number(metadata.log_counts.warning || 0).toLocaleString()),
-    );
+    occurrences.append(heading, explanation);
+    for (const [level, label] of [
+      ["critical", "Critical"], ["error", "Error"], ["warning", "Warning"],
+      ["info", "Info"], ["debug", "Debug"], ["trace", "Trace"],
+    ]) {
+      const card = summaryCard(`${label} entries`, Number(metadata.log_counts[level] || 0).toLocaleString());
+      card.classList.add(`log-occurrence-${level}`);
+      occurrences.append(card);
+    }
   }
   const findings = document.createElement("section");
   findings.className = "finding-grid";
