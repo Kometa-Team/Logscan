@@ -258,6 +258,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             "size": lambda row: row["size_bytes"],
             "lines": lambda row: row["line_count"],
             "findings": lambda row: row["finding_count"],
+            "log_counts": lambda row: row["log_entry_count"] or 0,
             "version": lambda row: row["kometa_version"].casefold(),
         }
         if sort_key not in sorters:
@@ -406,6 +407,11 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     metadata = record.get("metadata") or {}
     overview = record.get("overview") or {}
     recommendations = record.get("recommendations") or []
+    stored_log_counts = metadata.get("log_counts")
+    log_counts = (
+        {level: int(stored_log_counts.get(level) or 0) for level in ("critical", "error", "warning", "info", "debug", "trace")}
+        if isinstance(stored_log_counts, dict) else None
+    )
     counts = {
         severity: sum(item.get("severity") == severity for item in recommendations)
         for severity in ("critical", "error", "warning", "schema", "advice")
@@ -443,6 +449,8 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         "finding_count": sum(counts.values()),
         "schema_count_available": schema_count_available,
         "counts": counts,
+        "log_counts": log_counts,
+        "log_entry_count": sum(log_counts.values()) if log_counts is not None else None,
         "kometa_version": metadata.get("kometa_version") or "Unknown",
         "kometa_branch": _kometa_branch(metadata),
         "platform": metadata.get("runtime_platform") or "Unknown",

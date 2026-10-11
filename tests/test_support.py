@@ -354,6 +354,42 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertNotIn("delete_token_hash", body)
 
 
+    def test_inventory_displays_all_log_counts_separately_from_findings(self):
+        self.authorize_session()
+        counts = {"critical": 12, "error": 34, "warning": 56, "info": 7890, "debug": 1234, "trace": 0}
+        self.store.update_metadata(self.scan_id, log_counts=counts)
+        body = self.client.get("/support/logs").get_data(as_text=True)
+        self.assertIn('aria-label="Finding counts"', body)
+        self.assertIn('data-findings="5"', body)
+        self.assertIn('aria-label="Log entry counts"', body)
+        for level, count in counts.items():
+            self.assertIn(f'aria-label="{level.title()} log entries: {count:,}"', body)
+        self.assertLess(body.index('>Findings</a>'), body.index('>Log counts</a>'))
+
+    def test_inventory_does_not_present_missing_log_counts_as_zero(self):
+        self.authorize_session()
+        body = self.client.get("/support/logs").get_data(as_text=True)
+        self.assertIn('aria-label="Log counts unavailable"', body)
+        self.assertNotIn('aria-label="Log entry counts"', body)
+        self.store.update_metadata(self.scan_id, log_counts={})
+        body = self.client.get("/support/logs").get_data(as_text=True)
+        self.assertNotIn('aria-label="Log counts unavailable"', body)
+        self.assertIn('aria-label="Trace log entries: 0"', body)
+
+    def test_inventory_sorts_log_counts_independently_from_findings(self):
+        self.authorize_session()
+        self.store.update_metadata(self.scan_id, log_counts={"error": 3})
+        result = SimpleNamespace(
+            filename="many-entries.log", recommendations=[],
+            metadata={"log_counts": {"info": 100}},
+            overview={"uploaded_by_id": "42"}, categories=[],
+        )
+        self.store.create(result.filename, b"log", result)
+        descending = self.client.get("/support/logs?sort=log_counts&direction=desc").get_data(as_text=True)
+        self.assertLess(descending.index('data-title="many-entries.log"'), descending.index('data-title="discord-example.log"'))
+        ascending = self.client.get("/support/logs?sort=log_counts&direction=asc").get_data(as_text=True)
+        self.assertLess(ascending.index('data-title="discord-example.log"'), ascending.index('data-title="many-entries.log"'))
+
     def test_inventory_filters_quickstart_and_direct_runs(self):
         direct_result = SimpleNamespace(
             filename="direct-example.log",

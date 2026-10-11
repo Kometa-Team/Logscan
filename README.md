@@ -204,10 +204,16 @@ If Cloudflare proxies the hostname, its plan-specific request-body limit still a
 ## Scan results
 
 Scan results retain the findings count and separately show **Log occurrences**:
-the number of critical, error, and warning log entries. Repeated entries count
-separately, while one entry may produce more than one finding. These counts
-are calculated from the full log, including large logs, rather than from the
+the number of critical, error, warning, info, debug, and trace log entries.
+Repeated entries count separately, while one entry may produce more than one
+finding. These counts are calculated from the full log, including large logs,
+rather than from the
 displayed evidence lines.
+Critical, error, and warning counts share their colors with findings and log
+viewer highlights; info, debug, and trace have distinct colors.
+The support console displays the same six levels in a separate **Log counts**
+column beside **Findings**, sortable by total tagged entries. Counts unavailable
+before backfill are shown as unavailable rather than zero.
 
 Large-file text rules match arbitrary mixed case, just like the normal scanner,
 without lowercasing or decoding the entire log into memory.
@@ -220,6 +226,8 @@ normal runtime footer is required, and no runtime is fabricated.
 
 Analysis version 5 reprocesses retained scans through the existing startup
 backfill, preserving scan IDs, source logs, deletion tokens and upload attribution.
+All six log-level counts are already stored in version-5 results, so displaying
+them requires no further analysis-version bump or rescan.
 
 ## Tests
 
