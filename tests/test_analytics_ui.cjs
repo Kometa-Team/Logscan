@@ -30,11 +30,12 @@ test("service totals include ImageMaid cleanup without opening an accordion", ()
   assert.equal(metrics.length, 12);
   assert.equal(metrics[0].children[0].textContent, "Kometa logs uploaded");
   assert.equal(metrics[1].children[0].textContent, "ImageMaid logs uploaded");
-  for (const [label, value] of [["Kometa logs uploaded", "523"], ["ImageMaid logs uploaded", "3"], ["ImageMaid files removed", "27,448"], ["ImageMaid space recovered", "1.5 MB"], ["Missing people images identified", "38"], ["Missing people images resolved", "18"]]) {
+  for (const [label, value] of [["Kometa logs uploaded", "523"], ["ImageMaid logs uploaded", "3"], ["Plex image bloat files removed", "27,448"], ["ImageMaid space recovered", "1.5 MB"], ["Missing people images identified", "38"], ["Missing people images resolved", "18"]]) {
     const metric = metrics.find(item => item.children[0].textContent === label);
     assert.equal(metric.children[1].textContent, value);
   }
   assert.ok(metrics.every(item => item.children[0].children.length === 0));
+  assert.equal(nodes.get("#analytics-imagemaid-summary").children[0].children[0].textContent, "Plex image bloat files removed");
   assert.equal(nodes.get("#analytics-kometa-total").textContent, "523 logs");
   assert.equal(nodes.get("#analytics-imagemaid-total").textContent, "3 logs");
 });

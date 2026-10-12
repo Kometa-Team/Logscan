@@ -32,7 +32,7 @@ function renderSummary(totals) {
     ["Data processed", formatBytes(totals.bytes_processed)],
     ["Missing people images identified", number.format(totals.people_submitted)],
     ["Missing people images resolved", number.format(totals.people_addressed)],
-    ["ImageMaid files removed", number.format(totals.imagemaid_files_removed || 0)],
+    ["Plex image bloat files removed", number.format(totals.imagemaid_files_removed || 0)],
     ["ImageMaid space recovered", formatBytes(totals.imagemaid_bytes_recovered || 0)],
     ["Batch uploads", number.format(totals.batches)],
     ["Duplicates reused", number.format(totals.duplicates_reused || 0)],
@@ -41,7 +41,7 @@ function renderSummary(totals) {
   ]);
   const seconds = totals.imagemaid_runtime_seconds || 0;
   renderMetrics("#analytics-imagemaid-summary", [
-    ["Files removed", number.format(totals.imagemaid_files_removed || 0)],
+    ["Plex image bloat files removed", number.format(totals.imagemaid_files_removed || 0)],
     ["Space recovered", formatBytes(totals.imagemaid_bytes_recovered || 0)],
     ["Completed runs", number.format(totals.imagemaid_completed_runs || 0)],
     ["Cleanup reports", number.format(totals.imagemaid_cleanup_reports || 0)],
