@@ -1433,8 +1433,17 @@ function addKometaIntegrity(section, integrity = {}) {
     ...categories.map((key) => [key[0].toUpperCase() + key.slice(1), counts[key]]),
     ["Report source", native ? (integrity.report_location === "summary" ? "Kometa startup-check summary" : "Kometa startup check")
       : integrity.source === "config" ? "Configuration header" : integrity.source === "run" ? "Run marker" : null],
-    ["Integrity log lines", integrity.evidence_lines?.length ? integrity.evidence_lines : null],
   ]);
+  const evidenceLines = (integrity.evidence_lines || []).filter((line) => Number.isSafeInteger(line) && line > 0);
+  if (evidenceLines.length) {
+    const row = document.createElement("div");
+    const term = document.createElement("dt");
+    const definition = document.createElement("dd");
+    term.textContent = "Integrity log lines";
+    appendLineReferenceLinks(definition, formatLineRanges(evidenceLines));
+    row.append(term, definition);
+    rows.append(row);
+  }
   section.querySelector(".environment-details").append(...rows.children);
   if (diagnostics.childElementCount) section.append(diagnostics);
   section.classList.add(`integrity-${status}`);
