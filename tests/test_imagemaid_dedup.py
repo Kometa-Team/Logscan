@@ -212,6 +212,10 @@ def test_bot_web_dedup_tool_analytics_and_private_grants(tmp_path, monkeypatch):
     assert totals["imagemaid_completed_runs"] == 1 and totals["imagemaid_runtime_seconds"] == 60
     page = client.get("/").get_data(as_text=True)
     assert 'aria-label="Cumulative ImageMaid cleanup"' in page and "1.5 MB" in page and "<dd>18</dd>" in page
+    assert "<dt>Kometa logs uploaded</dt><dd>0</dd>" in page
+    assert "<dt>ImageMaid logs uploaded</dt><dd>1</dd>" in page
+    assert page.index("Kometa logs processed") < page.index("ImageMaid cleanup")
+    assert "Missing people images identified" in page and "Missing people images resolved" in page
     analytics_page = client.get("/analytics").get_data(as_text=True)
     assert analytics_page.count('<details class="analytics-group"') == 6
     assert '<details class="analytics-group" open' not in analytics_page
