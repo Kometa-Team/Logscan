@@ -779,7 +779,8 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-filter-panel > summary::after { content: "+"; color: var(--accent-bright); font-size: 1.35rem; font-weight: 400; line-height: 1; }
 .support-filter-panel[open] > summary::after { content: "-"; }
 .support-filter-status { margin-left: auto; color: var(--muted); font-size: .7rem; font-weight: 600; }
-.support-filters { display: grid; grid-template-columns: minmax(260px, 2fr) repeat(5, minmax(110px, .65fr)) auto auto; align-items: end; gap: 10px; padding: 16px; }
+.support-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); align-items: end; gap: 10px; padding: 16px; }
+.support-search { grid-column: span 2; }
 .support-filters label { display: grid; gap: 6px; color: var(--muted); font-size: .7rem; font-weight: 650; }
 .support-filters input, .support-filters select { width: 100%; height: 42px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; outline: none; background: #080b18; color: var(--text); }
 .support-filters input:focus, .support-filters select:focus { border-color: var(--accent-bright); }
@@ -805,6 +806,10 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .support-source.discord { background: rgba(114,119,248,.12); color: #c7d2fe; }
 .support-source.web { background: rgba(34,211,238,.1); color: #a5f3fc; }
 .support-launcher { display: inline-flex; margin-left: 5px; padding: 2px 5px; align-items: center; border: 1px solid #a78bfa; border-radius: 4px; background: rgba(167,139,250,.12); color: #d8b4fe; font-size: .58rem; line-height: 1; vertical-align: 2px; }
+.support-integrity { display: block; width: fit-content; margin-top: 6px; color: var(--muted); font-size: .66rem; text-decoration: none; }
+.support-integrity:hover { text-decoration: underline; }
+.support-integrity.integrity-clean { color: #86efac; }
+.support-integrity.integrity-modified { color: #fde68a; }
 .support-severities { display: flex; gap: 4px; }
 .severity-chip { display: grid; min-width: 23px; height: 23px; padding: 0 5px; place-items: center; border: 1px solid currentColor; border-radius: 5px; font-size: .65rem; font-weight: 700; }
 .severity-chip { color: color-mix(in srgb, var(--count-color) 70%, white); background: color-mix(in srgb, var(--count-color) 12%, transparent); }
