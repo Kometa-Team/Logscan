@@ -21,6 +21,7 @@ from .rules import RuleRegistry, migrated_rules
 from .rules.base import TextRule, evaluate_text_rules_bytes
 from .categories import category_configuration
 from .log_facts import count_log_occurrences, extract_validation_summary
+from .imagemaid import analyze_imagemaid, runtime_seconds
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_DEPTH = 3
@@ -42,6 +43,25 @@ ARCHIVE_SUFFIXES = {
 
 class ScanError(ValueError):
     pass
+
+
+def detect_log_tool(content) -> str:
+    """Identify the producing application from source markers, never filenames."""
+    kometa = bool(re.search(rb"\[(?:kometa|plex_meta_manager)\.py:\d+\]", content, re.IGNORECASE))
+    imagemaid = bool(re.search(rb"\[imagemaid\.py:\d+\]", content, re.IGNORECASE))
+    if not kometa and not imagemaid:
+        imagemaid = bool(
+            re.search(rb"\|\s*=*\s*ImageMaid(?:\s+(?:Summary|Finished))?\s*=*\s*\|", content, re.IGNORECASE)
+            and re.search(rb"\|\s*Version:", content, re.IGNORECASE)
+            and re.search(rb"(?:imagemaid\.py|\|\s*Running in\s+\w+\s+Mode)", content, re.IGNORECASE)
+        )
+    if kometa and imagemaid:
+        raise ScanError("This file contains both Kometa and ImageMaid source markers. Upload separate logs or a mixed archive instead.")
+    if imagemaid:
+        return "imagemaid"
+    if kometa:
+        return "kometa"
+    raise ScanError("This does not appear to be a complete Kometa log file or a recognized ImageMaid log file.")
 
 
 def extract_missing_people(content: str) -> list[dict[str, str | bool]]:
@@ -1126,9 +1146,9 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     if len(content_bytes) > MAX_FILE_BYTES:
         raise ScanError("The selected file is larger than the 1 GB limit.")
 
+    if detect_log_tool(content_bytes) == "imagemaid":
+        return _scan_imagemaid(filename, content_bytes)
     content = content_bytes.decode("utf-8", errors="replace")
-    if not re.search(r"\[(?:kometa|plex_meta_manager)\.py:", content, re.IGNORECASE):
-        raise ScanError("This does not appear to be a complete Kometa log file.")
 
     version_match = re.search(r"\bVersion:\s*([^|\r\n]+)", content)
     kometa_version = version_match.group(1).strip() if version_match else None
@@ -1154,6 +1174,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
 
     runtime_platform = _first_value(content, "Platform")
     metadata = {
+        "tool_name": "kometa",
         "kometa_version": kometa_version,
         "newest_version_at_run": _first_value(content, "Newest Version"),
         "kometa_branch": kometa_branch,
@@ -1190,7 +1211,57 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
 def _scan_large_path(filename: str, path: Path) -> ScanResult:
     with path.open("rb") as source:
         with mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as content:
-            return _scan_large_log(filename, content)
+            if detect_log_tool(content) == "imagemaid":
+                return _scan_imagemaid(filename, content)
+            result = _scan_large_log(filename, content)
+            result.metadata["tool_name"] = "kometa"
+            return result
+
+
+def _scan_imagemaid(filename: str, content) -> ScanResult:
+    analysis = analyze_imagemaid(content)
+    values = analysis["values"]
+    recommendations = analysis["recommendations"]
+    quickstart = extract_quickstart_metadata(analysis["quickstart_content"])
+    metadata = {
+        "tool_name": "imagemaid",
+        "imagemaid_version": values["version"],
+        "imagemaid_mode": values["mode"],
+        "runtime_platform": normalized_platform(values.get("platform")),
+        "installation_method": normalized_installation(values["version"]),
+        "run_time": values["run_time"],
+        "complete": analysis["complete"],
+        "header_found": values["version"] is not None,
+        "size_bytes": len(content),
+        "line_count": analysis["line_count"],
+        "log_counts": count_log_occurrences(content),
+        "counts": {key: sum(item["severity"] == key for item in recommendations) for key in ("critical", "error", "warning", "schema", "advice")},
+        "imagemaid_counts": analysis["counts"],
+        "imagemaid_operations": analysis["operations"],
+        **quickstart,
+        "imagemaid_cleanup_reported": analysis["cleanup_reported"],
+        "run_time_seconds": runtime_seconds(values["run_time"] or ""),
+        "imagemaid_branch": kometa_branch_from_version(values["version"]),
+    }
+    overview = {
+        "tool_name": "imagemaid",
+        "log_name": filename,
+        "finding_count": len(recommendations),
+        "imagemaid_version": values["version"],
+        "imagemaid_mode": values["mode"],
+        "platform": values.get("platform"),
+        "run_command": values["run_command"],
+        "start_time": values["started"],
+        "finished": values["finished"],
+        "run_time": values["run_time"],
+        "section_run_times": [
+            {"name": key.replace("_", " ").title(), "seconds": seconds, "duration": _format_runtime(seconds), "line": analysis["timing_lines"][key]}
+            for key, seconds in sorted(analysis["timings"].items(), key=lambda item: -item[1])
+        ],
+        "imagemaid_counts": analysis["counts"],
+        "imagemaid_operations": analysis["operations"],
+    }
+    return ScanResult(filename, recommendations, metadata, overview, [group for group in category_configuration() if group["key"] != "schema"], [])
 
 
 def scan_content_size(content: bytes | Path) -> int:
@@ -1325,14 +1396,20 @@ def _stream_kometa_marker_and_size(source) -> tuple[bool, int]:
     carry = b""
     size = 0
     marker_found = False
+    header_found = False
+    version_found = False
+    command_found = False
     while chunk := source.read(1024 * 1024):
         size += len(chunk)
         if size > MAX_FILE_BYTES:
             raise ScanError("The extracted archive contents are larger than the 1 GB limit.")
         lowered = (carry + chunk).lower()
-        marker_found = marker_found or b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered
-        carry = chunk[-32:]
-    return marker_found, size
+        marker_found = marker_found or bool(re.search(rb"\[(?:kometa|plex_meta_manager|imagemaid)\.py:\d+\]", lowered))
+        header_found |= bool(re.search(rb"\|\s*=*\s*imagemaid(?:\s+(?:summary|finished))?\s*=*\s*\|", lowered))
+        version_found |= bool(re.search(rb"\|\s*version:", lowered))
+        command_found |= bool(re.search(rb"(?:imagemaid\.py|\|\s*running in\s+\w+\s+mode)", lowered))
+        carry = lowered[-4096:]
+    return marker_found or (header_found and version_found and command_found), size
 
 
 def _stream_contains_kometa_marker(source) -> bool:
@@ -1466,7 +1543,7 @@ def find_scannable_archive_logs(filename: str, content_bytes: bytes) -> list[tup
                     with archive.open(entry) as member:
                         while chunk := member.read(1024 * 1024):
                             lowered = (carry + chunk).lower()
-                            if b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered:
+                            if b"[kometa.py:" in lowered or b"[plex_meta_manager.py:" in lowered or b"[imagemaid.py:" in lowered:
                                 marker_found = True
                                 break
                             carry = chunk[-32:]

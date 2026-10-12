@@ -1519,6 +1519,20 @@ function renderSummary(metadata, overview) {
   const heading = document.createElement("h3");
   heading.textContent = "Environment";
   environment.append(heading);
+  if (metadata.tool_name === "imagemaid") {
+    const counts = metadata.imagemaid_counts || {};
+    environment.append(environmentSection("imagemaid", "ImageMaid", [metadata.imagemaid_version, metadata.imagemaid_mode].filter(Boolean).join(" / ") || "Detected", [
+      ["Version", metadata.imagemaid_version], ["Mode", metadata.imagemaid_mode],
+      ["Platform", metadata.runtime_platform], ["Run command", overview.run_command],
+      ["Operations", metadata.imagemaid_operations],
+      ["Restore files found", (counts.restore_found_files || 0).toLocaleString()], ["Restore files removed", (counts.restore_removed_files || 0).toLocaleString()],
+      ["Restore space recovered", formatBytes(counts.restore_recovered_bytes || 0)],
+      ["PhotoTranscoder files found", (counts.photo_found_files || 0).toLocaleString()], ["PhotoTranscoder files removed", (counts.photo_removed_files || 0).toLocaleString()],
+      ["PhotoTranscoder space recovered", formatBytes(counts.photo_recovered_bytes || 0)],
+      ["Bloat files removed", (counts.bloat_removed_files || 0).toLocaleString()],
+      ["Bloat space recovered", formatBytes(counts.bloat_recovered_bytes || 0)],
+    ]));
+  } else {
   const kometa = environmentSection("kometa", "Kometa", [
     metadata.kometa_version,
     metadata.kometa_branch && metadata.kometa_branch !== "unknown" ? metadata.kometa_branch : null,
@@ -1533,6 +1547,7 @@ function renderSummary(metadata, overview) {
     ["Run command", overview.run_command],
   ]);
   environment.append(addKometaIntegrity(kometa, metadata.kometa_integrity));
+  }
 
   const configurations = overview.plex_configurations || [];
   const plexLines = configurations.flatMap((section) => section.lines || []);
@@ -1747,6 +1762,11 @@ function renderResults(data, runSchemaValidation = true) {
   deleteToken = new URLSearchParams(location.hash.slice(1)).get("delete");
   updateRetentionCountdown(data);
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
+  const isImageMaid = metadata.tool_name === "imagemaid";
+  for (const id of ["view-config", "toggle-viewer-content", "download-config-option", "download-both-option"]) {
+    const control = document.getElementById(id);
+    if (control) control.hidden = isImageMaid;
+  }
   const schemaIssueCount = Number(metadata.counts.schema) || 0;
   const schemaUnavailable = recommendations.some((item) => item.id === "live_schema_unavailable");
   const quickstartBranch = metadata.quickstart_branch && metadata.quickstart_branch !== "unknown"
@@ -1754,9 +1774,9 @@ function renderResults(data, runSchemaValidation = true) {
     : "";
   overview.run_launcher = metadata.quickstart_run
     ? `Quickstart ${metadata.quickstart_version || "version unknown"}${quickstartBranch}`
-    : "Direct Kometa run";
+    : isImageMaid ? "Direct ImageMaid run" : "Direct Kometa run";
   overview.yaml_issue_count = schemaIssueCount;
-  overview.yaml_validation = schemaUnavailable
+  overview.yaml_validation = isImageMaid ? null : schemaUnavailable
     ? "Live schema validation unavailable"
     : schemaIssueCount
       ? `${schemaIssueCount.toLocaleString()} schema issue${schemaIssueCount === 1 ? "" : "s"} detected`
@@ -1821,8 +1841,10 @@ function renderResults(data, runSchemaValidation = true) {
   document.querySelector("#delete-scan").hidden = !deleteToken;
   applySupportDestination(data, groups, recommendations);
   results.scrollIntoView({ behavior: "smooth", block: "start" });
-  if (runSchemaValidation) loadSchemaValidation(data);
-  loadCurrentKometaVersions(data);
+  if (!isImageMaid) {
+    if (runSchemaValidation) loadSchemaValidation(data);
+    loadCurrentKometaVersions(data);
+  }
 }
 
 input.addEventListener("change", () => selectedFiles());
@@ -1997,7 +2019,8 @@ getHelp.addEventListener("click", () => {
   if (!currentScanId) return;
   const filename = document.querySelector("#results-title").textContent;
   const resultUrl = new URL(`/scan/${encodeURIComponent(currentScanId)}`, location.origin);
-  helpMessage.value = `I require assistance reviewing my Kometa log file \`${filename}\`, the link to my Logscan results can be found [here](${resultUrl}).`;
+  const toolLabel = currentOverview?.tool_name === "imagemaid" ? "ImageMaid" : "Kometa";
+  helpMessage.value = `I require assistance reviewing my ${toolLabel} log file \`${filename}\`, the link to my Logscan results can be found [here](${resultUrl}).`;
   helpDialog.showModal();
 });
 copyHelpMessage.addEventListener("click", async () => {

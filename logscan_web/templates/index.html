@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Scan a Kometa log and review practical recommendations.">
+  <meta name="description" content="Scan Kometa or ImageMaid logs and review practical recommendations.">
   <link rel="icon" href="{{ url_for('static', filename='logscan.png') }}" type="image/png">
-  <title>Kometa Log Scanner</title>
+  <title>Kometa and ImageMaid Logscan</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261011-2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-1') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
-  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20261011-2') }}" defer></script>
+  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20261012-1') }}" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -23,8 +23,13 @@
   <main class="shell">
     <section class="hero">
       <p class="eyebrow">Kometa Logscan</p>
-      <h1>Turn your Kometa log into a clear action plan.</h1>
-      <p class="hero-copy">Upload a Kometa log to identify configuration issues, common errors, and practical recommendations. Logs and scan results are automatically deleted after 48 hours. Keep the private deletion link if you want to remove yours sooner.</p>
+      <h1>Kometa and ImageMaid Logscan</h1>
+      <p class="hero-copy">Upload a Kometa or ImageMaid log to review its run, errors, and recommendations. Logs and scan results are automatically deleted after 48 hours. Keep the private deletion link if you want to remove yours sooner.</p>
+      <div class="cleanup-heading"><img class="tool-icon" src="{{ url_for('static', filename='imagemaid.png') }}" alt=""><span>ImageMaid cleanup reported across uploaded logs</span></div>
+      <dl class="cleanup-totals" aria-label="Cumulative ImageMaid cleanup">
+        <div><dt>Space recovered</dt><dd>{{ usage_stats.imagemaid_space_recovered }}</dd></div>
+        <div><dt>Files removed</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_files_removed) }}</dd></div>
+      </dl>
       <dl class="usage-stats" aria-label="Service activity since tracking began">
         <div><dt>Logs processed</dt><dd>{{ "{:,}".format(usage_stats.logs_submitted) }}</dd></div>
         <div><dt>Lines processed</dt><dd>{{ "{:,}".format(usage_stats.lines_processed) }}</dd></div>
@@ -51,7 +56,7 @@
           <span class="upload-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
           </span>
-          <span class="drop-title">Drop your Kometa logs here</span>
+          <span class="drop-title">Drop your Kometa or ImageMaid logs here</span>
           <span class="drop-copy">or choose files from your device</span>
           <span class="file-pill" id="file-pill">LOG, TXT, or YAML · ZIP, 7Z, TAR, GZIP, BZIP2, XZ, or Zstandard · 1 GB max after extraction</span>
         </label>

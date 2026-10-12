@@ -58,8 +58,8 @@ _log_index_lock = threading.Lock()
 
 def _format_bytes(value: int) -> str:
     size = float(max(0, value))
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
+    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
+        if size < 1024 or unit == "PB":
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
 
@@ -220,7 +220,7 @@ def _stored_log_lines(path: Path, index: dict, start: int, count: int) -> list[s
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
-ANALYSIS_VERSION = 6
+ANALYSIS_VERSION = 7
 SCHEMA_VALIDATION_VERSION = 7
 POPULAR_PEOPLE_PAGE_SIZE = 25
 TMDB_POPULAR_PAGE_SIZE = 20
@@ -987,7 +987,11 @@ def create_app() -> Flask:
             app.logger.warning("Unable to send missing-person Discord webhook: %s", exc)
 
     def backfill_schema_validation_counts():
-        records = [record for record in store.list() if not _schema_validation_is_fresh(record.get("metadata") or {})]
+        records = [
+            record
+            for record in store.list()
+            if (record.get("metadata") or {}).get("tool_name", "kometa") == "kometa" and not _schema_validation_is_fresh(record.get("metadata") or {})
+        ]
         if not records:
             return
         app.logger.info("Backfilling schema validation counts for %d retained scan(s).", len(records))
@@ -1126,6 +1130,8 @@ def create_app() -> Flask:
             "lines_processed": totals["lines_processed"],
             "people_submitted": totals["people_submitted"],
             "people_addressed": totals["people_addressed"],
+            "imagemaid_files_removed": totals["imagemaid_files_removed"],
+            "imagemaid_space_recovered": _format_bytes(totals["imagemaid_bytes_recovered"]),
             "started_at": analytics_snapshot["started_at"],
         }
         try:
@@ -1162,12 +1168,16 @@ def create_app() -> Flask:
     def analytics_page():
         return render_template("analytics.html")
 
+    @app.get("/api/capabilities")
+    def scan_capabilities():
+        return jsonify(tools=["kometa", "imagemaid"], deduplication="content-sha256")
+
     @app.get("/scan/<scan_id>")
     def result_page(scan_id):
         record = store.get(scan_id)
         if record is None:
             abort(404)
-        public = {key: value for key, value in record.items() if key != "delete_token_hash"}
+        public = {key: value for key, value in record.items() if key not in {"delete_token_hash", "uploads", "content_sha256"}}
         metadata = dict(public.get("metadata") or {})
         public["metadata"] = metadata
         schema_count = metadata.get("schema_validation_count")
@@ -1430,7 +1440,6 @@ def create_app() -> Flask:
             update_scan_job(job_id, "failed", error=str(exc))
             return jsonify(error=str(exc)), 400
         update_scan_job(job_id, "saving")
-        expires_at = int((datetime.now(UTC) + timedelta(seconds=RETENTION_SECONDS)).timestamp())
         payloads = []
         unscanned_files = []
         if Path(upload_filename).suffix.lower() == ".zip":
@@ -1457,7 +1466,7 @@ def create_app() -> Flask:
         archive_uncompressed_size = sum(scan_content_size(scan_content) for _name, scan_content, _result in scans) if archive_compressed_size is not None else None
         for filename, content, result in scans:
             result.metadata["analysis_version"] = ANALYSIS_VERSION
-            if not app.config.get("TESTING"):
+            if result.metadata.get("tool_name", "kometa") == "kometa" and not app.config.get("TESTING"):
                 try:
                     log_content = content.read_text(encoding="utf-8", errors="replace") if isinstance(content, Path) else content.decode("utf-8", errors="replace")
                     schema_failures = validate_config(log_content)
@@ -1496,17 +1505,23 @@ def create_app() -> Flask:
                         url_for("people_page", tags=people_tags, _external=True),
                     )
             _finalize_result_metrics(result, archive_compressed_size, archive_uncompressed_size)
-            scan_id, delete_token = store.create(filename, content, result)
+            scan_id, delete_token, already_uploaded = store.create_or_reuse(filename, content, result, RETENTION_SECONDS)
+            retained = store.get(scan_id)
+            scan_expires_at = int(datetime.fromisoformat(retained["created_at"]).timestamp() + RETENTION_SECONDS)
             if isinstance(content, Path) and content.name.startswith("logscan-"):
                 content.unlink(missing_ok=True)
             result_url = url_for("result_page", scan_id=scan_id, _external=True)
-            missing_people = save_missing_people(
-                _people_needing_repository_images(missing_candidates, repository_people),
-                filename=result.filename,
-                log_url=result_url,
-                source_url=source_url,
-                uploaded_by=uploaded_by,
-                uploaded_by_id=uploaded_by_id,
+            missing_people = (
+                []
+                if already_uploaded
+                else save_missing_people(
+                    _people_needing_repository_images(missing_candidates, repository_people),
+                    filename=result.filename,
+                    log_url=result_url,
+                    source_url=source_url,
+                    uploaded_by=uploaded_by,
+                    uploaded_by_id=uploaded_by_id,
+                )
             )
             payloads.append(
                 {
@@ -1518,35 +1533,58 @@ def create_app() -> Flask:
                     "categories": result.categories,
                     "result_url": result_url,
                     "delete_token": delete_token,
-                    "expires_at": expires_at,
+                    "expires_at": scan_expires_at,
+                    "already_uploaded": already_uploaded,
                     "uploaded_by_bot": is_bot,
                     "missing_people": missing_people,
                 }
             )
         submitted_people = [person for payload in payloads for person in payload["missing_people"]]
         submitted_count = sum(bool(person.get("is_new")) for person in submitted_people)
-        processed_lines = sum(payload["metadata"].get("line_count", 0) for payload in payloads)
+        new_payloads = [payload for payload in payloads if not payload["already_uploaded"]]
+        processed_lines = sum(payload["metadata"].get("line_count", 0) for payload in new_payloads)
         analytics.record_success(
-            logs=len(payloads),
+            logs=len(new_payloads),
             lines=processed_lines,
-            bytes_processed=sum(result.metadata["size_bytes"] for _name, _content, result in scans),
+            bytes_processed=sum(payload["metadata"]["size_bytes"] for payload in new_payloads),
             source="discord" if is_bot else "web",
             batch=len(payloads) > 1,
-            versions=[normalized_kometa_version(payload["metadata"].get("kometa_version")) for payload in payloads],
-            kometa_branches=[safe_branch(payload["metadata"].get("kometa_branch"), {"master", "develop", "nightly"}) for payload in payloads],
-            launchers=["quickstart" if payload["metadata"].get("quickstart_run") else "direct" for payload in payloads],
-            quickstart_versions=[normalized_quickstart_version(payload["metadata"].get("quickstart_version")) for payload in payloads if payload["metadata"].get("quickstart_run")],
-            quickstart_branches=[
-                safe_branch(payload["metadata"].get("quickstart_branch"), {"master", "develop"}) for payload in payloads if payload["metadata"].get("quickstart_run")
+            versions=[
+                normalized_kometa_version(payload["metadata"].get("kometa_version")) for payload in new_payloads if payload["metadata"].get("tool_name", "kometa") == "kometa"
             ],
-            kometa_platforms=[payload["metadata"].get("runtime_platform", "Unknown") for payload in payloads],
-            installation_methods=[payload["metadata"].get("installation_method", "Unknown") for payload in payloads],
-            quickstart_platforms=[payload["metadata"].get("runtime_platform", "Unknown") for payload in payloads if payload["metadata"].get("quickstart_run")],
+            kometa_branches=[
+                safe_branch(payload["metadata"].get("kometa_branch"), {"master", "develop", "nightly"})
+                for payload in new_payloads
+                if payload["metadata"].get("tool_name", "kometa") == "kometa"
+            ],
+            launchers=["quickstart" if payload["metadata"].get("quickstart_run") else "direct" for payload in new_payloads],
+            quickstart_versions=[
+                normalized_quickstart_version(payload["metadata"].get("quickstart_version")) for payload in new_payloads if payload["metadata"].get("quickstart_run")
+            ],
+            quickstart_branches=[
+                safe_branch(payload["metadata"].get("quickstart_branch"), {"master", "develop"}) for payload in new_payloads if payload["metadata"].get("quickstart_run")
+            ],
+            kometa_platforms=[payload["metadata"].get("runtime_platform", "Unknown") for payload in new_payloads if payload["metadata"].get("tool_name", "kometa") == "kometa"],
+            installation_methods=[
+                payload["metadata"].get("installation_method", "Unknown") for payload in new_payloads if payload["metadata"].get("tool_name", "kometa") == "kometa"
+            ],
+            quickstart_platforms=[payload["metadata"].get("runtime_platform", "Unknown") for payload in new_payloads if payload["metadata"].get("quickstart_run")],
+            tools=[payload["metadata"].get("tool_name", "kometa") for payload in new_payloads],
+            imagemaid_versions=[
+                normalized_kometa_version(payload["metadata"].get("imagemaid_version")) for payload in new_payloads if payload["metadata"].get("tool_name") == "imagemaid"
+            ],
+            imagemaid_modes=[
+                safe_branch(payload["metadata"].get("imagemaid_mode"), {"report", "move", "restore", "remove", "clear"})
+                for payload in new_payloads
+                if payload["metadata"].get("tool_name") == "imagemaid"
+            ],
+            duplicates=sum(payload["already_uploaded"] for payload in payloads),
+            imagemaid=[payload["metadata"] for payload in new_payloads if payload["metadata"].get("tool_name") == "imagemaid"],
             plex={
-                key: [value for payload in payloads for value in payload["overview"].get("plex_analytics", {}).get(key, [])]
+                key: [value for payload in new_payloads for value in payload["overview"].get("plex_analytics", {}).get(key, [])]
                 for key in ("versions", "platforms", "update_channels", "library_types", "agents", "scanners")
             },
-            recommendations=[item for payload in payloads for item in payload["recommendations"]],
+            recommendations=[item for payload in new_payloads for item in payload["recommendations"]],
             people=submitted_count,
         )
         notify_people_webhook(submitted_people)
@@ -1811,6 +1849,8 @@ def create_app() -> Flask:
         if record is None:
             abort(404)
         metadata = record.get("metadata") or {}
+        if metadata.get("tool_name") == "imagemaid":
+            return jsonify(error="Kometa schema validation does not apply to ImageMaid logs."), 409
         cached_failures = metadata.get("schema_validation_failures")
         if isinstance(cached_failures, list) and _schema_validation_is_fresh(metadata):
             return jsonify(

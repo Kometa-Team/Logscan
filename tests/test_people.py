@@ -412,7 +412,7 @@ class StreamingScanTests(unittest.TestCase):
         job_id = "signed-in-web-background-123456"
         response = client.post(
             "/api/scan",
-            data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | timed out.\n"), "signed-in.log")},
+            data={"log": (BytesIO(b"[kometa.py:1] [WARNING] | signed-in run timed out.\n"), "signed-in.log")},
             content_type="multipart/form-data",
             headers={"X-Scan-Job-ID": job_id},
         )
@@ -1366,7 +1366,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('metadata.setdefault("counts", {})["schema"] = schema_count', source)
         self.assertIn('if metadata.get("schema_validation_version") != SCHEMA_VALIDATION_VERSION', source)
         self.assertIn("schema_validation_checked_at=datetime.now(UTC).isoformat()", source)
-        self.assertIn('if not _schema_validation_is_fresh(record.get("metadata") or {})', source)
+        self.assertIn('and not _schema_validation_is_fresh(record.get("metadata") or {})', source)
 
     def test_config_viewer_marks_exact_schema_issue_ranges(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")

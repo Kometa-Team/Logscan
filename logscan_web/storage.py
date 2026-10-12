@@ -8,7 +8,9 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,6 +20,103 @@ class ScanStore:
         self.root = Path(root)
         self.lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def _transaction(self):
+        # SQLite serializes filesystem mutations across worker processes too.
+        with self.lock:
+            connection = sqlite3.connect(self.root / "dedup.sqlite3", timeout=60)
+            try:
+                connection.execute("CREATE TABLE IF NOT EXISTS fingerprints (digest TEXT PRIMARY KEY, scan_id TEXT NOT NULL)")
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    @staticmethod
+    def fingerprint(content: bytes | Path) -> str:
+        digest = hashlib.sha256()
+        if isinstance(content, Path):
+            with content.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    digest.update(chunk)
+        else:
+            digest.update(content)
+        return digest.hexdigest()
+
+    def _write_record(self, record: dict) -> None:
+        directory = self.root / record["id"]
+        temporary = directory / "result.json.tmp"
+        temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(directory / "result.json")
+
+    @staticmethod
+    def _uploads(record: dict) -> list[dict]:
+        if "uploads" in record:
+            return record["uploads"]
+        overview = record.get("overview") or {}
+        return [
+            {
+                "token_hash": record["delete_token_hash"],
+                "uploaded_by": overview.get("uploaded_by"),
+                "uploaded_by_id": overview.get("uploaded_by_id"),
+                "upload_source": overview.get("upload_source", "web"),
+                "message_url": overview.get("message_url"),
+            }
+        ]
+
+    @classmethod
+    def owns(cls, record: dict | None, user_id: str) -> bool:
+        return bool(record and any(str(upload.get("uploaded_by_id") or "") == str(user_id) for upload in cls._uploads(record)))
+
+    def create_or_reuse(self, filename: str, content: bytes | Path, result, max_age_seconds: int) -> tuple[str, str, bool]:
+        digest = self.fingerprint(content)
+        with self._transaction() as index:
+            # Backfill old records and recover a completed write after an interrupted transaction.
+            indexed = {row[0] for row in index.execute("SELECT scan_id FROM fingerprints")}
+            for record in self.list():
+                path = self.log_path(record["id"])
+                if record["id"] not in indexed and path is not None:
+                    old_digest = record.get("content_sha256") or self.fingerprint(path)
+                    index.execute("INSERT OR IGNORE INTO fingerprints VALUES (?, ?)", (old_digest, record["id"]))
+            row = index.execute("SELECT scan_id FROM fingerprints WHERE digest = ?", (digest,)).fetchone()
+            record = self.get(row[0]) if row else None
+            if record:
+                try:
+                    live = datetime.fromisoformat(record["created_at"]).timestamp() + max_age_seconds > datetime.now(UTC).timestamp()
+                except (KeyError, TypeError, ValueError):
+                    live = False
+                if not live or self.log_path(record["id"]) is None:
+                    self._delete_record(record["id"], index)
+                    record = None
+            if record:
+                token = secrets.token_urlsafe(32)
+                uploads = self._uploads(record)
+                overview = result.overview
+                uploads.append(
+                    {
+                        "token_hash": hashlib.sha256(token.encode()).hexdigest(),
+                        "uploaded_by": overview.get("uploaded_by"),
+                        "uploaded_by_id": overview.get("uploaded_by_id"),
+                        "upload_source": overview.get("upload_source", "web"),
+                        "message_url": overview.get("message_url"),
+                    }
+                )
+                record["uploads"] = uploads
+                self._write_record(record)
+                return record["id"], token, True
+            if row:
+                index.execute("DELETE FROM fingerprints WHERE digest = ?", (digest,))
+            scan_id, token = self.create(filename, content, result)
+            record = self.get(scan_id)
+            record["content_sha256"] = digest
+            self._write_record(record)
+            index.execute("INSERT INTO fingerprints VALUES (?, ?)", (digest, scan_id))
+            return scan_id, token, False
 
     def create(self, filename: str, content: bytes, result) -> tuple[str, str]:
         scan_id = secrets.token_urlsafe(18)
@@ -107,7 +206,7 @@ class ScanStore:
 
     def update_metadata(self, scan_id: str, **values) -> bool:
         """Persist trusted derived metadata for an existing scan."""
-        with self.lock:
+        with self._transaction():
             record = self.get(scan_id)
             if record is None:
                 return False
@@ -120,7 +219,7 @@ class ScanStore:
 
     def replace_analysis(self, scan_id: str, result) -> bool:
         """Atomically replace derived scan output without changing record identity."""
-        with self.lock:
+        with self._transaction():
             record = self.get(scan_id)
             if record is None:
                 return False
@@ -140,16 +239,43 @@ class ScanStore:
             return True
 
     def delete(self, scan_id: str, token: str) -> bool:
-        record = self.get(scan_id)
-        if record is None:
-            return False
-        supplied = hashlib.sha256(token.encode()).hexdigest()
-        if not hmac.compare_digest(supplied, record["delete_token_hash"]):
-            return False
-        return self.delete_authorized(scan_id)
+        with self._transaction() as index:
+            record = self.get(scan_id)
+            if record is None:
+                return False
+            supplied = hashlib.sha256(token.encode()).hexdigest()
+            uploads = self._uploads(record)
+            matched = next((upload for upload in uploads if hmac.compare_digest(supplied, upload["token_hash"])), None)
+            if matched is None:
+                return False
+            owner = str(matched.get("uploaded_by_id") or "")
+            remaining = [upload for upload in uploads if (str(upload.get("uploaded_by_id") or "") != owner if owner else not hmac.compare_digest(supplied, upload["token_hash"]))]
+            return self._remove_uploads(record, remaining, index)
+
+    def delete_for_owner(self, scan_id: str, user_id: str) -> bool:
+        with self._transaction() as index:
+            record = self.get(scan_id)
+            if not self.owns(record, user_id):
+                return False
+            remaining = [upload for upload in self._uploads(record) if str(upload.get("uploaded_by_id") or "") != str(user_id)]
+            return self._remove_uploads(record, remaining, index)
+
+    def _remove_uploads(self, record: dict, remaining: list[dict], index) -> bool:
+        if not remaining:
+            return self._delete_record(record["id"], index)
+        record["uploads"] = remaining
+        # Preserve attribution only for uploaders who still retain this scan.
+        for key in ("uploaded_by", "uploaded_by_id", "upload_source", "message_url"):
+            record.setdefault("overview", {})[key] = remaining[0].get(key)
+        self._write_record(record)
+        return True
 
     def delete_authorized(self, scan_id: str) -> bool:
         """Delete an existing scan after its caller has performed authorization."""
+        with self._transaction() as index:
+            return self._delete_record(scan_id, index)
+
+    def _delete_record(self, scan_id: str, index) -> bool:
         if self.get(scan_id) is None:
             return False
         directory = self.root / scan_id
@@ -159,26 +285,28 @@ class ScanStore:
             except FileNotFoundError:
                 pass
         directory.rmdir()
+        index.execute("DELETE FROM fingerprints WHERE scan_id = ?", (scan_id,))
         return True
 
     def delete_expired(self, max_age_seconds: int) -> int:
         """Delete scans whose recorded creation time is older than max_age_seconds."""
         cutoff = datetime.now(UTC).timestamp() - max_age_seconds
         deleted = 0
-        for directory in self.root.iterdir():
-            if not directory.is_dir() or not self._valid_id(directory.name):
-                continue
-            record = self.get(directory.name)
-            if record is None:
-                continue
-            try:
-                created = datetime.fromisoformat(record["created_at"]).timestamp()
-            except (KeyError, TypeError, ValueError):
-                created = 0
-            if created >= cutoff:
-                continue
-            shutil.rmtree(directory)
-            deleted += 1
+        with self._transaction() as index:
+            for directory in self.root.iterdir():
+                if not directory.is_dir() or not self._valid_id(directory.name):
+                    continue
+                record = self.get(directory.name)
+                if record is None:
+                    continue
+                try:
+                    created = datetime.fromisoformat(record["created_at"]).timestamp()
+                except (KeyError, TypeError, ValueError):
+                    created = 0
+                if created >= cutoff:
+                    continue
+                self._delete_record(directory.name, index)
+                deleted += 1
         return deleted
 
     @staticmethod
@@ -254,6 +382,11 @@ class AnonymousAnalyticsStore:
         kometa_platforms: list[str] | None = None,
         quickstart_platforms: list[str] | None = None,
         installation_methods: list[str] | None = None,
+        tools: list[str] | None = None,
+        imagemaid_versions: list[str] | None = None,
+        imagemaid_modes: list[str] | None = None,
+        duplicates: int = 0,
+        imagemaid: list[dict] | None = None,
     ) -> None:
         with self.lock:
             data = self._read()
@@ -263,6 +396,22 @@ class AnonymousAnalyticsStore:
             day["bytes_processed"] += max(0, int(bytes_processed))
             day["people_submitted"] += max(0, int(people))
             day["batches"] += int(bool(batch))
+            day["duplicates_reused"] += max(0, int(duplicates))
+            for tool in tools or []:
+                self._increment(day["tools"], tool)
+            for version in imagemaid_versions or []:
+                self._increment(day["imagemaid_versions"], version)
+            for mode in imagemaid_modes or []:
+                self._increment(day["imagemaid_modes"], mode)
+            for metadata in imagemaid or []:
+                counts = metadata.get("imagemaid_counts") or {}
+                day["imagemaid_files_removed"] += sum(max(0, int(counts.get(key) or 0)) for key in ("restore_removed_files", "photo_removed_files", "bloat_removed_files"))
+                day["imagemaid_bytes_recovered"] += sum(max(0, int(counts.get(key) or 0)) for key in ("restore_recovered_bytes", "photo_recovered_bytes", "bloat_recovered_bytes"))
+                day["imagemaid_cleanup_reports"] += int(bool(metadata.get("imagemaid_cleanup_reported")))
+                day["imagemaid_runtime_seconds"] += max(0, int(metadata.get("run_time_seconds") or 0))
+                day["imagemaid_completed_runs"] += int(bool(metadata.get("complete")))
+                self._increment(day["imagemaid_platforms"], metadata.get("runtime_platform", "Unknown"))
+                self._increment(day["imagemaid_branches"], metadata.get("imagemaid_branch", "unknown"))
             self._increment(day["sources"], source, max(0, int(logs)))
             for version in versions:
                 self._increment(day["kometa_versions"], version)
@@ -350,10 +499,21 @@ class AnonymousAnalyticsStore:
                 "address_seconds_total",
                 "address_duration_count",
                 "batches",
+                "duplicates_reused",
+                "imagemaid_files_removed",
+                "imagemaid_bytes_recovered",
+                "imagemaid_cleanup_reports",
+                "imagemaid_runtime_seconds",
+                "imagemaid_completed_runs",
             ):
                 totals[key] += day.get(key, 0)
             for key in (
                 "sources",
+                "tools",
+                "imagemaid_versions",
+                "imagemaid_modes",
+                "imagemaid_platforms",
+                "imagemaid_branches",
                 "rejections",
                 "rejection_sources",
                 "kometa_versions",
@@ -396,6 +556,17 @@ class AnonymousAnalyticsStore:
             "address_seconds_total": 0,
             "address_duration_count": 0,
             "batches": 0,
+            "duplicates_reused": 0,
+            "tools": {},
+            "imagemaid_versions": {},
+            "imagemaid_modes": {},
+            "imagemaid_platforms": {},
+            "imagemaid_branches": {},
+            "imagemaid_files_removed": 0,
+            "imagemaid_bytes_recovered": 0,
+            "imagemaid_cleanup_reports": 0,
+            "imagemaid_runtime_seconds": 0,
+            "imagemaid_completed_runs": 0,
             "sources": {},
             "rejections": {},
             "rejection_sources": {},

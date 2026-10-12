@@ -266,7 +266,9 @@ function openBulkDeleteDialog() {
   const selected = selectedLogs();
   if (!selected.length || !bulkDeleteDialog) return;
   const count = selected.length;
-  bulkDeleteCopy.textContent = `This permanently removes ${count} selected log${count === 1 ? "" : "s"} and associated scan results. This cannot be undone.`;
+  bulkDeleteCopy.textContent = bulkDeleteDialog.dataset.view === "mine"
+    ? `This removes ${count} selected upload${count === 1 ? "" : "s"} from your account. Shared scans remain available to other uploaders.`
+    : `This permanently removes ${count} selected log${count === 1 ? "" : "s"} and associated scan results. This cannot be undone.`;
   const shown = selected.slice(0, 8).map((checkbox) => {
     const item = document.createElement("li");
     item.textContent = checkbox.dataset.title || checkbox.value;
@@ -311,7 +313,7 @@ bulkDeleteConfirm?.addEventListener("click", async () => {
     const response = await fetch("/support/logs/delete-selected", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scan_ids: scanIds }),
+      body: JSON.stringify({ scan_ids: scanIds, view: bulkDeleteDialog.dataset.view }),
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || "The selected logs could not be deleted.");

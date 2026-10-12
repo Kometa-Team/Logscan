@@ -1,8 +1,24 @@
 # Kometa Log Scanner
 
-A Flask website that stores and scans Kometa log files, presents
+A Flask website that stores and scans Kometa and ImageMaid log files, presents
 recommendations, creates opaque shareable result URLs, and maintains a unified
 People Poster processing queue. Each scan result has a separate deletion token.
+
+Log type is detected from content, including mixed Kometa/ImageMaid archives.
+ImageMaid results include versions, modes, runtime, errors, and reported cleanup
+counts and recovered space. Analytics groups default to closed accordions, and
+the main page shows cumulative ImageMaid cleanup totals.
+
+Identical extracted log contents reuse an existing, unexpired scan across web
+and Discord uploads. Each uploader receives a new private management token and
+can see their own signed-in upload. Removing an upload retains a shared scan
+for its other uploaders; support can remove the entire scan. Expired or fully
+deleted logs may be uploaded again. Reused scans do not increase aggregate
+processed-log or cleanup totals. Anonymous aggregate totals survive retention
+cleanup; log content and identities do not.
+
+Quickstart checks `/api/capabilities` before uploading ImageMaid logs. Update the
+web service before enabling the updated Quickstart and Discord integration.
 
 ## Requirements
 
