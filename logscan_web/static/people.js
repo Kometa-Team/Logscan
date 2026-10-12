@@ -11,7 +11,7 @@ const query = new URLSearchParams(location.search);
 let tagQuery = query.get("tag") || "";
 const selectedTags = new Set(query.getAll("tags"));
 let actionsEnabled = false;
-let page = Number(query.get("page")) || 1;
+const page = Number(query.get("page")) || 1;
 
 function filteredParams(nextPage) {
   const params = new URLSearchParams();
@@ -135,7 +135,7 @@ function addPerson(person) {
   flag.innerHTML = '<i class="fa-solid fa-flag" aria-hidden="true"></i>';
   flag.disabled = !person.tmdb_id;
   flag.addEventListener("click", async () => {
-    const reason = await FlagDialog.show(person.name);
+    const reason = await window.FlagDialog.show(person.name);
     if (!reason) return;
     const response = await fetch(`/api/people/${encodeURIComponent(person.person_key)}/flag`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }),

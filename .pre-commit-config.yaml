@@ -21,3 +21,17 @@ repos:
     rev: 26.10.1
     hooks:
       - id: black
+  - repo: local
+    hooks:
+      - id: eslint
+        name: JavaScript lint (ESLint)
+        entry: npm run lint:js
+        language: system
+        files: ^(logscan_web/static/.*\.js|tests/.*\.cjs|eslint\.config\.cjs|package(-lock)?\.json)$
+        pass_filenames: false
+      - id: spellcheck
+        name: Markdown spellcheck (CSpell)
+        entry: npm run spellcheck
+        language: system
+        files: (\.md$|^cspell\.json$|^package(-lock)?\.json$)
+        pass_filenames: false
