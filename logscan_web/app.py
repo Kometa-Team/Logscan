@@ -1127,6 +1127,8 @@ def create_app() -> Flask:
         totals = analytics_snapshot["totals"]
         stats = {
             "logs_submitted": totals["successful_logs"],
+            "kometa_logs_uploaded": totals["tools"].get("kometa", 0),
+            "imagemaid_logs_uploaded": totals["tools"].get("imagemaid", 0),
             "lines_processed": totals["lines_processed"],
             "people_submitted": totals["people_submitted"],
             "people_addressed": totals["people_addressed"],

@@ -6,8 +6,8 @@
   <title>Analytics | Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-2') }}">
-  <script src="{{ url_for('static', filename='analytics.js', v='20261012-2') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-3') }}">
+  <script src="{{ url_for('static', filename='analytics.js', v='20261012-3') }}" defer></script>
 </head>
 <body>
   {% set active_page = 'analytics' %}{% include '_site_header.html' %}
@@ -18,7 +18,7 @@
     <section id="analytics-summary" class="analytics-summary" aria-label="Lifetime totals"></section>
     <details class="analytics-group">
       <summary><span>Service activity</span><span class="analytics-group-total" id="analytics-since"></span></summary>
-      <div class="analytics-section"><div class="section-heading"><h2>Daily activity</h2></div><div class="analytics-table-wrap"><table><thead><tr><th>Date</th><th>Logs</th><th>Lines</th><th>Data</th><th>People submitted</th><th>People addressed</th></tr></thead><tbody id="analytics-days"></tbody></table></div></div>
+      <div class="analytics-section"><div class="section-heading"><h2>Daily activity</h2></div><div class="analytics-table-wrap"><table><thead><tr><th>Date</th><th>Logs</th><th>Log lines</th><th>Data</th><th>Missing people images identified</th><th>Missing people images resolved</th></tr></thead><tbody id="analytics-days"></tbody></table></div></div>
       <div class="analytics-breakdowns">{{ breakdown('Logs by tool', 'tools') }}{{ breakdown('Upload sources', 'sources') }}{{ breakdown('Rejected uploads', 'rejections') }}</div>
     </details>
     <details class="analytics-group" id="analytics-kometa">

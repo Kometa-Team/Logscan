@@ -25,14 +25,16 @@ function createContext() {
 
 test("service totals include ImageMaid cleanup without opening an accordion", () => {
   const { context, nodes } = createContext();
-  context.renderSummary({ successful_logs: 526, tools: { kometa: 523, imagemaid: 3 }, rejections: {}, imagemaid_files_removed: 27448, imagemaid_bytes_recovered: 1572864 });
+  context.renderSummary({ successful_logs: 526, tools: { kometa: 523, imagemaid: 3 }, rejections: {}, imagemaid_files_removed: 27448, imagemaid_bytes_recovered: 1572864, people_submitted: 38, people_addressed: 18 });
   const metrics = nodes.get("#analytics-summary").children;
   assert.equal(metrics.length, 12);
-  for (const [label, value] of [["ImageMaid logs", "3"], ["ImageMaid files removed", "27,448"], ["ImageMaid space recovered", "1.5 MB"]]) {
+  assert.equal(metrics[0].children[0].textContent, "Kometa logs uploaded");
+  assert.equal(metrics[1].children[0].textContent, "ImageMaid logs uploaded");
+  for (const [label, value] of [["Kometa logs uploaded", "523"], ["ImageMaid logs uploaded", "3"], ["ImageMaid files removed", "27,448"], ["ImageMaid space recovered", "1.5 MB"], ["Missing people images identified", "38"], ["Missing people images resolved", "18"]]) {
     const metric = metrics.find(item => item.children[0].textContent === label);
     assert.equal(metric.children[1].textContent, value);
-    assert.equal(metric.children[0].children[0].src, "/static/imagemaid.png");
   }
+  assert.ok(metrics.every(item => item.children[0].children.length === 0));
   assert.equal(nodes.get("#analytics-kometa-total").textContent, "523 logs");
   assert.equal(nodes.get("#analytics-imagemaid-total").textContent, "3 logs");
 });
@@ -41,7 +43,8 @@ test("ImageMaid summary handles analytics stores without cleanup data", () => {
   const { context, nodes } = createContext();
   context.renderSummary({ successful_logs: 0, rejections: {} });
   const metrics = nodes.get("#analytics-summary").children;
-  assert.equal(metrics.find(item => item.children[0].textContent === "ImageMaid logs").children[1].textContent, "0");
+  assert.equal(metrics.find(item => item.children[0].textContent === "Kometa logs uploaded").children[1].textContent, "0");
+  assert.equal(metrics.find(item => item.children[0].textContent === "ImageMaid logs uploaded").children[1].textContent, "0");
   assert.equal(metrics.find(item => item.children[0].textContent === "ImageMaid space recovered").children[1].textContent, "0 B");
 });
 

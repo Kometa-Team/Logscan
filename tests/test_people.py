@@ -2517,13 +2517,15 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertNotIn("Image status", html)
 
     def test_service_activity_is_visible_on_scanner_and_people_pages(self):
-        for path in ("/", "/people"):
+        pages = {
+            "/": ("Kometa logs uploaded", "ImageMaid logs uploaded", "Log lines processed", "Missing people images identified", "Missing people images resolved"),
+            "/people": ("Logs processed", "Lines processed", "People submitted", "People addressed"),
+        }
+        for path, labels in pages.items():
             html = self.client.get(path).get_data(as_text=True)
             self.assertIn('class="usage-stats"', html)
-            self.assertIn("Logs processed", html)
-            self.assertIn("Lines processed", html)
-            self.assertIn("People submitted", html)
-            self.assertIn("People addressed", html)
+            for label in labels:
+                self.assertIn(label, html)
             self.assertIn("Tracking since", html)
 
     def test_anonymous_scanner_makes_upload_identity_and_sign_in_visible(self):

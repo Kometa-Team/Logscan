@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-3') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
   <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20261012-1') }}" defer></script>
@@ -25,17 +25,18 @@
       <p class="eyebrow">Kometa Logscan</p>
       <h1>Kometa and ImageMaid Logscan</h1>
       <p class="hero-copy">Upload a Kometa or ImageMaid log to review its run, errors, and recommendations. Logs and scan results are automatically deleted after 48 hours. Keep the private deletion link if you want to remove yours sooner.</p>
-      <div class="cleanup-heading"><img class="tool-icon" src="{{ url_for('static', filename='imagemaid.png') }}" alt=""><span>ImageMaid cleanup reported across uploaded logs</span></div>
-      <dl class="usage-stats cleanup-totals" aria-label="Cumulative ImageMaid cleanup">
-        <div><dt>Space recovered</dt><dd>{{ usage_stats.imagemaid_space_recovered }}</dd></div>
-        <div><dt>Files removed</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_files_removed) }}</dd></div>
-      </dl>
-      <div class="cleanup-heading"><img class="tool-icon" src="{{ url_for('static', filename='kometa.png') }}" alt=""><span>Service activity</span></div>
+      <div class="cleanup-heading"><img class="tool-icon" src="{{ url_for('static', filename='kometa.png') }}" alt=""><span>Kometa logs processed</span></div>
       <dl class="usage-stats" aria-label="Service activity since tracking began">
-        <div><dt>Logs processed</dt><dd>{{ "{:,}".format(usage_stats.logs_submitted) }}</dd></div>
-        <div><dt>Lines processed</dt><dd>{{ "{:,}".format(usage_stats.lines_processed) }}</dd></div>
-        <div><dt>People submitted</dt><dd>{{ "{:,}".format(usage_stats.people_submitted) }}</dd></div>
-        <div><dt>People addressed</dt><dd>{{ "{:,}".format(usage_stats.people_addressed) }}</dd></div>
+        <div><dt>Kometa logs uploaded</dt><dd>{{ "{:,}".format(usage_stats.kometa_logs_uploaded) }}</dd></div>
+        <div><dt>Log lines processed</dt><dd>{{ "{:,}".format(usage_stats.lines_processed) }}</dd></div>
+        <div><dt>Missing people images identified</dt><dd>{{ "{:,}".format(usage_stats.people_submitted) }}</dd></div>
+        <div><dt>Missing people images resolved</dt><dd>{{ "{:,}".format(usage_stats.people_addressed) }}</dd></div>
+      </dl>
+      <div class="cleanup-heading"><img class="tool-icon" src="{{ url_for('static', filename='imagemaid.png') }}" alt=""><span>ImageMaid cleanup</span></div>
+      <dl class="usage-stats cleanup-totals" aria-label="Cumulative ImageMaid cleanup">
+        <div><dt>ImageMaid logs uploaded</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_logs_uploaded) }}</dd></div>
+        <div><dt>ImageMaid files removed</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_files_removed) }}</dd></div>
+        <div><dt>ImageMaid space recovered</dt><dd>{{ usage_stats.imagemaid_space_recovered }}</dd></div>
       </dl>
       <p class="usage-since">Tracking since {{ usage_stats.tracking_since }}</p>
     </section>
