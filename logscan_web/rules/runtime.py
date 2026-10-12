@@ -72,15 +72,17 @@ class RuntimeAnalysisRule:
 
         def add(rule_id: str, evidence: tuple[int, ...] = (), details: str = "") -> None:
             rule = _definition(rule_id)
-            findings.append(Finding(
-                rule.id,
-                rule.category,
-                rule.title,
-                rule.description,
-                rule.solution,
-                evidence,
-                details,
-            ))
+            findings.append(
+                Finding(
+                    rule.id,
+                    rule.category,
+                    rule.title,
+                    rule.description,
+                    rule.solution,
+                    evidence,
+                    details,
+                )
+            )
 
         memory = _memory_gb(context, "Memory")
         cache = _memory_gb(context, "Plex DB cache setting")
@@ -159,9 +161,7 @@ class RuntimeAnalysisRule:
                 before_maintenance = (maintenance_start - scheduled) % 1440
                 maintenance_buffer = (maintenance_start - maintenance_end) % 1440
                 in_maintenance = (
-                    maintenance_start <= scheduled < maintenance_end
-                    if maintenance_start <= maintenance_end
-                    else scheduled >= maintenance_start or scheduled < maintenance_end
+                    maintenance_start <= scheduled < maintenance_end if maintenance_start <= maintenance_end else scheduled >= maintenance_start or scheduled < maintenance_end
                 )
                 if run_minutes > 1440:
                     schedule_id = "schedule_over_24_hours"

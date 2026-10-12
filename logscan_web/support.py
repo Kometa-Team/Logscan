@@ -62,9 +62,7 @@ def support_session_authorized() -> bool:
             f"/guilds/{current_app.config['DISCORD_GUILD_ID']}/members/{user['id']}",
             headers={"Authorization": f"Bot {bot_token}"},
         )
-        g.discord_support_access = bool(
-            current_app.config["DISCORD_SUPPORT_ROLE_IDS"].intersection(member.get("roles", []))
-        )
+        g.discord_support_access = bool(current_app.config["DISCORD_SUPPORT_ROLE_IDS"].intersection(member.get("roles", [])))
     except (HTTPError, URLError, KeyError, ValueError):
         current_app.logger.warning(
             "Discord support role revalidation failed; denying privileged access",
@@ -206,11 +204,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         direction = request.args.get("direction", "desc")
         page_size_value = request.args.get("page_size", "25").casefold()
         try:
-            page_size = (
-                None
-                if page_size_value == "all"
-                else min(100, max(10, int(page_size_value)))
-            )
+            page_size = None if page_size_value == "all" else min(100, max(10, int(page_size_value)))
             page = max(1, int(request.args.get("page", 1)))
         except ValueError:
             page_size, page = 25, 1
@@ -222,10 +216,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         is_support_console = view_mode == "all"
         records = store.list()
         if not is_support_console:
-            records = [
-                record for record in records
-                if str((record.get("overview") or {}).get("uploaded_by_id") or "") == str(user["id"])
-            ]
+            records = [record for record in records if str((record.get("overview") or {}).get("uploaded_by_id") or "") == str(user["id"])]
         rows = [_support_row(record, retention_seconds, now) for record in records]
         total_logs = len(rows)
         query_key = query.casefold()
@@ -268,11 +259,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         rows.sort(key=sorters[sort_key], reverse=direction == "desc")
 
         filtered_logs = len(rows)
-        page_count = (
-            1
-            if page_size is None
-            else max(1, (filtered_logs + page_size - 1) // page_size)
-        )
+        page_count = 1 if page_size is None else max(1, (filtered_logs + page_size - 1) // page_size)
         page = min(page, page_count)
         start = 0 if page_size is None else (page - 1) * page_size
         visible_rows = rows if page_size is None else rows[start : start + page_size]
@@ -304,10 +291,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         supplied_ids = payload.get("scan_ids")
         if not isinstance(supplied_ids, list):
             abort(400, description="Select one or more logs to delete.")
-        scan_ids = list(dict.fromkeys(
-            value.strip() for value in supplied_ids
-            if isinstance(value, str) and value.strip()
-        ))
+        scan_ids = list(dict.fromkeys(value.strip() for value in supplied_ids if isinstance(value, str) and value.strip()))
         if not scan_ids or len(scan_ids) > 1000:
             abort(400, description="Select between 1 and 1,000 logs to delete.")
 
@@ -352,13 +336,15 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
 
 
 def _discord_token(code: str) -> str:
-    data = urlencode({
-        "client_id": current_app.config["DISCORD_CLIENT_ID"],
-        "client_secret": current_app.config["DISCORD_CLIENT_SECRET"],
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": current_app.config["DISCORD_REDIRECT_URI"],
-    }).encode()
+    data = urlencode(
+        {
+            "client_id": current_app.config["DISCORD_CLIENT_ID"],
+            "client_secret": current_app.config["DISCORD_CLIENT_SECRET"],
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": current_app.config["DISCORD_REDIRECT_URI"],
+        }
+    ).encode()
     return _discord_request("/oauth2/token", data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})["access_token"]
 
 
@@ -409,20 +395,14 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     recommendations = record.get("recommendations") or []
     stored_log_counts = metadata.get("log_counts")
     log_counts = (
-        {level: int(stored_log_counts.get(level) or 0) for level in ("critical", "error", "warning", "info", "debug", "trace")}
-        if isinstance(stored_log_counts, dict) else None
+        {level: int(stored_log_counts.get(level) or 0) for level in ("critical", "error", "warning", "info", "debug", "trace")} if isinstance(stored_log_counts, dict) else None
     )
-    counts = {
-        severity: sum(item.get("severity") == severity for item in recommendations)
-        for severity in ("critical", "error", "warning", "schema", "advice")
-    }
+    counts = {severity: sum(item.get("severity") == severity for item in recommendations) for severity in ("critical", "error", "warning", "schema", "advice")}
     persisted_schema_count = metadata.get("schema_validation_count")
     schema_count_available = isinstance(persisted_schema_count, int)
     if schema_count_available:
         counts["schema"] = persisted_schema_count
-    if metadata.get("schema_directive_missing") and not any(
-        item.get("id") == "live_schema_directive_advice" for item in recommendations
-    ):
+    if metadata.get("schema_directive_missing") and not any(item.get("id") == "live_schema_directive_advice" for item in recommendations):
         counts["advice"] += 1
     created = _parsed_datetime(record.get("created_at"))
     updated = _parsed_datetime(record.get("updated_at"), created)
@@ -462,9 +442,18 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         "message_url": overview.get("message_url"),
     }
     row["search_text"] = " ".join(
-        str(row[key]) for key in (
-            "filename", "uploader", "uploader_id", "id", "kometa_version", "platform",
-            "kometa_branch", "installation", "quickstart_version", "quickstart_branch",
+        str(row[key])
+        for key in (
+            "filename",
+            "uploader",
+            "uploader_id",
+            "id",
+            "kometa_version",
+            "platform",
+            "kometa_branch",
+            "installation",
+            "quickstart_version",
+            "quickstart_branch",
         )
     ).casefold()
     return row

@@ -1,11 +1,11 @@
 """External-service recommendation rules."""
 
 from .base import TextRule
-from ..recommendations import RULES
+from ..recommendations import RULES as RULE_DEFINITIONS
 
 
 def _rule(rule_id: str, *needles: str) -> TextRule:
-    definition = next(rule for rule in RULES.values() if rule.id == rule_id)
+    definition = next(rule for rule in RULE_DEFINITIONS.values() if rule.id == rule_id)
     return TextRule(definition, any_of=needles)
 
 

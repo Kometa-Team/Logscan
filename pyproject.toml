@@ -1,0 +1,21 @@
+[tool.black]
+line-length = 180
+target-version = ["py313"]
+extend-exclude = '/data/'
+
+[tool.ruff]
+line-length = 180
+target-version = "py313"
+extend-exclude = ["data"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Temporary storage must be configured before importing the Flask application.
+"tests/test_people.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

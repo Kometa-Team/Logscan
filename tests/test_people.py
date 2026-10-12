@@ -19,20 +19,32 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-
 STORE = tempfile.TemporaryDirectory()
 os.environ["SCAN_STORE"] = STORE.name
 os.environ["TMDB_API_KEY"] = "test-key"
 
-Path(STORE.name, "popular_people_cache.json").write_text(json.dumps({
-    "updated_at": datetime.now(UTC).isoformat(),
-    "people": [
-        {"id": 1, "name": "Alice Person", "profile_path": "/alice.jpg", "known_for_department": "Acting"},
-        {"id": 2, "name": "Completed Person", "profile_path": "/complete.jpg", "known_for_department": "Acting"},
-    ],
-}), encoding="utf-8")
+Path(STORE.name, "popular_people_cache.json").write_text(
+    json.dumps(
+        {
+            "updated_at": datetime.now(UTC).isoformat(),
+            "people": [
+                {"id": 1, "name": "Alice Person", "profile_path": "/alice.jpg", "known_for_department": "Acting"},
+                {"id": 2, "name": "Completed Person", "profile_path": "/complete.jpg", "known_for_department": "Acting"},
+            ],
+        }
+    ),
+    encoding="utf-8",
+)
 
-from logscan_web.app import SCHEMA_VALIDATION_VERSION, _download_artifact_names, _schema_directive_advice, _schema_validation_is_fresh, add_missing_people_recommendations, app, create_app
+from logscan_web.app import (
+    SCHEMA_VALIDATION_VERSION,
+    _download_artifact_names,
+    _schema_directive_advice,
+    _schema_validation_is_fresh,
+    add_missing_people_recommendations,
+    app,
+    create_app,
+)
 from logscan_web.scanner import (
     MAX_FILE_BYTES,
     STREAM_SCAN_THRESHOLD,
@@ -113,19 +125,18 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         self.assertIn(people_url, result.recommendations[0]["solution"])
 
     def test_repository_filename_is_fully_url_decoded(self):
-        content = (
-            "Collection Warning: No Poster Found at "
-            "https://raw.githubusercontent.com/Kometa-Team/People-Images/master/"
-            "Hikaru%20Kond%C3%B4.jpg\n"
+        content = "Collection Warning: No Poster Found at " "https://raw.githubusercontent.com/Kometa-Team/People-Images/master/" "Hikaru%20Kond%C3%B4.jpg\n"
+        self.assertEqual(
+            extract_missing_people(content),
+            [
+                {"name": "Hikaru Kondô", "tmdb_image_found": False},
+            ],
         )
-        self.assertEqual(extract_missing_people(content), [
-            {"name": "Hikaru Kondô", "tmdb_image_found": False},
-        ])
 
 
 class UploadLimitTests(unittest.TestCase):
     def test_extracted_log_limit_is_one_gibibyte_and_visible(self):
-        self.assertEqual(MAX_FILE_BYTES, 1024 ** 3)
+        self.assertEqual(MAX_FILE_BYTES, 1024**3)
         html = app.test_client().get("/").get_data(as_text=True)
         self.assertIn("1 GB max after extraction", html)
 
@@ -211,9 +222,7 @@ class StreamingScanTests(unittest.TestCase):
                     find_scannable_upload_path(filename, path),
                     [("meta.log", len(content))],
                 )
-                self.assertTrue(
-                    scan_log(filename, compressed).filename.endswith(".log")
-                )
+                self.assertTrue(scan_log(filename, compressed).filename.endswith(".log"))
             finally:
                 path.unlink(missing_ok=True)
 
@@ -230,6 +239,7 @@ class StreamingScanTests(unittest.TestCase):
             )
         finally:
             path.unlink(missing_ok=True)
+
     def test_stored_log_viewer_returns_bounded_line_windows(self):
         lines = [
             "[kometa.py:1] [INFO] | Version: 2.5.0 |",
@@ -257,7 +267,7 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(download.data, content)
         self.assertRegex(
             download.headers["Content-Disposition"],
-            r'attachment; filename=large-meta--web-anonymous--\d{8}-\d{6}Z\.log',
+            r"attachment; filename=large-meta--web-anonymous--\d{8}-\d{6}Z\.log",
         )
 
         missing_config = app.test_client().get(f"/api/scans/{scan_id}/download/config")
@@ -265,15 +275,17 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(missing_config.get_json()["error"], "No redacted config block was found in this log.")
 
     def test_stored_config_and_combined_downloads_use_extracted_config(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
-            "[config.py:2] [DEBUG] | Redacted Config |",
-            "[config.py:3] [DEBUG] | libraries: |",
-            "[config.py:4] [DEBUG] |   Movies: |",
-            "[config.py:5] [DEBUG] | |",
-            "[config.py:6] [WARNING] | Config Warning: test terminator |",
-            "[kometa.py:7] [INFO] | Finished: Run Time: 0:01:00 |",
-        ]).encode()
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
+                "[config.py:2] [DEBUG] | Redacted Config |",
+                "[config.py:3] [DEBUG] | libraries: |",
+                "[config.py:4] [DEBUG] |   Movies: |",
+                "[config.py:5] [DEBUG] | |",
+                "[config.py:6] [WARNING] | Config Warning: test terminator |",
+                "[kometa.py:7] [INFO] | Finished: Run Time: 0:01:00 |",
+            ]
+        ).encode()
         client = app.test_client()
         response = client.post(
             "/api/scan",
@@ -319,23 +331,28 @@ class StreamingScanTests(unittest.TestCase):
 
         for record, base in cases:
             with self.subTest(base=base):
-                self.assertEqual(_download_artifact_names(record), {
-                    "base": base,
-                    "log": f"{base}.log",
-                    "config": f"{base}-config.yml",
-                    "archive": f"{base}-files.zip",
-                })
+                self.assertEqual(
+                    _download_artifact_names(record),
+                    {
+                        "base": base,
+                        "log": f"{base}.log",
+                        "config": f"{base}-config.yml",
+                        "archive": f"{base}-files.zip",
+                    },
+                )
 
     def test_stored_config_download_preserves_existing_schema_directive(self):
         directive = "# yaml-language-server: $schema=https://example.test/config-schema.json"
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
-            "[config.py:2] [DEBUG] | Redacted Config |",
-            f"[config.py:3] [DEBUG] | {directive} |",
-            "[config.py:4] [DEBUG] | libraries: {} |",
-            "[config.py:5] [DEBUG] | |",
-            "[config.py:6] [WARNING] | Config Warning: test terminator |",
-        ]).encode()
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
+                "[config.py:2] [DEBUG] | Redacted Config |",
+                f"[config.py:3] [DEBUG] | {directive} |",
+                "[config.py:4] [DEBUG] | libraries: {} |",
+                "[config.py:5] [DEBUG] | |",
+                "[config.py:6] [WARNING] | Config Warning: test terminator |",
+            ]
+        ).encode()
         client = app.test_client()
         response = client.post(
             "/api/scan",
@@ -411,10 +428,7 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(payload["phase"], "complete", payload)
         self.assertRegex(payload["redirect_url"], r"^http://localhost/scan/[^#]+#delete=.+$")
         self.assertNotIn("result", payload)
-        records = [
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in Path(STORE.name).glob("*/result.json")
-        ]
+        records = [json.loads(path.read_text(encoding="utf-8")) for path in Path(STORE.name).glob("*/result.json")]
         record = next(record for record in records if record["filename"] == "signed-in.log")
         self.assertEqual(record["overview"]["uploaded_by"], "Web User")
         self.assertEqual(record["overview"]["uploaded_by_id"], "web-user-42")
@@ -660,11 +674,14 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(Path(STORE.name, payload["id"], "log").is_file())
+
     def test_disk_backed_gzip_scan_matches_regular_scan(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
-            "[kometa.py:2] [WARNING] | timed out.",
-        ]).encode()
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
+                "[kometa.py:2] [WARNING] | timed out.",
+            ]
+        ).encode()
         expected = scan_log("meta.log.log", content)
         with tempfile.NamedTemporaryFile(suffix=".gz", delete=False) as upload:
             upload.write(gzip.compress(content))
@@ -682,16 +699,19 @@ class StreamingScanTests(unittest.TestCase):
             for _name, scan_content, _result in scans:
                 if isinstance(scan_content, Path):
                     scan_content.unlink(missing_ok=True)
+
     def test_disk_backed_zip_scan_matches_regular_scan(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
-            "[kometa.py:2] [WARNING] | timed out.",
-            "[Quickstart] Run marker: quickstart=0.10.6-build7 branch=develop",
-            "[Quickstart] Metadata Start",
-            "[Quickstart] version=0.10.6-build7 branch=develop mode=managed flags=--run,--read-only",
-            "[Quickstart] platform=Linux launcher=compose",
-            "[Quickstart] Metadata End",
-        ]).encode()
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
+                "[kometa.py:2] [WARNING] | timed out.",
+                "[Quickstart] Run marker: quickstart=0.10.6-build7 branch=develop",
+                "[Quickstart] Metadata Start",
+                "[Quickstart] version=0.10.6-build7 branch=develop mode=managed flags=--run,--read-only",
+                "[Quickstart] platform=Linux launcher=compose",
+                "[Quickstart] Metadata End",
+            ]
+        ).encode()
         expected = scan_log("meta.log", content)
         archive_bytes = BytesIO()
         with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -710,17 +730,19 @@ class StreamingScanTests(unittest.TestCase):
             disk_content.unlink(missing_ok=True)
 
     def test_disk_backed_scan_preserves_plex_configuration_sections(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
-            "[config.py:2] [INFO] | Plex Configuration |",
-            "[config.py:3] [INFO] | Connected to server NZWHS01 version 1.31.2.6810-a607d384f |",
-            "[config.py:4] [INFO] | Connected to library TestMovies |",
-            "[config.py:5] [INFO] | Library Connection Successful |",
-            "[builder.py:6] [INFO] | Type: imdb_awards |",
-            "[kometa.py:6] [INFO] | Finished Unrelated Collection Run Time: 0:12:34 |",
-            "[builder.py:7] [INFO] | Scanning Metadata and Images |",
-            "[config.py:8] [INFO] | Run Order: operations |",
-        ]).encode()
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
+                "[config.py:2] [INFO] | Plex Configuration |",
+                "[config.py:3] [INFO] | Connected to server NZWHS01 version 1.31.2.6810-a607d384f |",
+                "[config.py:4] [INFO] | Connected to library TestMovies |",
+                "[config.py:5] [INFO] | Library Connection Successful |",
+                "[builder.py:6] [INFO] | Type: imdb_awards |",
+                "[kometa.py:6] [INFO] | Finished Unrelated Collection Run Time: 0:12:34 |",
+                "[builder.py:7] [INFO] | Scanning Metadata and Images |",
+                "[config.py:8] [INFO] | Run Order: operations |",
+            ]
+        ).encode()
         archive_bytes = BytesIO()
         with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("meta.log", content)
@@ -744,14 +766,13 @@ class StreamingScanTests(unittest.TestCase):
             "[2026-09-26 22:17:45,061] [kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
             "[2026-09-26 22:17:45,061] [plex.py:2] [INFO] | Scheduled maintenance running between 2:00 and 5:00 |",
         ]
+        lines.extend(f"[2026-09-27 01:{index % 60:02d}:00,000] [kometa.py:{index + 3}] [INFO] | Finished Section {index:03d} Run Time: 0:00:01 |" for index in range(225))
         lines.extend(
-            f"[2026-09-27 01:{index % 60:02d}:00,000] [kometa.py:{index + 3}] [INFO] | Finished Section {index:03d} Run Time: 0:00:01 |"
-            for index in range(225)
+            [
+                "[2026-09-27 05:00:17,563] [kometa.py:300] [INFO] | Finished People's Choice Awards 2008 Collection |",
+                "[2026-09-27 05:00:17,563] [kometa.py:300] [INFO] | Collection Run Time: 3:00:17 |",
+            ]
         )
-        lines.extend([
-            "[2026-09-27 05:00:17,563] [kometa.py:300] [INFO] | Finished People's Choice Awards 2008 Collection |",
-            "[2026-09-27 05:00:17,563] [kometa.py:300] [INFO] | Collection Run Time: 3:00:17 |",
-        ])
         archive_bytes = BytesIO()
         with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("meta.log", "\n".join(lines).encode())
@@ -812,14 +833,13 @@ class StreamingScanTests(unittest.TestCase):
             "[2026-09-29 00:00:00,000] [kometa.py:1] [INFO] | Version: 2.5.1 (Branch: master) |",
             "[2026-09-29 01:56:00,000] [config.py:2] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
         ]
+        lines.extend(f"[2026-09-29 01:{index % 60:02d}:00,000] [kometa.py:{index + 3}] [INFO] | Finished Section {index:03d} Run Time: 0:00:01 |" for index in range(225))
         lines.extend(
-            f"[2026-09-29 01:{index % 60:02d}:00,000] [kometa.py:{index + 3}] [INFO] | Finished Section {index:03d} Run Time: 0:00:01 |"
-            for index in range(225)
+            [
+                "[2026-09-29 02:00:05,000] [kometa.py:300] [CRITICAL] | Plex Critical Error: Response 503 (service_unavailable) received during maintenance. |",
+                "[2026-09-29 05:04:00,000] [kometa.py:301] [INFO] | Finished People's Choice Awards Run Time: 3:08:00 |",
+            ]
         )
-        lines.extend([
-            "[2026-09-29 02:00:05,000] [kometa.py:300] [CRITICAL] | Plex Critical Error: Response 503 (service_unavailable) received during maintenance. |",
-            "[2026-09-29 05:04:00,000] [kometa.py:301] [INFO] | Finished People's Choice Awards Run Time: 3:08:00 |",
-        ])
         archive_bytes = BytesIO()
         with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("meta.log", "\n".join(lines).encode())
@@ -836,18 +856,21 @@ class StreamingScanTests(unittest.TestCase):
         finally:
             disk_content.unlink(missing_ok=True)
 
+
 class RuntimeMetadataTests(unittest.TestCase):
     def test_section_run_times_are_sorted_and_zero_values_are_excluded(self):
         prefix = "[kometa.py:1] [INFO] |"
-        content = "\n".join([
-            f"{prefix} Finished Collections |",
-            f"{prefix} Run Time: 0:03:00 |",
-            f"{prefix} Finished Zero Work |",
-            f"{prefix} Run Time: 0:00:00 |",
-            f"{prefix} Finished Metadata Run Time: 0:12:30 |",
-            f"{prefix} Finished Overlays |",
-            f"{prefix} Run Time: 1:02:03 |",
-        ])
+        content = "\n".join(
+            [
+                f"{prefix} Finished Collections |",
+                f"{prefix} Run Time: 0:03:00 |",
+                f"{prefix} Finished Zero Work |",
+                f"{prefix} Run Time: 0:00:00 |",
+                f"{prefix} Finished Metadata Run Time: 0:12:30 |",
+                f"{prefix} Finished Overlays |",
+                f"{prefix} Run Time: 1:02:03 |",
+            ]
+        )
 
         runtimes = extract_section_run_times(content)
 
@@ -861,11 +884,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         )
 
     def test_section_run_time_excludes_confirmed_plex_maintenance_overlap(self):
-        content = "\n".join([
-            "[2026-09-29 01:56:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
-            "[2026-09-29 02:00:05,000] [kometa.py:2] [CRITICAL] | Plex Critical Error: Response 503 (service_unavailable) received. Plex may be running startup or maintenance tasks. |",
-            "[2026-09-29 05:04:00,000] [kometa.py:3] [INFO] | Finished People's Choice Awards Run Time: 3:08:00 |",
-        ])
+        content = "\n".join(
+            [
+                "[2026-09-29 01:56:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+                "[2026-09-29 02:00:05,000] [kometa.py:2] [CRITICAL] | Plex Critical Error: Response 503 (service_unavailable) received. Plex may be running startup or maintenance tasks. |",
+                "[2026-09-29 05:04:00,000] [kometa.py:3] [INFO] | Finished People's Choice Awards Run Time: 3:08:00 |",
+            ]
+        )
 
         runtimes = extract_section_run_times(content)
 
@@ -876,10 +901,12 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(runtimes[0]["reported_duration"], "3:08:00")
 
     def test_section_run_time_handles_silent_plex_maintenance(self):
-        content = "\n".join([
-            "[2026-09-29 01:56:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
-            "[2026-09-29 05:04:00,000] [kometa.py:2] [INFO] | Finished People's Choice Awards Run Time: 3:08:00 |",
-        ])
+        content = "\n".join(
+            [
+                "[2026-09-29 01:56:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+                "[2026-09-29 05:04:00,000] [kometa.py:2] [INFO] | Finished People's Choice Awards Run Time: 3:08:00 |",
+            ]
+        )
 
         runtimes = extract_section_run_times(content)
 
@@ -887,11 +914,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(runtimes[0]["reported_duration"], "3:08:00")
 
     def test_section_run_time_matches_silent_production_maintenance_gap(self):
-        content = "\n".join([
-            "[2026-09-26 22:17:45,061] [plex.py:871] [INFO] | Scheduled maintenance running between 2:00 and 5:00 |",
-            "[2026-09-27 05:00:17,563] [kometa.py:1470] [INFO] | Finished People's Choice Awards 2008 Collection |",
-            "[2026-09-27 05:00:17,563] [kometa.py:1470] [INFO] | Collection Run Time: 3:00:17 |",
-        ])
+        content = "\n".join(
+            [
+                "[2026-09-26 22:17:45,061] [plex.py:871] [INFO] | Scheduled maintenance running between 2:00 and 5:00 |",
+                "[2026-09-27 05:00:17,563] [kometa.py:1470] [INFO] | Finished People's Choice Awards 2008 Collection |",
+                "[2026-09-27 05:00:17,563] [kometa.py:1470] [INFO] | Collection Run Time: 3:00:17 |",
+            ]
+        )
 
         runtimes = extract_section_run_times(content)
 
@@ -900,26 +929,32 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(runtimes[0]["reported_duration"], "3:00:17")
 
     def test_section_run_time_outside_maintenance_is_unchanged(self):
-        content = "\n".join([
-            "[2026-09-29 01:00:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
-            "[2026-09-29 06:08:00,000] [kometa.py:2] [INFO] | Finished Morning Collection Run Time: 0:08:00 |",
-        ])
+        content = "\n".join(
+            [
+                "[2026-09-29 01:00:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+                "[2026-09-29 06:08:00,000] [kometa.py:2] [INFO] | Finished Morning Collection Run Time: 0:08:00 |",
+            ]
+        )
 
         runtimes = extract_section_run_times(content)
 
         self.assertEqual(runtimes[0]["duration"], "0:08:00")
         self.assertNotIn("reported_duration", runtimes[0])
+
     def test_section_run_time_handles_overnight_maintenance_window(self):
-        content = "\n".join([
-            "[2026-09-29 22:56:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 23:00 and 02:00 |",
-            "[2026-09-29 23:00:05,000] [kometa.py:2] [CRITICAL] | Plex Critical Error: Response 503 (service_unavailable) received during maintenance. |",
-            "[2026-09-30 02:04:00,000] [kometa.py:3] [INFO] | Finished Overnight Collection Run Time: 3:08:00 |",
-        ])
+        content = "\n".join(
+            [
+                "[2026-09-29 22:56:00,000] [config.py:1] [INFO] | Scheduled maintenance running between 23:00 and 02:00 |",
+                "[2026-09-29 23:00:05,000] [kometa.py:2] [CRITICAL] | Plex Critical Error: Response 503 (service_unavailable) received during maintenance. |",
+                "[2026-09-30 02:04:00,000] [kometa.py:3] [INFO] | Finished Overnight Collection Run Time: 3:08:00 |",
+            ]
+        )
 
         runtimes = extract_section_run_times(content)
 
         self.assertEqual(runtimes[0]["duration"], "0:08:00")
         self.assertEqual(runtimes[0]["seconds"], 480)
+
     def test_severity_dots_use_the_semantic_color_scale(self):
         css = Path("logscan_web/static/styles.css").read_text(encoding="utf-8")
         expected = {
@@ -936,11 +971,13 @@ class RuntimeMetadataTests(unittest.TestCase):
                 self.assertIn(f".{severity} .severity-dot {{ color: var(--{severity});", css)
 
     def test_wsl_runtime_finding_includes_actionable_configuration(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
-            "[kometa.py:2] [INFO] | Platform: Linux-5.15.0-microsoft-standard-WSL2 |",
-            "[kometa.py:3] [INFO] | Memory: 6 GB |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+                "[kometa.py:2] [INFO] | Platform: Linux-5.15.0-microsoft-standard-WSL2 |",
+                "[kometa.py:3] [INFO] | Memory: 6 GB |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "wsl_memory")
@@ -952,15 +989,17 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertNotIn("wsl --set-memory", finding["message"])
 
     def test_runtime_findings_include_detected_values_and_maintenance_context(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
-            "[kometa.py:2] [INFO] | Memory: 3.50 GB |",
-            "[config.py:3] [INFO] | overlay_files: |",
-            "[config.py:4] [INFO] | Plex DB cache setting: 4096 MB |",
-            "[kometa.py:5] [INFO] | --time (KOMETA_TIME): 01:00 |",
-            "[config.py:6] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
-            "[kometa.py:7] [INFO] | Finished: now Run Time: 1 days, 01:00:00 |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+                "[kometa.py:2] [INFO] | Memory: 3.50 GB |",
+                "[config.py:3] [INFO] | overlay_files: |",
+                "[config.py:4] [INFO] | Plex DB cache setting: 4096 MB |",
+                "[kometa.py:5] [INFO] | --time (KOMETA_TIME): 01:00 |",
+                "[config.py:6] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+                "[kometa.py:7] [INFO] | Finished: now Run Time: 1 days, 01:00:00 |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         findings = {item["id"]: item for item in result.recommendations}
@@ -973,12 +1012,14 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("support.plex.tv/articles/202197488", schedule)
 
     def test_schedule_conflict_prescribes_maintenance_end_and_plex_settings(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
-            "[kometa.py:2] [INFO] | --time (KOMETA_TIME): 02:45 |",
-            "[config.py:3] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
-            "[kometa.py:4] [INFO] | Finished: now Run Time: 20:03:44 |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+                "[kometa.py:2] [INFO] | --time (KOMETA_TIME): 02:45 |",
+                "[config.py:3] [INFO] | Scheduled maintenance running between 02:00 and 05:00 |",
+                "[kometa.py:4] [INFO] | Finished: now Run Time: 20:03:44 |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "schedule_conflict")
@@ -990,19 +1031,23 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Plex server defaults are **2:00 AM-5:00 AM**", message)
         self.assertIn("Plex server's local time", message)
         self.assertIn("support.plex.tv/articles/201553286-scheduled-tasks", message)
+
     def test_rating_rounding_uses_its_own_plex_version_range(self):
         def recommendations_for(version):
-            content = "\n".join([
-                "[kometa.py:1] [INFO] | Version: 1.21.0 (Docker) |",
-                f"[plex.py:2] [INFO] | Connected to server LPlex version {version} |",
-                "[config.py:3] [INFO] | mass_user_rating_update: imdb |",
-            ])
+            content = "\n".join(
+                [
+                    "[kometa.py:1] [INFO] | Version: 1.21.0 (Docker) |",
+                    f"[plex.py:2] [INFO] | Connected to server LPlex version {version} |",
+                    "[config.py:3] [INFO] | mass_user_rating_update: imdb |",
+                ]
+            )
             return {item["id"] for item in scan_log("meta.log", content.encode()).recommendations}
 
         self.assertIn("rating_rounding", recommendations_for("1.40.2.8351-9938371be"))
         self.assertNotIn("rating_rounding", recommendations_for("1.40.0.7998-c29d4c0c8"))
         self.assertNotIn("rating_rounding", recommendations_for("1.40.3.8555-fef15d30c"))
         self.assertNotIn("rating_rounding", recommendations_for("1.41.7.0"))
+
     def test_wiki_links_follow_master_and_develop_without_nightly_urls(self):
         recommendation = {
             "solution": "See https://kometa.wiki/en/latest/config/anidb",
@@ -1017,10 +1062,12 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertNotIn("/en/nightly/", recommendation["solution"])
 
     def test_scanned_develop_log_uses_develop_wiki(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: develop) |",
-            "[config.py:2] [ERROR] | AniDB Error: Login failed |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: develop) |",
+                "[config.py:2] [ERROR] | AniDB Error: Login failed |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "anidb_auth")
@@ -1122,14 +1169,16 @@ class RuntimeMetadataTests(unittest.TestCase):
                 },
             },
         }
-        log = "\n".join([
-            "Redacted Config",
-            "[config.py:1] [INFO] | template_variables: |",
-            "[config.py:2] [INFO] |   sort_by: random |",
-            "[config.py:3] [INFO] |   use_christmas: true |",
-            "[config.py:4] [INFO] | end |",
-            "Initializing cache database at /config/cache",
-        ])
+        log = "\n".join(
+            [
+                "Redacted Config",
+                "[config.py:1] [INFO] | template_variables: |",
+                "[config.py:2] [INFO] |   sort_by: random |",
+                "[config.py:3] [INFO] |   use_christmas: true |",
+                "[config.py:4] [INFO] | end |",
+                "Initializing cache database at /config/cache",
+            ]
+        )
 
         with patch("logscan_web.recommendations.urlopen", return_value=Response(schema)):
             failures = validate_redacted_config(log)
@@ -1173,16 +1222,18 @@ class RuntimeMetadataTests(unittest.TestCase):
                 },
             },
         }
-        log = "\n".join([
-            "Redacted Config",
-            "[config.py:1] [INFO] | libraries: |",
-            "[config.py:2] [INFO] |   Anime: |",
-            "[config.py:3] [INFO] |     collection_files: |",
-            "[config.py:4] [INFO] |     - default: streaming |",
-            "[config.py:5] [INFO] |       exclude: showtime |",
-            "[config.py:6] [INFO] | end |",
-            "Initializing cache database at /config/cache",
-        ])
+        log = "\n".join(
+            [
+                "Redacted Config",
+                "[config.py:1] [INFO] | libraries: |",
+                "[config.py:2] [INFO] |   Anime: |",
+                "[config.py:3] [INFO] |     collection_files: |",
+                "[config.py:4] [INFO] |     - default: streaming |",
+                "[config.py:5] [INFO] |       exclude: showtime |",
+                "[config.py:6] [INFO] | end |",
+                "Initializing cache database at /config/cache",
+            ]
+        )
 
         with patch("logscan_web.recommendations.urlopen", return_value=Response(schema)):
             failures = validate_redacted_config(log)
@@ -1196,26 +1247,30 @@ class RuntimeMetadataTests(unittest.TestCase):
 
     def test_schema_validation_stops_before_post_config_error(self):
         schema = {"type": "object", "properties": {"plex": {"type": "object"}}}
-        log = "\n".join([
-            "Redacted Config",
-            "[config.py:309] [DEBUG] | plex: |",
-            "[config.py:309] [DEBUG] |   timeout: 60 |",
-            "[config.py:316] [DEBUG] | |",
-            "[config.py:509] [ERROR] | Trakt is no longer supported, please see Announcements |",
-            "[cache.py:52] [INFO] | Initializing cache database at /config/config.cache |",
-        ])
+        log = "\n".join(
+            [
+                "Redacted Config",
+                "[config.py:309] [DEBUG] | plex: |",
+                "[config.py:309] [DEBUG] |   timeout: 60 |",
+                "[config.py:316] [DEBUG] | |",
+                "[config.py:509] [ERROR] | Trakt is no longer supported, please see Announcements |",
+                "[cache.py:52] [INFO] | Initializing cache database at /config/config.cache |",
+            ]
+        )
 
         with patch("logscan_web.recommendations.urlopen", return_value=Response(schema)):
             self.assertEqual(validate_redacted_config(log), [])
 
     def test_yaml_parser_failure_has_navigable_config_position(self):
-        log = "\n".join([
-            "Redacted Config",
-            "[config.py:1] [INFO] | plex: |",
-            "[config.py:2] [INFO] |   timeout: \"unterminated |",
-            "[config.py:3] [INFO] | end |",
-            "Initializing cache database at /config/cache",
-        ])
+        log = "\n".join(
+            [
+                "Redacted Config",
+                "[config.py:1] [INFO] | plex: |",
+                '[config.py:2] [INFO] |   timeout: "unterminated |',
+                "[config.py:3] [INFO] | end |",
+                "Initializing cache database at /config/cache",
+            ]
+        )
 
         failure = validate_redacted_config(log)[0]
 
@@ -1229,13 +1284,16 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn('["CRITICAL", "ERROR", "WARNING"].includes(match[1])', script)
         self.assertIn("match[2].replace", script)
+
     def test_schema_validation_reuses_persistent_branch_cache(self):
         schema = {"type": "object", "properties": {}}
-        log = "\n".join([
-            "Redacted Config",
-            "[config.py:1] [INFO] | {} |",
-            "Initializing cache database at /config/cache",
-        ])
+        log = "\n".join(
+            [
+                "Redacted Config",
+                "[config.py:1] [INFO] | {} |",
+                "Initializing cache database at /config/cache",
+            ]
+        )
         with tempfile.TemporaryDirectory() as cache_dir:
             with patch("logscan_web.recommendations.urlopen", return_value=Response(schema)) as fetch:
                 self.assertEqual(validate_redacted_config(log, schema_cache_dir=cache_dir), [])
@@ -1248,11 +1306,13 @@ class RuntimeMetadataTests(unittest.TestCase):
 
     def test_schema_validation_uses_stale_cache_when_refresh_fails(self):
         schema = {"type": "object", "properties": {}}
-        log = "\n".join([
-            "Redacted Config",
-            "[config.py:1] [INFO] | {} |",
-            "Initializing cache database at /config/cache",
-        ])
+        log = "\n".join(
+            [
+                "Redacted Config",
+                "[config.py:1] [INFO] | {} |",
+                "Initializing cache database at /config/cache",
+            ]
+        )
         with tempfile.TemporaryDirectory() as cache_dir:
             cache_path = Path(cache_dir, "master.json")
             cache_path.write_text(json.dumps(schema), encoding="utf-8")
@@ -1265,20 +1325,39 @@ class RuntimeMetadataTests(unittest.TestCase):
         now = datetime.now(UTC)
         base = {"schema_validation_version": SCHEMA_VALIDATION_VERSION}
 
-        self.assertTrue(_schema_validation_is_fresh({
-            **base, "schema_validation_checked_at": now.isoformat(),
-        }))
-        self.assertFalse(_schema_validation_is_fresh({
-            "schema_validation_version": SCHEMA_VALIDATION_VERSION - 1,
-            "schema_validation_checked_at": now.isoformat(),
-        }))
+        self.assertTrue(
+            _schema_validation_is_fresh(
+                {
+                    **base,
+                    "schema_validation_checked_at": now.isoformat(),
+                }
+            )
+        )
+        self.assertFalse(
+            _schema_validation_is_fresh(
+                {
+                    "schema_validation_version": SCHEMA_VALIDATION_VERSION - 1,
+                    "schema_validation_checked_at": now.isoformat(),
+                }
+            )
+        )
         self.assertFalse(_schema_validation_is_fresh(base))
-        self.assertFalse(_schema_validation_is_fresh({
-            **base, "schema_validation_checked_at": (now - timedelta(hours=2)).isoformat(),
-        }))
-        self.assertFalse(_schema_validation_is_fresh({
-            **base, "schema_validation_checked_at": (now + timedelta(minutes=1)).isoformat(),
-        }))
+        self.assertFalse(
+            _schema_validation_is_fresh(
+                {
+                    **base,
+                    "schema_validation_checked_at": (now - timedelta(hours=2)).isoformat(),
+                }
+            )
+        )
+        self.assertFalse(
+            _schema_validation_is_fresh(
+                {
+                    **base,
+                    "schema_validation_checked_at": (now + timedelta(minutes=1)).isoformat(),
+                }
+            )
+        )
 
     def test_schema_results_are_persisted_and_drive_the_page_count(self):
         source = Path("logscan_web/app.py").read_text(encoding="utf-8")
@@ -1286,7 +1365,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('result.metadata["schema_validation_failures"] = schema_failures', source)
         self.assertIn('metadata.setdefault("counts", {})["schema"] = schema_count', source)
         self.assertIn('if metadata.get("schema_validation_version") != SCHEMA_VALIDATION_VERSION', source)
-        self.assertIn('schema_validation_checked_at=datetime.now(UTC).isoformat()', source)
+        self.assertIn("schema_validation_checked_at=datetime.now(UTC).isoformat()", source)
         self.assertIn('if not _schema_validation_is_fresh(record.get("metadata") or {})', source)
 
     def test_config_viewer_marks_exact_schema_issue_ranges(self):
@@ -1308,10 +1387,12 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("new Blob([configForDownload()]", script)
 
     def test_schema_directive_advice_is_available_before_live_validation(self):
-        advice = _schema_directive_advice({
-            "schema_directive_missing": True,
-            "schema_validation_branch": "develop",
-        })
+        advice = _schema_directive_advice(
+            {
+                "schema_directive_missing": True,
+                "schema_validation_branch": "develop",
+            }
+        )
 
         self.assertEqual(advice["id"], "live_schema_directive_advice")
         self.assertEqual(advice["severity"], "advice")
@@ -1344,8 +1425,8 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("/download/${kind}", script)
         self.assertIn('runDownload("both")', script)
         self.assertIn('if (currentScanId) {\n    link.href = "/api/scans/"', script)
-        self.assertIn('} else {\n    const lines = await loadLogLines();', script)
-        download_handlers = script[script.index("const downloadDialog"):script.index('document.querySelector("#close-recommendation")')]
+        self.assertIn("} else {\n    const lines = await loadLogLines();", script)
+        download_handlers = script[script.index("const downloadDialog") : script.index('document.querySelector("#close-recommendation")')]
         self.assertNotIn("alert(", download_handlers)
 
     def test_mobile_viewer_disables_per_line_text_autosizing(self):
@@ -1375,18 +1456,18 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Review issues in config", script)
         self.assertIn("Longest section run times", script)
         self.assertIn('["100", "100 per page"]', script)
-        self.assertIn('Previous section runtime page', script)
-        self.assertIn('Next section runtime page', script)
-        self.assertIn('runtimePageIndex', script)
-        self.assertIn('function groupedLogSections(sections)', script)
+        self.assertIn("Previous section runtime page", script)
+        self.assertIn("Next section runtime page", script)
+        self.assertIn("runtimePageIndex", script)
+        self.assertIn("function groupedLogSections(sections)", script)
         self.assertIn('document.createElement("optgroup")', script)
-        self.assertIn('Collection files', script)
-        self.assertIn('Metadata operations', script)
+        self.assertIn("Collection files", script)
+        self.assertIn("Metadata operations", script)
         self.assertIn('["Plex DB cache", dbCache]', script)
         self.assertIn('["PlexPass", plexPass]', script)
         self.assertIn('["all", `All (', script)
         self.assertIn('document.createElement("details")', script)
-        self.assertIn('rank.textContent = `${start + index + 1} of ${sectionRunTimes.length}`', script)
+        self.assertIn("rank.textContent = `${start + index + 1} of ${sectionRunTimes.length}`", script)
         self.assertIn("async function openRuntimeLine", script)
         self.assertIn("block.includes(duration)", script)
         self.assertEqual(template.count('class="secondary-button compact"'), 2)
@@ -1410,12 +1491,12 @@ class RuntimeMetadataTests(unittest.TestCase):
     def test_overview_identifies_quickstart_and_direct_launchers(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 
-        self.assertIn('overview.run_launcher = metadata.quickstart_run', script)
+        self.assertIn("overview.run_launcher = metadata.quickstart_run", script)
         self.assertIn('environmentSection("quickstart", "Quickstart"', script)
-        self.assertIn('badge.src = `/static/${kind}.png`', script)
+        self.assertIn("badge.src = `/static/${kind}.png`", script)
         self.assertIn('sectionContent.scrollIntoView({ behavior: "smooth", block: "start" })', script)
-        self.assertIn('plexConfigurationList(configurations)', script)
-        self.assertIn('Connection details reported for each Plex library.', script)
+        self.assertIn("plexConfigurationList(configurations)", script)
+        self.assertIn("Connection details reported for each Plex library.", script)
         self.assertNotIn('[["Run command", overview.run_command]], true', script)
         self.assertIn("metadata.quickstart_run", script)
         self.assertIn('metadata.quickstart_version || "version unknown"', script)
@@ -1432,12 +1513,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn('environmentSection("kometa", "Kometa"', script)
         self.assertIn('environmentSection("plex", "Plex"', script)
         self.assertIn('environmentSection("quickstart", "Quickstart"', script)
-        self.assertIn('badge.src = `/static/${kind}.png`', script)
+        self.assertIn("badge.src = `/static/${kind}.png`", script)
         self.assertIn('sectionContent.scrollIntoView({ behavior: "smooth", block: "start" })', script)
-        self.assertIn('plexConfigurationList(configurations)', script)
-        self.assertIn('Connection details reported for each Plex library.', script)
+        self.assertIn("plexConfigurationList(configurations)", script)
+        self.assertIn("Connection details reported for each Plex library.", script)
         self.assertNotIn('[["Run command", overview.run_command]], true', script)
-        self.assertIn('const servers = overview.plex_servers || []', script)
+        self.assertIn("const servers = overview.plex_servers || []", script)
+
     def test_overview_validation_status_tracks_live_schema_results(self):
         script = Path("logscan_web/static/app.js").read_text(encoding="utf-8")
 
@@ -1462,11 +1544,11 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn('label === "Configuration validation"', script)
         self.assertNotIn('label === "Configuration validation" && Number(overview.yaml_issue_count) > 0', script)
-        self.assertIn('hasSchemaIssues ? `${value}. Review the first issue in config.yml` : `${value}. Open extracted config.yml`', script)
+        self.assertIn("hasSchemaIssues ? `${value}. Review the first issue in config.yml` : `${value}. Open extracted config.yml`", script)
         self.assertIn('item.classList.add("overview-validation-issue")', script)
         self.assertIn('item.setAttribute("role", "button")', script)
         self.assertIn("showConfigInViewer(Number(firstIssue?.config_line) || 0)", script)
-        config_viewer = script[script.index("async function showConfigInViewer"):script.index("function populateSectionJump")]
+        config_viewer = script[script.index("async function showConfigInViewer") : script.index("function populateSectionJump")]
         self.assertIn("if (!logViewer.open) logViewer.showModal()", config_viewer)
         self.assertIn(".overview-validation-issue:hover", css)
         self.assertIn("box-shadow: inset 3px 0 0 var(--schema)", css)
@@ -1477,10 +1559,10 @@ class RuntimeMetadataTests(unittest.TestCase):
 
         self.assertIn('id="view-log"', template)
         self.assertIn('title="Open raw log"', template)
-        self.assertIn('fa-solid fa-file-lines', template)
+        self.assertIn("fa-solid fa-file-lines", template)
         self.assertIn('id="view-config"', template)
         self.assertIn('title="Open extracted config"', template)
-        self.assertIn('fa-solid fa-file-code', template)
+        self.assertIn("fa-solid fa-file-code", template)
         self.assertIn('document.querySelector("#view-config").addEventListener("click", () => showConfigInViewer()', script)
 
     def test_zero_schema_finding_tile_keeps_optimization_review_available(self):
@@ -1494,20 +1576,24 @@ class RuntimeMetadataTests(unittest.TestCase):
 
     def test_yaml_schema_directive_detection_uses_extracted_config(self):
         prefix = "[config.py:1] [INFO] |"
-        without_directive = "\n".join([
-            "Redacted Config",
-            f"{prefix} libraries:",
-            f"{prefix}   Movies:",
-            f"{prefix} end",
-            "Initializing cache database at /config/cache",
-        ])
-        with_directive = "\n".join([
-            "Redacted Config",
-            f"{prefix} # yaml-language-server: $schema=https://example.test/schema.json",
-            f"{prefix} libraries:",
-            f"{prefix} end",
-            "Initializing cache database at /config/cache",
-        ])
+        without_directive = "\n".join(
+            [
+                "Redacted Config",
+                f"{prefix} libraries:",
+                f"{prefix}   Movies:",
+                f"{prefix} end",
+                "Initializing cache database at /config/cache",
+            ]
+        )
+        with_directive = "\n".join(
+            [
+                "Redacted Config",
+                f"{prefix} # yaml-language-server: $schema=https://example.test/schema.json",
+                f"{prefix} libraries:",
+                f"{prefix} end",
+                "Initializing cache database at /config/cache",
+            ]
+        )
         self.assertFalse(has_yaml_language_server_directive(without_directive))
         self.assertTrue(has_yaml_language_server_directive(with_directive))
 
@@ -1515,11 +1601,14 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(schema_branch_for_log("Version: 2.2.0 (Branch: master)"), "master")
         self.assertEqual(schema_branch_for_log("Version: 2.3.0 (Branch: develop)"), "develop")
         self.assertEqual(schema_branch_for_log("Version: 2.1.0 (Branch: nightly)"), "develop")
+
     def test_retired_nightly_branch_recommends_develop_or_master(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
-            "[kometa.py:2] [INFO] | Finished: Run Time: 0:01:00 |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.4.8-build21 (Branch: nightly) |",
+                "[kometa.py:2] [INFO] | Finished: Run Time: 0:01:00 |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "retired_nightly_branch")
@@ -1531,25 +1620,24 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(result.metadata["kometa_branch"], "nightly")
 
     def test_retired_nightly_branch_supports_current_version_format(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.2.2 (Python 3.11.5) (Git: nightly) |",
-            "[kometa.py:2] [INFO] | Finished: Run Time: 0:01:01 |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.2.2 (Python 3.11.5) (Git: nightly) |",
+                "[kometa.py:2] [INFO] | Finished: Run Time: 0:01:01 |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
-        findings = [
-            item for item in result.recommendations
-            if item["id"] == "retired_nightly_branch"
-        ]
+        findings = [item for item in result.recommendations if item["id"] == "retired_nightly_branch"]
 
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["severity"], "warning")
         self.assertEqual(findings[0]["evidence_lines"], [1])
         self.assertEqual(result.metadata["kometa_branch"], "nightly")
 
-
     def test_traceback_is_critical(self):
         self.assertEqual(next(rule for rule in RULES.values() if rule.id == "traceback").category, "critical")
+
     def test_internal_server_error_is_critical(self):
         self.assertEqual(next(rule for rule in RULES.values() if rule.id == "internal_server").category, "critical")
 
@@ -1594,6 +1682,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         }
         by_id = {rule.id: rule.category for rule in RULES.values()}
         self.assertEqual({rule_id: by_id[rule_id] for rule_id in expected}, expected)
+
     def test_every_verified_discord_documentation_url_is_kept(self):
         by_id = {rule.id: rule for rule in RULES.values()}
 
@@ -1623,6 +1712,7 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Docker and unRAID", rule.solution)
         self.assertIn("https://www.kometa.wiki/en/latest/kometa/install/images", rule.solution)
         self.assertNotIn("nightly", f"{rule.description} {rule.solution}".lower())
+
     def test_overlay_reset_uses_rich_reapply_guidance(self):
         rule = next(rule for rule in RULES.values() if rule.id == "overlay_reset")
 
@@ -1632,11 +1722,14 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("particular repair or rebuild cases", rule.description)
         self.assertIn("ImageMaid", rule.solution)
         self.assertNotIn("reapplication", f"{rule.title} {rule.description} {rule.solution}".lower())
+
     def test_legacy_other_award_keeps_discord_guidance_and_url(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
-            "[config.py:2] [WARNING] | other_award: oscars |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+                "[config.py:2] [WARNING] | other_award: oscars |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "legacy_other_award")
@@ -1649,14 +1742,16 @@ class RuntimeMetadataTests(unittest.TestCase):
         )
 
     def test_legacy_mass_metadata_operations_recommend_grouped_replacements(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: develop) |",
-            "[config.py:2] [DEBUG] |     mass_genre_update: tmdb |",
-            "[config.py:3] [DEBUG] |     mass_user_rating_update: imdb |",
-            "[config.py:4] [DEBUG] |     mass_episode_critic_rating_update: tmdb |",
-            "[config.py:5] [DEBUG] |     mass_poster_update: |",
-            "[config.py:6] [DEBUG] |     mass_image_update: |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.5.1 (Branch: develop) |",
+                "[config.py:2] [DEBUG] |     mass_genre_update: tmdb |",
+                "[config.py:3] [DEBUG] |     mass_user_rating_update: imdb |",
+                "[config.py:4] [DEBUG] |     mass_episode_critic_rating_update: tmdb |",
+                "[config.py:5] [DEBUG] |     mass_poster_update: |",
+                "[config.py:6] [DEBUG] |     mass_image_update: |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "legacy_mass_metadata_update")
@@ -1669,12 +1764,15 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("`episode_critic`", finding["solution"])
         self.assertIn("`poster`", finding["solution"])
         self.assertIn("https://www.kometa.wiki/en/develop/config/operations/#mass-metadata-update", finding["solution"])
+
     def test_pre_kometa_yaml_keeps_replacement_url_and_evidence(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
-            "[config.py:2] [INFO] |     - pmm: imdb |",
-            "[config.py:3] [INFO] |     - pmm: oscars |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+                "[config.py:2] [INFO] |     - pmm: imdb |",
+                "[config.py:3] [INFO] |     - pmm: oscars |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "legacy_pmm")
@@ -1686,11 +1784,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(finding["evidence_lines"], [2, 3])
 
     def test_anidb_recommendations_keep_discord_guidance_and_url(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
-            "[config.py:2] [ERROR] | AniDB Error: Login failed |",
-            "[config.py:3] [ERROR] | No Anime Found for AniDB ID: 69 |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+                "[config.py:2] [ERROR] | AniDB Error: Login failed |",
+                "[config.py:3] [ERROR] | No Anime Found for AniDB ID: 69 |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         findings = {item["id"]: item for item in result.recommendations}
@@ -1705,11 +1805,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(connection["evidence_lines"], [3])
 
     def test_removed_trakt_source_has_specific_recommendation(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.5.1-build6 (Branch: master) |",
-            "[meta.py:172] [INFO] | File Loaded From: /config/collections-config/1-Movies_Tops.yml |",
-            "[meta.py:173] [ERROR] | Trakt is no longer supported, please see the Announcements channel in the Kometa Discord server for further information |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.5.1-build6 (Branch: master) |",
+                "[meta.py:172] [INFO] | File Loaded From: /config/collections-config/1-Movies_Tops.yml |",
+                "[meta.py:173] [ERROR] | Trakt is no longer supported, please see the Announcements channel in the Kometa Discord server for further information |",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "trakt_unsupported")
@@ -1721,11 +1823,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertIn("Announcements", finding["solution"])
 
     def test_missing_config_subattribute_explains_logged_default(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.5.1-build6 (Branch: master) |",
-            "[config.py:641] [WARNING] | Config Warning: settings sub-attribute verify_ssl not found using True as default |",
-            "[config.py:935] [INFO] |========================================================================================",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.5.1-build6 (Branch: master) |",
+                "[config.py:641] [WARNING] | Config Warning: settings sub-attribute verify_ssl not found using True as default |",
+                "[config.py:935] [INFO] |========================================================================================",
+            ]
+        )
 
         result = scan_log("meta.log", content.encode())
         finding = next(item for item in result.recommendations if item["id"] == "config_subattribute_default")
@@ -1747,19 +1851,22 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(normalized_installation("2.3.1 (Linuxserver)"), "Docker (LinuxServer)")
         self.assertEqual(normalized_installation("2.5.0 (Python 3.13.2)"), "Native Python")
         self.assertEqual(normalized_installation("2.5.0"), "Unknown")
+
     def test_plex_configuration_sections_are_exposed_in_log_overview(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
-            "[config.py:2] [INFO] | Plex Configuration |",
-            "[config.py:3] [INFO] | Using Asset Directory: config/assets/Movies/ |",
-            "[config.py:4] [INFO] | Connected to server NZWHS01 version 1.31.2.6810-a607d384f |",
-            "[config.py:5] [INFO] | Running on Linux version 6.1.34-Unraid |",
-            "[config.py:6] [INFO] | Connected to library TestMovies |",
-            "[config.py:7] [INFO] | Type: Movie |",
-            "[config.py:8] [INFO] | Agent: tv.plex.agents.movie |",
-            "[config.py:9] [INFO] | Library Connection Successful |",
-            "[builder.py:10] [INFO] | Scanning Metadata and Images |",
-        ])
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Branch: master) |",
+                "[config.py:2] [INFO] | Plex Configuration |",
+                "[config.py:3] [INFO] | Using Asset Directory: config/assets/Movies/ |",
+                "[config.py:4] [INFO] | Connected to server NZWHS01 version 1.31.2.6810-a607d384f |",
+                "[config.py:5] [INFO] | Running on Linux version 6.1.34-Unraid |",
+                "[config.py:6] [INFO] | Connected to library TestMovies |",
+                "[config.py:7] [INFO] | Type: Movie |",
+                "[config.py:8] [INFO] | Agent: tv.plex.agents.movie |",
+                "[config.py:9] [INFO] | Library Connection Successful |",
+                "[builder.py:10] [INFO] | Scanning Metadata and Images |",
+            ]
+        )
 
         sections = extract_plex_configurations(content)
         result = scan_log("meta.log", content.encode())
@@ -1773,128 +1880,167 @@ class RuntimeMetadataTests(unittest.TestCase):
         self.assertEqual(result.overview["plex_analytics"]["platforms"], ["Linux"])
         self.assertEqual(result.overview["plex_analytics"]["library_types"], ["Movie"])
         self.assertEqual(result.overview["plex_analytics"]["agents"], ["tv.plex.agents.movie"])
-        self.assertEqual(result.overview["plex_servers"], [{
-            "name": "NZWHS01",
-            "version": "1.31.2.6810-a607d384f",
-            "platform": "Linux version 6.1.34-Unraid",
-        }])
+        self.assertEqual(
+            result.overview["plex_servers"],
+            [
+                {
+                    "name": "NZWHS01",
+                    "version": "1.31.2.6810-a607d384f",
+                    "platform": "Linux version 6.1.34-Unraid",
+                }
+            ],
+        )
 
     def test_plex_configuration_title_falls_back_for_partial_sections(self):
-        content = "\n".join([
-            "[config.py:1] [INFO] | Plex Configuration |",
-            "[config.py:2] [INFO] | Connected to library Documentaries |",
-            "[config.py:3] [INFO] | Plex Configuration |",
-            "[config.py:4] [INFO] | Type: Show |",
-            "[config.py:5] [INFO] | Plex Configuration |",
-            "[config.py:6] [INFO] | Connected to server Plex version 1.2.3.4-abcd |",
-        ])
+        content = "\n".join(
+            [
+                "[config.py:1] [INFO] | Plex Configuration |",
+                "[config.py:2] [INFO] | Connected to library Documentaries |",
+                "[config.py:3] [INFO] | Plex Configuration |",
+                "[config.py:4] [INFO] | Type: Show |",
+                "[config.py:5] [INFO] | Plex Configuration |",
+                "[config.py:6] [INFO] | Connected to server Plex version 1.2.3.4-abcd |",
+            ]
+        )
 
         sections = extract_plex_configurations(content)
 
-        self.assertEqual([section["title"] for section in sections], [
-            "Plex Configuration - Documentaries",
-            "Plex Configuration - Show",
-            "Plex Configuration - Section 3",
-        ])
+        self.assertEqual(
+            [section["title"] for section in sections],
+            [
+                "Plex Configuration - Documentaries",
+                "Plex Configuration - Show",
+                "Plex Configuration - Section 3",
+            ],
+        )
 
     def test_quickstart_metadata_extractor_supports_backfill_and_direct_runs(self):
-        quickstart = extract_quickstart_metadata(
-            "[Quickstart] Run marker: quickstart=0.10.6-build7 branch=develop"
-        )
+        quickstart = extract_quickstart_metadata("[Quickstart] Run marker: quickstart=0.10.6-build7 branch=develop")
         direct = extract_quickstart_metadata("[kometa.py:1] [INFO] | Version: 2.5.0 |")
 
-        self.assertEqual(quickstart, {
-            "quickstart_run": True,
-            "quickstart_version": "0.10.6-build7",
-            "quickstart_branch": "develop",
-            "quickstart": {
-                "detected": True, "version": "0.10.6-build7", "branch": "develop",
-                "mode": None, "flags": [], "metadata": {},
+        self.assertEqual(
+            quickstart,
+            {
+                "quickstart_run": True,
+                "quickstart_version": "0.10.6-build7",
+                "quickstart_branch": "develop",
+                "quickstart": {
+                    "detected": True,
+                    "version": "0.10.6-build7",
+                    "branch": "develop",
+                    "mode": None,
+                    "flags": [],
+                    "metadata": {},
+                },
             },
-        })
-        self.assertEqual(direct, {
-            "quickstart_run": False,
-            "quickstart_version": None,
-            "quickstart_branch": "unknown",
-            "quickstart": {
-                "detected": False, "version": None, "branch": "unknown",
-                "mode": None, "flags": [], "metadata": {},
+        )
+        self.assertEqual(
+            direct,
+            {
+                "quickstart_run": False,
+                "quickstart_version": None,
+                "quickstart_branch": "unknown",
+                "quickstart": {
+                    "detected": False,
+                    "version": None,
+                    "branch": "unknown",
+                    "mode": None,
+                    "flags": [],
+                    "metadata": {},
+                },
             },
-        })
+        )
 
     def test_quickstart_generated_header_exposes_safe_operational_metadata(self):
         prefix = "[2026-09-12 23:07:10,167] [config.py:315] [DEBUG] | # "
-        content = "\n".join(prefix + value + " |" for value in [
-            "dreamy_kare config created by Quickstart on 2026-09-12 23:02:21",
-            "OS: Windows 11",
-            "Docker: False",
-            "CPU: Intel64 Family 6 Model 94 Stepping 3, GenuineIntel (8 cores)",
-            "Memory: 14011 MB / 32657 MB (42%) | 18645 MB Free",
-            "Python: 3.12.10",
-            "Git: git version 2.55.0.windows.3",
-            "Browser: private browser value",
-            "Quickstart Port: 8008",
-            "Quickstart Debug: Disabled",
-            "Quickstart Theme: kometa",
-            "Quickstart Optimize Template Defaults: Enabled",
-            "Quickstart Config Archive History: 10",
-            "Quickstart Kometa Log Retention: Keep all (0)",
-            "Quickstart ImageMaid Log Retention: Keep all (0)",
-            r"Quickstart Test Libraries Temp Path: C:\Users\private\tmp",
-            "Kometa Runtime Mode: Quickstart-managed install",
-            "Quickstart Session Lifetime Days: 30",
-            "Quickstart: 0.10.6-build33 | Branch: run_command_fixes | Environment: Local-Windows",
-        ])
+        content = "\n".join(
+            prefix + value + " |"
+            for value in [
+                "dreamy_kare config created by Quickstart on 2026-09-12 23:02:21",
+                "OS: Windows 11",
+                "Docker: False",
+                "CPU: Intel64 Family 6 Model 94 Stepping 3, GenuineIntel (8 cores)",
+                "Memory: 14011 MB / 32657 MB (42%) | 18645 MB Free",
+                "Python: 3.12.10",
+                "Git: git version 2.55.0.windows.3",
+                "Browser: private browser value",
+                "Quickstart Port: 8008",
+                "Quickstart Debug: Disabled",
+                "Quickstart Theme: kometa",
+                "Quickstart Optimize Template Defaults: Enabled",
+                "Quickstart Config Archive History: 10",
+                "Quickstart Kometa Log Retention: Keep all (0)",
+                "Quickstart ImageMaid Log Retention: Keep all (0)",
+                r"Quickstart Test Libraries Temp Path: C:\Users\private\tmp",
+                "Kometa Runtime Mode: Quickstart-managed install",
+                "Quickstart Session Lifetime Days: 30",
+                "Quickstart: 0.10.6-build33 | Branch: run_command_fixes | Environment: Local-Windows",
+            ]
+        )
 
         quickstart = extract_quickstart_metadata(content)["quickstart"]
 
         self.assertEqual(quickstart["version"], "0.10.6-build33")
         self.assertEqual(quickstart["branch"], "run_command_fixes")
         self.assertEqual(quickstart["mode"], "Quickstart-managed install")
-        self.assertEqual(quickstart["metadata"], {
-            "platform": "Local-Windows",
-            "os": "Windows 11",
-            "docker": "False",
-            "cpu": "Intel64 Family 6 Model 94 Stepping 3, GenuineIntel (8 cores)",
-            "memory": "14011 MB / 32657 MB (42%) | 18645 MB Free",
-            "python": "3.12.10",
-            "git": "git version 2.55.0.windows.3",
-            "port": "8008",
-            "debug": "Disabled",
-            "theme": "kometa",
-            "optimize_template_defaults": "Enabled",
-            "config_archive_history": "10",
-            "kometa_log_retention": "Keep all (0)",
-            "imagemaid_log_retention": "Keep all (0)",
-            "session_lifetime_days": "30",
-        })
+        self.assertEqual(
+            quickstart["metadata"],
+            {
+                "platform": "Local-Windows",
+                "os": "Windows 11",
+                "docker": "False",
+                "cpu": "Intel64 Family 6 Model 94 Stepping 3, GenuineIntel (8 cores)",
+                "memory": "14011 MB / 32657 MB (42%) | 18645 MB Free",
+                "python": "3.12.10",
+                "git": "git version 2.55.0.windows.3",
+                "port": "8008",
+                "debug": "Disabled",
+                "theme": "kometa",
+                "optimize_template_defaults": "Enabled",
+                "config_archive_history": "10",
+                "kometa_log_retention": "Keep all (0)",
+                "imagemaid_log_retention": "Keep all (0)",
+                "session_lifetime_days": "30",
+            },
+        )
         serialized = json.dumps(quickstart)
         self.assertNotIn("private browser value", serialized)
         self.assertNotIn(r"C:\Users\private", serialized)
         self.assertNotIn("dreamy_kare", serialized)
+
     def test_quickstart_metadata_block_is_structured_and_private_values_are_omitted(self):
-        content = "\n".join([
-            "[Quickstart] Metadata Start",
-            "[Quickstart] version=0.10.9 branch=develop mode=managed flags=--run,--read-only",
-            "[Quickstart] platform=Linux workspace=private config=(redacted) launcher=compose",
-            "[Quickstart] Metadata End",
-        ])
+        content = "\n".join(
+            [
+                "[Quickstart] Metadata Start",
+                "[Quickstart] version=0.10.9 branch=develop mode=managed flags=--run,--read-only",
+                "[Quickstart] platform=Linux workspace=private config=(redacted) launcher=compose",
+                "[Quickstart] Metadata End",
+            ]
+        )
 
         extracted = extract_quickstart_metadata(content)
 
         self.assertEqual(extracted["quickstart"]["version"], "0.10.9")
         self.assertEqual(extracted["quickstart"]["mode"], "managed")
         self.assertEqual(extracted["quickstart"]["flags"], ["--run", "--read-only"])
-        self.assertEqual(extracted["quickstart"]["metadata"], {
-            "platform": "Linux",
-            "launcher": "compose",
-        })
+        self.assertEqual(
+            extracted["quickstart"]["metadata"],
+            {
+                "platform": "Linux",
+                "launcher": "compose",
+            },
+        )
+
     def test_kometa_and_quickstart_channels_are_extracted_from_safe_markers(self):
-        content = "\n".join([
-            "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Python 3.12.1) (Branch: nightly) |",
-            "[Quickstart] Run marker: started=private config=private quickstart=0.10.4-build302 branch=develop",
-        ])
-        metadata = scan_log("meta.log", content.encode())["metadata"] if isinstance(scan_log("meta.log", content.encode()), dict) else scan_log("meta.log", content.encode()).metadata
+        content = "\n".join(
+            [
+                "[kometa.py:1] [INFO] | Version: 2.3.1-build24 (Python 3.12.1) (Branch: nightly) |",
+                "[Quickstart] Run marker: started=private config=private quickstart=0.10.4-build302 branch=develop",
+            ]
+        )
+        metadata = (
+            scan_log("meta.log", content.encode())["metadata"] if isinstance(scan_log("meta.log", content.encode()), dict) else scan_log("meta.log", content.encode()).metadata
+        )
         self.assertEqual(metadata["kometa_branch"], "nightly")
         self.assertTrue(metadata["quickstart_run"])
         self.assertEqual(metadata["quickstart_version"], "0.10.4-build302")
@@ -1906,9 +2052,18 @@ class AnonymousAnalyticsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             analytics = AnonymousAnalyticsStore(directory)
             analytics.record_success(
-                logs=50, lines=2282999, bytes_processed=100, source="web", batch=False,
-                versions=[], kometa_branches=[], launchers=[], quickstart_versions=[],
-                quickstart_branches=[], recommendations=[], people=0,
+                logs=50,
+                lines=2282999,
+                bytes_processed=100,
+                source="web",
+                batch=False,
+                versions=[],
+                kometa_branches=[],
+                launchers=[],
+                quickstart_versions=[],
+                quickstart_branches=[],
+                recommendations=[],
+                people=0,
             )
             legacy = {
                 "logs_submitted": 54,
@@ -1925,19 +2080,33 @@ class AnonymousAnalyticsTests(unittest.TestCase):
         self.assertEqual(snapshot["totals"]["lines_processed"], 3393973)
         self.assertEqual(snapshot["totals"]["people_submitted"], 15)
         self.assertEqual(snapshot["totals"]["sources"]["legacy"], 4)
+
     def test_existing_daily_buckets_migrate_when_new_dimensions_are_added(self):
         with tempfile.TemporaryDirectory() as directory:
-            Path(directory, "usage_analytics.json").write_text(json.dumps({
-                "started_at": datetime.now(UTC).isoformat(),
-                "days": {datetime.now(UTC).date().isoformat(): {"successful_logs": 4}},
-                "addressed_keys": [],
-            }), encoding="utf-8")
+            Path(directory, "usage_analytics.json").write_text(
+                json.dumps(
+                    {
+                        "started_at": datetime.now(UTC).isoformat(),
+                        "days": {datetime.now(UTC).date().isoformat(): {"successful_logs": 4}},
+                        "addressed_keys": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
             analytics = AnonymousAnalyticsStore(directory)
             analytics.record_success(
-                logs=1, lines=10, bytes_processed=100, source="discord", batch=False,
-                versions=["2.3.1-build24"], kometa_branches=["nightly"], launchers=["quickstart"],
-                quickstart_versions=["0.10.4-build302"], quickstart_branches=["develop"],
-                recommendations=[], people=0,
+                logs=1,
+                lines=10,
+                bytes_processed=100,
+                source="discord",
+                batch=False,
+                versions=["2.3.1-build24"],
+                kometa_branches=["nightly"],
+                launchers=["quickstart"],
+                quickstart_versions=["0.10.4-build302"],
+                quickstart_branches=["develop"],
+                recommendations=[],
+                people=0,
             )
             totals = analytics.snapshot()["totals"]
         self.assertEqual(totals["successful_logs"], 5)
@@ -1949,16 +2118,28 @@ class AnonymousAnalyticsTests(unittest.TestCase):
             analytics = AnonymousAnalyticsStore(directory)
             analytics.record_rejection("not_kometa_log", "web")
             analytics.record_success(
-                logs=2, lines=1200, bytes_processed=5000, source="discord", batch=True,
-                versions=["2.1.0", "unknown"], kometa_branches=["master", "nightly"],
-                launchers=["direct", "quickstart"], quickstart_versions=["0.10.4-build302"],
-                quickstart_branches=["develop"], recommendations=[{"id": "test_rule", "severity": "warning"}], people=3,
-                kometa_platforms=["Linux", "Windows"], quickstart_platforms=["Linux"],
+                logs=2,
+                lines=1200,
+                bytes_processed=5000,
+                source="discord",
+                batch=True,
+                versions=["2.1.0", "unknown"],
+                kometa_branches=["master", "nightly"],
+                launchers=["direct", "quickstart"],
+                quickstart_versions=["0.10.4-build302"],
+                quickstart_branches=["develop"],
+                recommendations=[{"id": "test_rule", "severity": "warning"}],
+                people=3,
+                kometa_platforms=["Linux", "Windows"],
+                quickstart_platforms=["Linux"],
                 installation_methods=["Docker", "Native Python"],
                 plex={
-                    "versions": ["1.31.2.6810-a607d384f"], "platforms": ["Linux"],
-                    "update_channels": ["Public"], "library_types": ["Movie"],
-                    "agents": ["tv.plex.agents.movie"], "scanners": ["Plex Movie"],
+                    "versions": ["1.31.2.6810-a607d384f"],
+                    "platforms": ["Linux"],
+                    "update_channels": ["Public"],
+                    "library_types": ["Movie"],
+                    "agents": ["tv.plex.agents.movie"],
+                    "scanners": ["Plex Movie"],
                 },
             )
             analytics.record_addressed([{"key": "tmdb-1", "created_at": datetime.now(UTC).isoformat()}])
@@ -2002,11 +2183,16 @@ class UsageStatsTests(unittest.TestCase):
 
 class PeopleUnionTests(unittest.TestCase):
     def setUp(self):
-        Path(STORE.name, "people.json").write_text(json.dumps([
-            {"key": "tmdb-1", "tmdb_id": 1, "name": "Alice Person", "log_url": "/scan/alice", "requested_by": [{"name": "Request User", "id": "123"}]},
-            {"key": "tmdb-3", "tmdb_id": 3, "name": "Bob Person", "log_url": "/scan/bob"},
-            {"key": "tmdb-4", "tmdb_id": 4, "name": "Completed Person", "log_url": "/scan/completed"},
-        ]), encoding="utf-8")
+        Path(STORE.name, "people.json").write_text(
+            json.dumps(
+                [
+                    {"key": "tmdb-1", "tmdb_id": 1, "name": "Alice Person", "log_url": "/scan/alice", "requested_by": [{"name": "Request User", "id": "123"}]},
+                    {"key": "tmdb-3", "tmdb_id": 3, "name": "Bob Person", "log_url": "/scan/bob"},
+                    {"key": "tmdb-4", "tmdb_id": 4, "name": "Completed Person", "log_url": "/scan/completed"},
+                ]
+            ),
+            encoding="utf-8",
+        )
         for filename in ("popular_people_checked.json", "popular_people_exclusions.json", "popular_people_flags.json"):
             Path(STORE.name, filename).write_text("[]" if filename != "popular_people_flags.json" else "{}", encoding="utf-8")
         self.client = app.test_client()
@@ -2052,21 +2238,30 @@ class PeopleUnionTests(unittest.TestCase):
     def test_requesters_accumulate_without_duplicates(self):
         with tempfile.TemporaryDirectory() as directory:
             store = PeopleStore(directory)
-            store.upsert({
-                "key": "tmdb-9", "name": "Person",
-                "requested_by": [{"name": "First Name", "id": "1"}],
-                "provenance_tags": ["Log Upload"],
-            })
+            store.upsert(
+                {
+                    "key": "tmdb-9",
+                    "name": "Person",
+                    "requested_by": [{"name": "First Name", "id": "1"}],
+                    "provenance_tags": ["Log Upload"],
+                }
+            )
             store.upsert({"key": "tmdb-9", "name": "Person", "requested_by": [{"name": "Updated Name", "id": "1"}]})
-            person = store.upsert({
-                "key": "tmdb-9", "name": "Person",
-                "requested_by": [{"name": "Second User", "id": "2"}],
-                "provenance_tags": ["Automated Top 250"],
-            })
-        self.assertEqual(person["requested_by"], [
-            {"name": "Updated Name", "id": "1"},
-            {"name": "Second User", "id": "2"},
-        ])
+            person = store.upsert(
+                {
+                    "key": "tmdb-9",
+                    "name": "Person",
+                    "requested_by": [{"name": "Second User", "id": "2"}],
+                    "provenance_tags": ["Automated Top 250"],
+                }
+            )
+        self.assertEqual(
+            person["requested_by"],
+            [
+                {"name": "Updated Name", "id": "1"},
+                {"name": "Second User", "id": "2"},
+            ],
+        )
         self.assertEqual(person["provenance_tags"], ["Log Upload", "Automated Top 250"])
 
     def test_api_supports_smaller_mobile_page_size(self):
@@ -2088,11 +2283,14 @@ class PeopleUnionTests(unittest.TestCase):
 
     def test_dynamic_tags_include_counts_and_group_requesters_with_or_semantics(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
-            response = self.client.get("/api/people", query_string=[
-                ("sources", "missing,trending"),
-                ("tags", "Requested by Request User"),
-                ("tags", "Requested by Unknown"),
-            ])
+            response = self.client.get(
+                "/api/people",
+                query_string=[
+                    ("sources", "missing,trending"),
+                    ("tags", "Requested by Request User"),
+                    ("tags", "Requested by Unknown"),
+                ],
+            )
         payload = response.get_json()
         self.assertEqual([person["tmdb_id"] for person in payload["people"]], [1, 3])
         facets = {(item["category"], item["tag"]): item["count"] for item in payload["available_tags"]}
@@ -2102,11 +2300,14 @@ class PeopleUnionTests(unittest.TestCase):
 
     def test_dynamic_tags_combine_different_categories_with_and_semantics(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
-            response = self.client.get("/api/people", query_string=[
-                ("sources", "missing,trending"),
-                ("tags", "Log Upload"),
-                ("tags", "Requested by Unknown"),
-            ])
+            response = self.client.get(
+                "/api/people",
+                query_string=[
+                    ("sources", "missing,trending"),
+                    ("tags", "Log Upload"),
+                    ("tags", "Requested by Unknown"),
+                ],
+            )
         self.assertEqual([person["tmdb_id"] for person in response.get_json()["people"]], [3])
 
     def test_missing_filter_includes_trending_gaps_without_uploaded_logs(self):
@@ -2124,13 +2325,15 @@ class PeopleUnionTests(unittest.TestCase):
             if "caching.graphql.imdb.com" in url:
                 return Response({"data": {"chartNames": {"edges": []}}})
             if "/person/popular?" in url:
-                return Response({
-                    "total_pages": 1,
-                    "results": [
-                        {"id": 1, "name": "Alice Person", "profile_path": "/alice.jpg", "known_for_department": "Acting"},
-                        {"id": 2, "name": "Completed Person", "profile_path": "/complete.jpg", "known_for_department": "Acting"},
-                    ],
-                })
+                return Response(
+                    {
+                        "total_pages": 1,
+                        "results": [
+                            {"id": 1, "name": "Alice Person", "profile_path": "/alice.jpg", "known_for_department": "Acting"},
+                            {"id": 2, "name": "Completed Person", "profile_path": "/complete.jpg", "known_for_department": "Acting"},
+                        ],
+                    }
+                )
             raise AssertionError(f"Unexpected URL: {url}")
 
         with tempfile.TemporaryDirectory() as directory:
@@ -2147,9 +2350,14 @@ class PeopleUnionTests(unittest.TestCase):
                 self.assertEqual(AnonymousAnalyticsStore(directory).snapshot()["totals"]["people_submitted"], 1)
 
     def test_missing_tmdb_is_searchable_and_excluded_from_processing_export(self):
-        Path(STORE.name, "people.json").write_text(json.dumps([
-            {"key": "tmdb-5", "tmdb_id": 5, "name": "Blocked Person", "log_url": "/scan/blocked"},
-        ]), encoding="utf-8")
+        Path(STORE.name, "people.json").write_text(
+            json.dumps(
+                [
+                    {"key": "tmdb-5", "tmdb_id": 5, "name": "Blocked Person", "log_url": "/scan/blocked"},
+                ]
+            ),
+            encoding="utf-8",
+        )
         people = self.request_people("missing", "Missing TMDb")
         blocked = next(person for person in people if person["tmdb_id"] == 5)
         self.assertEqual(blocked["metadata_tags"], ["Missing TMDb"])
@@ -2167,9 +2375,14 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(person["tmdb_images_url"], "https://www.themoviedb.org/person/3/images/profiles")
 
     def test_verified_tmdb_image_survives_transient_profile_lookup_gap(self):
-        Path(STORE.name, "people.json").write_text(json.dumps([
-            {"key": "tmdb-5", "tmdb_id": 5, "name": "Blocked Person", "tmdb_image_found": True},
-        ]), encoding="utf-8")
+        Path(STORE.name, "people.json").write_text(
+            json.dumps(
+                [
+                    {"key": "tmdb-5", "tmdb_id": 5, "name": "Blocked Person", "tmdb_image_found": True},
+                ]
+            ),
+            encoding="utf-8",
+        )
         person = next(person for person in self.request_people("missing") if person["tmdb_id"] == 5)
         self.assertEqual(person["metadata_tags"], ["TMDb Ready"])
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
@@ -2182,10 +2395,15 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(completed["kometa_image"], "https://example.test/completed.jpg")
 
     def test_repository_image_reconciliation_ignores_accents_but_not_partial_names(self):
-        Path(STORE.name, "people.json").write_text(json.dumps([
-            {"key": "tmdb-6", "tmdb_id": 6, "name": "Hikaru Kondo", "log_url": "/scan/hikaru"},
-            {"key": "tmdb-7", "tmdb_id": 7, "name": "Hikaru", "log_url": "/scan/other-hikaru"},
-        ]), encoding="utf-8")
+        Path(STORE.name, "people.json").write_text(
+            json.dumps(
+                [
+                    {"key": "tmdb-6", "tmdb_id": 6, "name": "Hikaru Kondo", "log_url": "/scan/hikaru"},
+                    {"key": "tmdb-7", "tmdb_id": 7, "name": "Hikaru", "log_url": "/scan/other-hikaru"},
+                ]
+            ),
+            encoding="utf-8",
+        )
 
         def accented_urlopen(request, timeout=0):
             if "People-Images/refs" in request.full_url:
@@ -2207,12 +2425,20 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertEqual(response.get_data(as_text=True).splitlines(), ["1|Alice Person", "3|Bob Person", "2|Completed Person"])
 
     def test_export_preserves_original_accented_log_name(self):
-        Path(STORE.name, "people.json").write_text(json.dumps([
-            {
-                "key": "tmdb-1", "tmdb_id": 1, "name": "Hikaru Kondo",
-                "original_name": "Hikaru Kondô", "log_url": "/scan/hikaru",
-            },
-        ]), encoding="utf-8")
+        Path(STORE.name, "people.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "key": "tmdb-1",
+                        "tmdb_id": 1,
+                        "name": "Hikaru Kondo",
+                        "original_name": "Hikaru Kondô",
+                        "log_url": "/scan/hikaru",
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):
             response = self.client.get(
                 "/api/people/export",
@@ -2243,7 +2469,7 @@ class PeopleUnionTests(unittest.TestCase):
             self.assertIn("Sign out", body)
             self.assertIn('class="header-my-uploads"', body)
             self.assertIn('src="https://cdn.example/avatar.png"', body)
-            self.assertIn('view=mine', body)
+            self.assertIn("view=mine", body)
             if path == "/":
                 self.assertIn("Uploading as Support Person", body)
                 self.assertIn("New scans will appear in My uploads for 48 hours.", body)
@@ -2314,7 +2540,7 @@ class PeopleUnionTests(unittest.TestCase):
         html = self.client.get("/").get_data(as_text=True)
         self.assertIn('href="/people">People</a>', html)
         self.assertIn('aria-label="All utilities"', html)
-        self.assertIn('>Kometa Logscan</span>', html)
+        self.assertIn(">Kometa Logscan</span>", html)
         self.assertIn('aria-label="Kometa Logscan home"', html)
 
     def test_shared_navigation_uses_one_menu_on_desktop_and_mobile(self):
@@ -2322,7 +2548,7 @@ class PeopleUnionTests(unittest.TestCase):
         self.assertNotIn('class="header-primary-links"', html)
         self.assertIn('class="site-nav"', html)
         self.assertIn('class="site-nav-icon"', html)
-        self.assertNotIn('>Account</span>', html)
+        self.assertNotIn(">Account</span>", html)
         self.assertIn('aria-current="page">Log Scanner</a>', html)
         self.assertIn("site_nav.js", html)
         self.assertIn('href="https://utilities.kometa.wiki/"', html)
@@ -2375,13 +2601,15 @@ class PeopleUnionTests(unittest.TestCase):
         )
         previous = {key: app.config.get(key) for key in keys}
         try:
-            app.config.update({
-                "DISCORD_CLIENT_ID": "",
-                "DISCORD_CLIENT_SECRET": "",
-                "DISCORD_GUILD_ID": "",
-                "DISCORD_SUPPORT_ROLE_IDS": set(),
-                "LOGSCAN_SECRET_KEY": "",
-            })
+            app.config.update(
+                {
+                    "DISCORD_CLIENT_ID": "",
+                    "DISCORD_CLIENT_SECRET": "",
+                    "DISCORD_GUILD_ID": "",
+                    "DISCORD_SUPPORT_ROLE_IDS": set(),
+                    "LOGSCAN_SECRET_KEY": "",
+                }
+            )
             response = self.client.get("/support/logs")
         finally:
             app.config.update(previous)

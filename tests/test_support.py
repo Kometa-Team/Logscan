@@ -96,7 +96,7 @@ class SupportConsoleTests(unittest.TestCase):
 
         self.assertGreaterEqual(ANALYSIS_VERSION, 4)
         self.assertIn('if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION', source)
-        self.assertIn("scan_archive_path(record.get(\"filename\") or \"kometa.log\", path)", source)
+        self.assertIn('scan_archive_path(record.get("filename") or "kometa.log", path)', source)
         self.assertIn("backfill_scan_analysis()", source)
         self.assertIn("backfill_schema_validation_counts()", source)
         self.assertIn('name="retained-scan-migration"', source)
@@ -353,7 +353,6 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertNotIn(self.delete_token, body)
         self.assertNotIn("delete_token_hash", body)
 
-
     def test_inventory_displays_all_log_counts_separately_from_findings(self):
         self.authorize_session()
         counts = {"critical": 12, "error": 34, "warning": 56, "info": 7890, "debug": 1234, "trace": 0}
@@ -364,7 +363,7 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn('aria-label="Log entry counts"', body)
         for level, count in counts.items():
             self.assertIn(f'aria-label="{level.title()} log entries: {count:,}"', body)
-        self.assertLess(body.index('>Findings</a>'), body.index('>Log counts</a>'))
+        self.assertLess(body.index(">Findings</a>"), body.index(">Log counts</a>"))
 
     def test_inventory_does_not_present_missing_log_counts_as_zero(self):
         self.authorize_session()
@@ -380,9 +379,11 @@ class SupportConsoleTests(unittest.TestCase):
         self.authorize_session()
         self.store.update_metadata(self.scan_id, log_counts={"error": 3})
         result = SimpleNamespace(
-            filename="many-entries.log", recommendations=[],
+            filename="many-entries.log",
+            recommendations=[],
             metadata={"log_counts": {"info": 100}},
-            overview={"uploaded_by_id": "42"}, categories=[],
+            overview={"uploaded_by_id": "42"},
+            categories=[],
         )
         self.store.create(result.filename, b"log", result)
         descending = self.client.get("/support/logs?sort=log_counts&direction=desc").get_data(as_text=True)
@@ -485,10 +486,11 @@ class SupportConsoleTests(unittest.TestCase):
         body = self.client.get("/support/logs?view=all").get_data(as_text=True)
 
         self.assertIn('<span class="severity-chip advice" title="Advice: 1">1</span>', body)
+
     @patch("logscan_web.support.urlopen")
     def test_discord_requests_send_explicit_user_agent(self, mocked_urlopen):
         response = mocked_urlopen.return_value.__enter__.return_value
-        response.read.return_value = b'{}'
+        response.read.return_value = b"{}"
         _discord_request("/users/@me", headers={"Authorization": "Bearer token"})
         sent_request = mocked_urlopen.call_args.args[0]
         self.assertEqual(sent_request.get_header("User-agent"), DISCORD_USER_AGENT)
@@ -543,7 +545,7 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn("severity == 'schema' or row.counts[severity]", template)
         self.assertIn('class="support-severities" aria-label="Finding counts"', template)
         self.assertIn('title="{{ severity|title }}: {{ row.counts[severity] }}"', template)
-        self.assertNotIn("{% if row.counts[severity] %}<span class=\"severity-chip", template)
+        self.assertNotIn('{% if row.counts[severity] %}<span class="severity-chip', template)
         self.assertIn("row.schema_count_available", template)
         self.assertIn("Unavailable", template)
         self.assertIn("Expires in", template)
@@ -638,6 +640,7 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertEqual(response.get_json()["deleted"], 2)
         self.assertIsNone(self.store.get(self.scan_id))
         self.assertIsNone(self.store.get(unowned_id))
+
     def test_support_member_can_delete_log_without_exposing_token(self):
         unauthorized = self.client.post(f"/support/logs/{self.scan_id}/delete")
         self.assertEqual(unauthorized.status_code, 302)
@@ -650,6 +653,7 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertEqual(response.location, "/support/logs?view=mine")
         self.assertIsNone(self.store.get(self.scan_id))
         self.assertIn("user_id=42", "\n".join(captured.output))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,6 @@ import re
 from ..models import Finding, ScanContext
 from ..recommendations import RecommendationRule as RuleDefinition
 
-
 EVIDENCE_LIMIT = 10_000
 _LINE_BREAKS = re.compile(r"\r\n|\r|\n")
 _BYTE_LINE_BREAKS = re.compile(rb"\r\n|\r|\n")
@@ -47,16 +46,12 @@ def _is_word_character(content, position: int) -> bool:
         start = position
         while start > max(0, position - 3) and content[start] & 0xC0 == 0x80:
             start -= 1
-        value = content[start:start + 4].decode("utf-8", errors="replace")[0]
+        value = content[start : start + 4].decode("utf-8", errors="replace")[0]
     return value.isalnum() or value == "_"
 
 
 def _has_word_match(pattern, content, start: int, end: int) -> bool:
-    return any(
-        not _is_word_character(content, match.start() - 1)
-        and not _is_word_character(content, match.end())
-        for match in pattern.finditer(content, start, end)
-    )
+    return any(not _is_word_character(content, match.start() - 1) and not _is_word_character(content, match.end()) for match in pattern.finditer(content, start, end))
 
 
 def findings_from_lines(definition: RuleDefinition, numbers: Iterable[int]) -> list[Finding]:
@@ -73,11 +68,18 @@ def findings_from_lines(definition: RuleDefinition, numbers: Iterable[int]) -> l
             evidence.append(number)
     if not count:
         return []
-    return [Finding(
-        definition.id, definition.category, definition.title, definition.description,
-        definition.solution, tuple(evidence), occurrence_count=count,
-        evidence_truncated=count > len(evidence),
-    )]
+    return [
+        Finding(
+            definition.id,
+            definition.category,
+            definition.title,
+            definition.description,
+            definition.solution,
+            tuple(evidence),
+            occurrence_count=count,
+            evidence_truncated=count > len(evidence),
+        )
+    ]
 
 
 @dataclass(frozen=True)

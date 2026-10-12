@@ -245,18 +245,40 @@ It adds per-detector counts and truncation flags to stored results, preserves
 existing schema metadata, and leaves raw log-level counts and findings totals
 separate. Quickstart's scanner and analytics are unchanged.
 
-## Tests
+## Development Checks
 
-Run the regression suite from the repository root:
+Install the application dependencies and development tools from the repository
+root (Python 3.13):
 
 ```powershell
-py -3.13 -m unittest discover -s tests -v
+py -3.13 -m pip install -r requirements.txt -r requirements-dev.txt
+py -3.13 -m pre_commit install
 ```
 
-On Linux or macOS, use `python -m unittest discover -s tests -v` from the
-activated Python 3.13 virtual environment.
+Run the same checks used by CI:
 
-Run the occurrence rendering regressions with `node --test tests/test_occurrence_ui.cjs`.
+```powershell
+py -3.13 -m pre_commit run --all-files
+py -3.13 -m pytest
+node --test tests/test_occurrence_ui.cjs
+```
+
+On Linux or macOS, replace `py -3.13` with `python` from an activated Python 3.13
+virtual environment. JavaScript tests require Node.js 22 or newer.
+
+Pre-commit checks YAML and JSON syntax, merge conflicts, filename case conflicts,
+whitespace, and requirements ordering, then runs Ruff and Black. Ruff uses the
+initial Quickstart rule set (`E4`, `E7`, `E9`, `F`); Black and Ruff share a
+180-character line length. Hooks can fix files; review their changes before
+committing. Run either Python check separately with:
+
+```powershell
+py -3.13 -m ruff check .
+py -3.13 -m black --check .
+```
+
+CI runs these file checks and both regression suites on pull requests and pushes
+to `main`. Dependabot checks Python dependencies and GitHub Actions daily.
 
 ## Included files
 

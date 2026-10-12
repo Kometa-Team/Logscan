@@ -15,7 +15,6 @@ from logscan_web.rules.kometa import PlexSecurityRule
 from logscan_web.scanner import scan_archive_path, scan_log
 from logscan_web.storage import ScanStore
 
-
 HEADER = "[kometa.py:1] [INFO] | Version: 2.2.2 |\n"
 
 
@@ -65,8 +64,7 @@ class DetectorOccurrenceTests(unittest.TestCase):
 
     def test_same_line_match_after_more_than_evidence_cap_partial_anchors(self):
         for result in self.scans(
-            "Config Error: Operation mass_genre_update\n" * (EVIDENCE_LIMIT + 5)
-            + "Config Error: Operation mass_genre_update without a successful service\n" * 2
+            "Config Error: Operation mass_genre_update\n" * (EVIDENCE_LIMIT + 5) + "Config Error: Operation mass_genre_update without a successful service\n" * 2
         ):
             finding = self.finding(result, "mass_update")
             self.assertEqual(finding["occurrence_count"], 2)
@@ -74,18 +72,13 @@ class DetectorOccurrenceTests(unittest.TestCase):
             self.assertFalse(finding["evidence_truncated"])
 
     def test_word_boundaries_and_mixed_case_match_in_both_scans(self):
-        for result in self.scans(
-            "database_cache: false\ncache: false_suffix\n\u00e9cache: false\ncache: false\u00e9\n"
-            "(cAcHe: FaLsE) cAcHe: FaLsE\ncache: false\n"
-        ):
+        for result in self.scans("database_cache: false\ncache: false_suffix\n\u00e9cache: false\ncache: false\u00e9\n" "(cAcHe: FaLsE) cAcHe: FaLsE\ncache: false\n"):
             finding = self.finding(result, "cache_disabled")
             self.assertEqual(finding["occurrence_count"], 2)
             self.assertEqual(finding["evidence_lines"], [6, 7])
 
     def test_occurrences_continue_after_evidence_cap_and_keep_parity(self):
-        normal, streamed = self.scans(
-            "[kometa.py:2] [ERROR] | TMDb Error: Invalid API key; TMDb Error: Invalid API key |\n" * (EVIDENCE_LIMIT + 5)
-        )
+        normal, streamed = self.scans("[kometa.py:2] [ERROR] | TMDb Error: Invalid API key; TMDb Error: Invalid API key |\n" * (EVIDENCE_LIMIT + 5))
         for identifier in ("tmdb_key", "kometa_error"):
             regular = self.finding(normal, identifier)
             self.assertEqual(regular, self.finding(streamed, identifier))
@@ -97,16 +90,17 @@ class DetectorOccurrenceTests(unittest.TestCase):
 
     def test_exact_cap_is_not_truncated(self):
         rule = TextRule(RecommendationRule("test", "error", "Test", "Test", "Test"), any_of=("failure",))
-        for evaluate in (lambda: rule.evaluate(ScanContext.from_content("test.log", "failure\n" * EVIDENCE_LIMIT)),
-                         lambda: evaluate_text_rules_bytes([rule], b"failure\n" * EVIDENCE_LIMIT)):
+        for evaluate in (
+            lambda: rule.evaluate(ScanContext.from_content("test.log", "failure\n" * EVIDENCE_LIMIT)),
+            lambda: evaluate_text_rules_bytes([rule], b"failure\n" * EVIDENCE_LIMIT),
+        ):
             finding = evaluate()[0]
             self.assertEqual(finding.occurrence_count, EVIDENCE_LIMIT)
             self.assertFalse(finding.evidence_truncated)
 
     def test_complete_combined_predicate_and_log_wide_prerequisites(self):
         definition = RecommendationRule("test", "error", "Test", "Test", "Test")
-        rule = TextRule(definition, any_of=("problem",), word_bounded_any_of=("cache", "cache: false"),
-                        all_of=("enabled", "confirmed"), all_on_same_line=("alpha", "beta"))
+        rule = TextRule(definition, any_of=("problem",), word_bounded_any_of=("cache", "cache: false"), all_of=("enabled", "confirmed"), all_on_same_line=("alpha", "beta"))
         text = "enabled\nconfirmed\nproblem alpha\ncache beta\nproblem alpha beta cache: false_suffix\n"
         for findings in (rule.evaluate(ScanContext.from_content("test.log", text)), evaluate_text_rules_bytes([rule], text.encode())):
             self.assertEqual(findings[0].occurrence_count, 1)
@@ -151,8 +145,7 @@ class DetectorOccurrenceTests(unittest.TestCase):
 
     def test_custom_detector_applies_version_range_and_evidence_cap(self):
         rule = PlexSecurityRule(RecommendationRule("test", "critical", "Test", "Test", "Test"))
-        text = ("Connected to server Safe version 1.43.0.10000\n"
-                + "cOnNeCtEd to server Vulnerable version 1.41.8.10000\n" * (EVIDENCE_LIMIT + 5))
+        text = "Connected to server Safe version 1.43.0.10000\n" + "cOnNeCtEd to server Vulnerable version 1.41.8.10000\n" * (EVIDENCE_LIMIT + 5)
         normal = rule.evaluate(ScanContext.from_content("test.log", text))[0]
         streamed = rule.evaluate_bytes(text.encode())[0]
         self.assertEqual(normal, streamed)
@@ -179,6 +172,7 @@ class DetectorOccurrenceTests(unittest.TestCase):
 
     def test_stored_results_and_older_records_without_fields(self):
         from logscan_web.app import ANALYSIS_VERSION, app
+
         content = (HEADER + "[kometa.py:2] [ERROR] | TMDb Error: Invalid API key |\n" * (EVIDENCE_LIMIT + 5)).encode()
         result = scan_log("meta.log", content)
         result.metadata.update(analysis_version=ANALYSIS_VERSION, schema_validation_count=0)
@@ -203,15 +197,21 @@ class DetectorOccurrenceTests(unittest.TestCase):
 
     def test_startup_backfill_preserves_retained_record_identity_and_metadata(self):
         from logscan_web.app import ANALYSIS_VERSION, SCHEMA_VALIDATION_VERSION, create_app
+
         self.assertEqual(ANALYSIS_VERSION, 6)
         content = (HEADER + "[kometa.py:2] [ERROR] | TMDb Error: Invalid API key |\n" * 3).encode()
         result = scan_log("meta.log", content)
         for item in result.recommendations:
             item.pop("occurrence_count", None)
             item.pop("evidence_truncated", None)
-        schema = {"schema_validation_count": 0, "schema_validation_version": SCHEMA_VALIDATION_VERSION,
-                  "schema_validation_checked_at": datetime.now(UTC).isoformat(), "schema_validation_failures": [],
-                  "schema_validation_branch": "develop", "schema_directive_missing": True}
+        schema = {
+            "schema_validation_count": 0,
+            "schema_validation_version": SCHEMA_VALIDATION_VERSION,
+            "schema_validation_checked_at": datetime.now(UTC).isoformat(),
+            "schema_validation_failures": [],
+            "schema_validation_branch": "develop",
+            "schema_directive_missing": True,
+        }
         result.metadata.update(analysis_version=5, **schema)
         attribution = {"upload_source": "discord", "uploaded_by": "Tester", "uploaded_by_id": "42", "message_url": "https://example.test/message"}
         result.overview.update(attribution)
