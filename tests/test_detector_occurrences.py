@@ -248,6 +248,15 @@ class DetectorOccurrenceTests(unittest.TestCase):
             integrity_finding = next(item for item in after["recommendations"] if item["id"] == "source_integrity_modified")
             self.assertIn("modules/logs.py", integrity_finding["message"])
             self.assertEqual(integrity_finding["evidence_lines"], after["metadata"]["kometa_integrity"]["evidence_lines"])
+            app.config.update(
+                TESTING=True,
+                DISCORD_CLIENT_ID="test-client",
+                DISCORD_CLIENT_SECRET="test-secret",
+                DISCORD_GUILD_ID="test-guild",
+                DISCORD_SUPPORT_ROLE_IDS={"test-role"},
+                LOGSCAN_SECRET_KEY="test-secret",
+                DISCORD_BOT_TOKEN="",
+            )
             client = app.test_client()
             with client.session_transaction() as account:
                 account["support_authorized_at"] = 9999999999
