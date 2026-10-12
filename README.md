@@ -215,6 +215,21 @@ The support console displays the same six levels in a separate **Log counts**
 column beside **Findings**, sortable by total tagged entries. Counts unavailable
 before backfill are shown as unavailable rather than zero.
 
+Entry-backed findings additionally report `occurrence_count`: the number of
+distinct log lines satisfying that detector's complete predicate. Multiple
+keywords on the same line count once. Word boundaries, case-insensitive matches,
+and same-line requirements are applied before counting. `all_of` remains a
+log-wide prerequisite; qualifying lines are counted only after it is satisfied.
+Detectors can overlap, so their occurrences are never summed into total errors
+or findings counts. Contextual advice without a matching-entry count reports
+`occurrence_count: null`.
+
+Normal and streaming scans count the entire log. Evidence retains the first
+10,000 matching lines while counting continues; `evidence_truncated` is true
+when further evidence was omitted. Results show the count beside each applicable
+finding and explain truncation, such as "10,005 occurrences; showing the first
+10,000 matching entries." Older records without these fields remain viewable.
+
 Large-file text rules match arbitrary mixed case, just like the normal scanner,
 without lowercasing or decoding the entire log into memory.
 
@@ -224,10 +239,11 @@ level are displayed separately. A completed validation command can have a
 failed outcome; a report without a terminal result remains incomplete. No
 normal runtime footer is required, and no runtime is fabricated.
 
-Analysis version 5 reprocesses retained scans through the existing startup
+Analysis version 6 reprocesses retained scans through the existing startup
 backfill, preserving scan IDs, source logs, deletion tokens and upload attribution.
-All six log-level counts are already stored in version-5 results, so displaying
-them requires no further analysis-version bump or rescan.
+It adds per-detector counts and truncation flags to stored results, preserves
+existing schema metadata, and leaves raw log-level counts and findings totals
+separate. Quickstart's scanner and analytics are unchanged.
 
 ## Tests
 
@@ -239,6 +255,8 @@ py -3.13 -m unittest discover -s tests -v
 
 On Linux or macOS, use `python -m unittest discover -s tests -v` from the
 activated Python 3.13 virtual environment.
+
+Run the occurrence rendering regressions with `node --test tests/test_occurrence_ui.cjs`.
 
 ## Included files
 

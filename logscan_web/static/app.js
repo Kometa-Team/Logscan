@@ -471,9 +471,26 @@ function formatLineRanges(lineNumbers) {
   return ranges.join(", ");
 }
 
-function recommendationBody(message, evidenceLines = [], configLine = 0) {
+function occurrenceSummary(finding) {
+  const count = finding?.occurrence_count;
+  return Number.isSafeInteger(count) && count >= 0
+    ? `${count.toLocaleString()} occurrence${count === 1 ? "" : "s"}`
+    : null;
+}
+
+function recommendationBody(message, evidenceLines = [], configLine = 0, finding = null) {
   const body = document.createElement("div");
   body.className = "recommendation-body";
+  const occurrenceText = occurrenceSummary(finding);
+  if (occurrenceText) {
+    const row = document.createElement("div");
+    row.className = "recommendation-meta occurrence-evidence-summary";
+    const shown = evidenceLines.length;
+    row.textContent = finding.evidence_truncated
+      ? `${occurrenceText}; showing the first ${shown.toLocaleString()} matching entr${shown === 1 ? "y" : "ies"}.`
+      : occurrenceText;
+    body.append(row);
+  }
   const hasEmbeddedEvidence = /Line number\(s\):/i.test(message);
   const lines = message.split("\n").slice(1);
   lines.forEach((line) => {
@@ -959,7 +976,7 @@ function openRecommendationDialog(items) {
       title.textContent = recommendation.title;
       content.append(title);
     }
-    content.append(recommendationBody(recommendation.message, recommendation.evidence_lines));
+    content.append(recommendationBody(recommendation.message, recommendation.evidence_lines, 0, recommendation));
   });
   document.querySelector("#recommendation-dialog").showModal();
 }
@@ -1144,12 +1161,22 @@ function showGroup(group, recommendations) {
     const dot = document.createElement("span");
     dot.className = "severity-dot";
     const titleText = document.createElement("span");
+    titleText.className = "recommendation-title";
     titleText.textContent = item.title;
     const chevron = document.createElement("span");
     chevron.className = "chevron";
     chevron.textContent = "›";
-    summary.append(dot, titleText, chevron);
-    const body = recommendationBody(item.message, item.evidence_lines, item.config_line);
+    summary.append(dot, titleText);
+    const occurrenceText = occurrenceSummary(item);
+    if (occurrenceText) {
+      const count = document.createElement("span");
+      count.className = "recommendation-occurrences";
+      count.textContent = occurrenceText;
+      count.title = "Distinct log entries matching this detector. Detectors can overlap.";
+      summary.append(count);
+    }
+    summary.append(chevron);
+    const body = recommendationBody(item.message, item.evidence_lines, item.config_line, item);
     details.append(summary, body);
     list.append(details);
   });

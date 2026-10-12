@@ -192,7 +192,7 @@ def _stored_log_lines(path: Path, index: dict, start: int, count: int) -> list[s
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
-ANALYSIS_VERSION = 5
+ANALYSIS_VERSION = 6
 SCHEMA_VALIDATION_VERSION = 7
 POPULAR_PEOPLE_PAGE_SIZE = 25
 TMDB_POPULAR_PAGE_SIZE = 20
@@ -1043,6 +1043,7 @@ def create_app() -> Flask:
                 "archive_compressed_size", "archive_uncompressed_size", "archive_compression_ratio",
                 "archive_reduction_percent", "schema_validation_count", "schema_validation_branch",
                 "schema_directive_missing",
+                "schema_validation_failures", "schema_validation_version", "schema_validation_checked_at",
             ):
                 if key in previous_metadata:
                     result.metadata[key] = previous_metadata[key]

@@ -60,6 +60,8 @@ class Finding:
     solution: str = "Review the referenced log entries and update the affected configuration."
     evidence_lines: tuple[int, ...] = field(default_factory=tuple)
     details: str = ""
+    occurrence_count: int | None = None
+    evidence_truncated: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -69,5 +71,7 @@ class Finding:
             "description": self.description,
             "solution": self.solution,
             "evidence_lines": list(self.evidence_lines),
+            "occurrence_count": self.occurrence_count,
+            "evidence_truncated": self.evidence_truncated,
             "message": self.details or f"**{self.title}**\nIssue: {self.description}\n\nProposed solution: {self.solution}",
         }
