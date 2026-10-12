@@ -14,9 +14,20 @@ function formatDuration(seconds) {
   return days ? `${days}d ${hours}h` : `${hours}h`;
 }
 
+function renderMetrics(selector, items) {
+  const target = document.querySelector(selector);
+  items.forEach(([label, value]) => {
+    const item = document.createElement("div");
+    const heading = document.createElement("span"); heading.textContent = label;
+    const total = document.createElement("strong"); total.textContent = value;
+    item.append(heading, total); target.append(item);
+  });
+}
+
 function renderSummary(totals) {
-  const items = [
+  renderMetrics("#analytics-summary", [
     ["Logs processed", number.format(totals.successful_logs)],
+    ["Duplicates reused", number.format(totals.duplicates_reused || 0)],
     ["Lines processed", number.format(totals.lines_processed)],
     ["Data processed", formatBytes(totals.bytes_processed)],
     ["Batch uploads", number.format(totals.batches)],
@@ -24,14 +35,18 @@ function renderSummary(totals) {
     ["People addressed", number.format(totals.people_addressed)],
     ["Average time to address", formatDuration(totals.average_address_seconds)],
     ["Rejected uploads", number.format(Object.values(totals.rejections).reduce((sum, value) => sum + value, 0))],
-  ];
-  const target = document.querySelector("#analytics-summary");
-  items.forEach(([label, value]) => {
-    const item = document.createElement("div");
-    const heading = document.createElement("span"); heading.textContent = label;
-    const total = document.createElement("strong"); total.textContent = value;
-    item.append(heading, total); target.append(item);
-  });
+  ]);
+  const seconds = totals.imagemaid_runtime_seconds || 0;
+  renderMetrics("#analytics-imagemaid-summary", [
+    ["Files removed", number.format(totals.imagemaid_files_removed || 0)],
+    ["Space recovered", formatBytes(totals.imagemaid_bytes_recovered || 0)],
+    ["Completed runs", number.format(totals.imagemaid_completed_runs || 0)],
+    ["Cleanup reports", number.format(totals.imagemaid_cleanup_reports || 0)],
+    ["Total runtime", `${number.format(Math.floor(seconds / 3600))}h ${Math.floor(seconds % 3600 / 60)}m ${seconds % 60}s`],
+  ]);
+  for (const tool of ["kometa", "imagemaid"]) {
+    document.querySelector(`#analytics-${tool}-total`).textContent = `${number.format(totals.tools?.[tool] || 0)} logs`;
+  }
 }
 
 function renderBars(selector, values, empty = "No activity yet") {
@@ -42,6 +57,10 @@ function renderBars(selector, values, empty = "No activity yet") {
   entries.slice(0, 12).forEach(([label, value]) => {
     const row = document.createElement("div"); row.className = "metric-bar";
     const name = document.createElement("span"); name.textContent = label.replaceAll("_", " ");
+    if (selector === "#analytics-tools" && ["kometa", "imagemaid"].includes(label)) {
+      const icon = document.createElement("img"); icon.src = `/static/${label}.png`; icon.alt = ""; icon.className = "tool-icon";
+      name.textContent = label === "imagemaid" ? "ImageMaid" : "Kometa"; name.prepend(icon);
+    }
     const count = document.createElement("strong"); count.textContent = number.format(value);
     const track = document.createElement("i");
     const fill = document.createElement("b"); fill.style.width = `${Math.max(3, value / maximum * 100)}%`;
@@ -65,13 +84,34 @@ function renderDays(days) {
   });
 }
 
+function renderCleanupDays(days) {
+  const target = document.querySelector("#analytics-imagemaid-days");
+  const entries = Object.entries(days).filter(([, values]) => values.tools?.imagemaid).sort(([left], [right]) => right.localeCompare(left)).slice(0, 30);
+  if (!entries.length) {
+    const row = document.createElement("tr"); const cell = document.createElement("td");
+    cell.colSpan = 5; cell.textContent = "No ImageMaid activity yet"; row.append(cell); target.append(row); return;
+  }
+  entries.forEach(([date, values]) => {
+    const row = document.createElement("tr");
+    [date, number.format(values.tools.imagemaid), number.format(values.imagemaid_completed_runs || 0), number.format(values.imagemaid_files_removed || 0), formatBytes(values.imagemaid_bytes_recovered || 0)].forEach((value) => {
+      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    });
+    target.append(row);
+  });
+}
+
 fetch("/api/analytics").then((response) => {
   if (!response.ok) throw new Error("Analytics could not be loaded.");
   return response.json();
 }).then(({ started_at: startedAt, totals, days }) => {
-  renderSummary(totals); renderDays(days);
+  renderSummary(totals); renderDays(days); renderCleanupDays(days);
   document.querySelector("#analytics-since").textContent = `Tracking since ${new Date(startedAt).toLocaleDateString()}`;
   renderBars("#analytics-sources", totals.sources);
+  renderBars("#analytics-tools", totals.tools);
+  renderBars("#analytics-imagemaid-versions", totals.imagemaid_versions);
+  renderBars("#analytics-imagemaid-modes", totals.imagemaid_modes);
+  renderBars("#analytics-imagemaid-platforms", totals.imagemaid_platforms);
+  renderBars("#analytics-imagemaid-branches", totals.imagemaid_branches);
   renderBars("#analytics-versions", totals.kometa_versions);
   renderBars("#analytics-kometa-branches", totals.kometa_branches);
   renderBars("#analytics-kometa-platforms", totals.kometa_platforms);

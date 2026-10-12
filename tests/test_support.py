@@ -542,14 +542,14 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn(".site-header-wide, .support-shell { width: calc(100% - 40px); max-width: none; }", css)
         self.assertNotIn("width: min(1600px, calc(100% - 40px))", css)
         self.assertIn("{% set wide_header = true %}", template)
-        self.assertIn("severity == 'schema' or row.counts[severity]", template)
+        self.assertIn("severity == 'schema' and row.tool_name == 'kometa'", template)
         self.assertIn('class="support-severities" aria-label="Finding counts"', template)
         self.assertIn('title="{{ severity|title }}: {{ row.counts[severity] }}"', template)
         self.assertNotIn('{% if row.counts[severity] %}<span class="severity-chip', template)
         self.assertIn("row.schema_count_available", template)
         self.assertIn("Unavailable", template)
         self.assertIn("Expires in", template)
-        self.assertIn("Kometa / Environment", template)
+        self.assertIn("Tool / Environment", template)
         self.assertNotIn("sort_link('updated_at','Updated')", template)
         header = Path("logscan_web/templates/_site_header.html").read_text(encoding="utf-8")
         self.assertIn("site-header-wide", header)
@@ -653,6 +653,23 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertEqual(response.location, "/support/logs?view=mine")
         self.assertIsNone(self.store.get(self.scan_id))
         self.assertIn("user_id=42", "\n".join(captured.output))
+
+    def test_support_member_my_uploads_deletion_keeps_other_owners(self):
+        result = SimpleNamespace(filename="shared.log", recommendations=[], metadata={}, overview={"uploaded_by_id": "99"}, categories=[])
+        reused_id, _token, reused = self.store.create_or_reuse("shared.log", b"log", result, 172800)
+        self.assertTrue(reused)
+        self.assertEqual(reused_id, self.scan_id)
+        self.authorize_session()
+        response = self.client.post(f"/support/logs/{self.scan_id}/delete?view=mine")
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(self.store.owns(self.store.get(self.scan_id), "42"))
+        self.assertTrue(self.store.owns(self.store.get(self.scan_id), "99"))
+        result.overview["uploaded_by_id"] = "42"
+        self.store.create_or_reuse("shared.log", b"log", result, 172800)
+        response = self.client.post("/support/logs/delete-selected", json={"scan_ids": [self.scan_id], "view": "mine"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.store.owns(self.store.get(self.scan_id), "42"))
+        self.assertTrue(self.store.owns(self.store.get(self.scan_id), "99"))
 
 
 if __name__ == "__main__":

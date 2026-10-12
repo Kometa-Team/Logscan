@@ -197,6 +197,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
     def logs():
         query = request.args.get("q", "").strip()
         source_filter = request.args.get("source", "all").casefold()
+        tool_filter = request.args.get("tool", "all").casefold()
         launcher_filter = request.args.get("launcher", "all").casefold()
         branch_filter = request.args.get("branch", "all").casefold()
         severity_filter = request.args.get("severity", "all").casefold()
@@ -216,9 +217,17 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         is_support_console = view_mode == "all"
         records = store.list()
         if not is_support_console:
-            records = [record for record in records if str((record.get("overview") or {}).get("uploaded_by_id") or "") == str(user["id"])]
+            records = [record for record in records if store.owns(record, user["id"])]
+            for record in records:
+                upload = next(upload for upload in store._uploads(record) if str(upload.get("uploaded_by_id") or "") == str(user["id"]))
+                record["overview"] = {**(record.get("overview") or {}), **{key: upload.get(key) for key in ("uploaded_by", "uploaded_by_id", "upload_source", "message_url")}}
         rows = [_support_row(record, retention_seconds, now) for record in records]
         total_logs = len(rows)
+        tool_counts = {tool: sum(row["tool_name"] == tool for row in rows) for tool in ("kometa", "imagemaid")}
+        if tool_filter in tool_counts:
+            rows = [row for row in rows if row["tool_name"] == tool_filter]
+        else:
+            tool_filter = "all"
         query_key = query.casefold()
         if query_key:
             rows = [row for row in rows if query_key in row["search_text"]]
@@ -273,6 +282,8 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             page_size="all" if page_size is None else page_size,
             query=query,
             source_filter=source_filter,
+            tool_filter=tool_filter,
+            tool_counts=tool_counts,
             launcher_filter=launcher_filter,
             branch_filter=branch_filter,
             severity_filter=severity_filter,
@@ -297,15 +308,16 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
 
         user = discord_session_user()
         support_access = support_session_authorized()
+        force_delete = support_access and payload.get("view") != "mine"
         records = []
         for scan_id in scan_ids:
             record = store.get(scan_id)
-            owns_log = str(((record or {}).get("overview") or {}).get("uploaded_by_id") or "") == str(user["id"])
-            if record is None or (not support_access and not owns_log):
+            owns_log = store.owns(record, user["id"])
+            if record is None or (not force_delete and not owns_log):
                 abort(404)
             records.append((scan_id, record))
 
-        deleted = sum(store.delete_authorized(scan_id) for scan_id, _record in records)
+        deleted = sum(store.delete_authorized(scan_id) if force_delete else store.delete_for_owner(scan_id, user["id"]) for scan_id, _record in records)
         current_app.logger.warning(
             "Stored logs bulk deleted: requested=%d deleted=%d user_id=%s support_access=%s",
             len(scan_ids),
@@ -320,10 +332,12 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
     def delete_log(scan_id):
         user = discord_session_user()
         record = store.get(scan_id)
-        owns_log = str(((record or {}).get("overview") or {}).get("uploaded_by_id") or "") == str(user["id"])
-        if not support_session_authorized() and not owns_log:
+        owns_log = store.owns(record, user["id"])
+        support_access = support_session_authorized()
+        force_delete = support_access and request.args.get("view") != "mine"
+        if not force_delete and not owns_log:
             abort(404)
-        if not store.delete_authorized(scan_id):
+        if not (store.delete_authorized(scan_id) if force_delete else store.delete_for_owner(scan_id, user["id"])):
             abort(404)
         current_app.logger.warning(
             "Stored log deleted: scan_id=%s user_id=%s",
@@ -411,6 +425,8 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     source = overview.get("upload_source") or ("discord" if overview.get("message_url") else "web")
     filename = record.get("filename") or "Untitled log"
     row = {
+        "tool_name": metadata.get("tool_name", "kometa"),
+        "tool_label": "ImageMaid" if metadata.get("tool_name") == "imagemaid" else "Kometa",
         "id": record.get("id", ""),
         "filename": filename,
         "uploader": uploader,
@@ -431,8 +447,8 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         "counts": counts,
         "log_counts": log_counts,
         "log_entry_count": sum(log_counts.values()) if log_counts is not None else None,
-        "kometa_version": metadata.get("kometa_version") or "Unknown",
-        "kometa_branch": _kometa_branch(metadata),
+        "kometa_version": (metadata.get("imagemaid_version") if metadata.get("tool_name") == "imagemaid" else metadata.get("kometa_version")) or "Unknown",
+        "kometa_branch": metadata.get("imagemaid_mode") or "unknown" if metadata.get("tool_name") == "imagemaid" else _kometa_branch(metadata),
         "platform": metadata.get("runtime_platform") or "Unknown",
         "installation": metadata.get("installation_method") or "Unknown",
         "quickstart_run": bool(metadata.get("quickstart_run")),
@@ -445,6 +461,7 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         str(row[key])
         for key in (
             "filename",
+            "tool_label",
             "uploader",
             "uploader_id",
             "id",
