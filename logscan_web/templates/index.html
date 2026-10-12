@@ -32,10 +32,10 @@
         <div><dt>Missing people images identified</dt><dd>{{ "{:,}".format(usage_stats.people_submitted) }}</dd></div>
         <div><dt>Missing people images resolved</dt><dd>{{ "{:,}".format(usage_stats.people_addressed) }}</dd></div>
       </dl>
-      <div class="cleanup-heading"><img class="tool-icon" src="{{ url_for('static', filename='imagemaid.png') }}" alt=""><span>ImageMaid cleanup</span></div>
+      <div class="cleanup-heading"><img class="tool-icon" src="{{ url_for('static', filename='imagemaid.png') }}" alt=""><span>ImageMaid cleanup from Plex</span></div>
       <dl class="usage-stats cleanup-totals" aria-label="Cumulative ImageMaid cleanup">
         <div><dt>ImageMaid logs uploaded</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_logs_uploaded) }}</dd></div>
-        <div><dt>ImageMaid files removed</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_files_removed) }}</dd></div>
+        <div><dt>Plex image bloat files removed</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_files_removed) }}</dd></div>
         <div><dt>ImageMaid space recovered</dt><dd>{{ usage_stats.imagemaid_space_recovered }}</dd></div>
       </dl>
       <p class="usage-since">Tracking since {{ usage_stats.tracking_since }}</p>

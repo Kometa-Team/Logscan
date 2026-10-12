@@ -214,6 +214,7 @@ def test_bot_web_dedup_tool_analytics_and_private_grants(tmp_path, monkeypatch):
     assert 'aria-label="Cumulative ImageMaid cleanup"' in page and "1.5 MB" in page and "<dd>18</dd>" in page
     assert "<dt>Kometa logs uploaded</dt><dd>0</dd>" in page
     assert "<dt>ImageMaid logs uploaded</dt><dd>1</dd>" in page
+    assert "<dt>Plex image bloat files removed</dt><dd>18</dd>" in page
     assert page.index("Kometa logs processed") < page.index("ImageMaid cleanup")
     assert "Missing people images identified" in page and "Missing people images resolved" in page
     analytics_page = client.get("/analytics").get_data(as_text=True)
