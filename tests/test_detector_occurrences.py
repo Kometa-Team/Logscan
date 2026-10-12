@@ -198,9 +198,14 @@ class DetectorOccurrenceTests(unittest.TestCase):
     def test_startup_backfill_preserves_retained_record_identity_and_metadata(self):
         from logscan_web.app import ANALYSIS_VERSION, SCHEMA_VALIDATION_VERSION, create_app
 
-        self.assertEqual(ANALYSIS_VERSION, 7)
-        content = (HEADER + "[kometa.py:2] [ERROR] | TMDb Error: Invalid API key |\n" * 3).encode()
+        self.assertEqual(ANALYSIS_VERSION, 8)
+        native_integrity = (
+            "[integrity.py:674] [INFO] |     Source Integrity: MODIFIED |\n" "[integrity.py:674] [INFO] |     Modified: |\n" "[integrity.py:674] [INFO] |       modules/logs.py |\n"
+        )
+        content = (HEADER + native_integrity + "[kometa.py:2] [ERROR] | TMDb Error: Invalid API key |\n" * 3).encode()
         result = scan_log("meta.log", content)
+        result.recommendations[:] = [item for item in result.recommendations if not item["id"].startswith("source_integrity_")]
+        result.metadata["kometa_integrity"] = {"detected": False, "state": "not_reported"}
         for item in result.recommendations:
             item.pop("occurrence_count", None)
             item.pop("evidence_truncated", None)
@@ -212,7 +217,7 @@ class DetectorOccurrenceTests(unittest.TestCase):
             "schema_validation_branch": "develop",
             "schema_directive_missing": True,
         }
-        result.metadata.update(analysis_version=5, **schema)
+        result.metadata.update(analysis_version=7, **schema)
         attribution = {"upload_source": "discord", "uploaded_by": "Tester", "uploaded_by_id": "42", "message_url": "https://example.test/message"}
         result.overview.update(attribution)
         with tempfile.TemporaryDirectory() as directory:
@@ -231,6 +236,10 @@ class DetectorOccurrenceTests(unittest.TestCase):
             self.assertEqual({key: after["metadata"][key] for key in schema}, schema)
             self.assertEqual({key: after["overview"][key] for key in attribution}, attribution)
             self.assertEqual(next(item for item in after["recommendations"] if item["id"] == "tmdb_key")["occurrence_count"], 3)
+            self.assertEqual(after["metadata"]["kometa_integrity"]["modified"], ["modules/logs.py"])
+            integrity_finding = next(item for item in after["recommendations"] if item["id"] == "source_integrity_modified")
+            self.assertIn("modules/logs.py", integrity_finding["message"])
+            self.assertEqual(integrity_finding["evidence_lines"], after["metadata"]["kometa_integrity"]["evidence_lines"])
             self.assertTrue(store.delete(scan_id, token))
 
 

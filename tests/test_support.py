@@ -94,7 +94,7 @@ class SupportConsoleTests(unittest.TestCase):
 
         source = Path("logscan_web/app.py").read_text(encoding="utf-8")
 
-        self.assertGreaterEqual(ANALYSIS_VERSION, 4)
+        self.assertGreaterEqual(ANALYSIS_VERSION, 8)
         self.assertIn('if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION', source)
         self.assertIn('scan_archive_path(record.get("filename") or "kometa.log", path)', source)
         self.assertIn("backfill_scan_analysis()", source)

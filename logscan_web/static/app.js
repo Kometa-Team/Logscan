@@ -1393,8 +1393,10 @@ function addKometaIntegrity(section, integrity = {}) {
   const deviations = categories.some((key) => Number(counts[key]) > 0 || integrity[key]?.length);
   const failed = integrity.state === "check_failed" || integrity.errors?.length;
   const clean = integrity.state === "clean" && !deviations && !failed;
+  const native = integrity.source === "kometa";
   const labels = {
-    clean: "Clean", modified: "Deviations detected", check_failed: "Check failed",
+    clean: native ? "Verified" : "Clean", modified: "Deviations detected", check_failed: "Check failed",
+    check_unavailable: "Check unavailable", disabled: "Check disabled",
     not_verified: "Not verified", not_applicable: "Not applicable", not_reported: "Not reported",
     unknown: "Unknown result",
   };
@@ -1429,7 +1431,8 @@ function addKometaIntegrity(section, integrity = {}) {
     ["Integrity checked at", integrity.checked_at],
     ["Installed commit", integrity.commit],
     ...categories.map((key) => [key[0].toUpperCase() + key.slice(1), counts[key]]),
-    ["Report source", integrity.source === "config" ? "Configuration header" : integrity.source === "run" ? "Run marker" : null],
+    ["Report source", native ? (integrity.report_location === "summary" ? "Kometa startup-check summary" : "Kometa startup check")
+      : integrity.source === "config" ? "Configuration header" : integrity.source === "run" ? "Run marker" : null],
     ["Integrity log lines", integrity.evidence_lines?.length ? integrity.evidence_lines : null],
   ]);
   section.querySelector(".environment-details").append(...rows.children);

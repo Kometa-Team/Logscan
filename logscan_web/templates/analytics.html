@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-3') }}">
-  <script src="{{ url_for('static', filename='analytics.js', v='20261012-4') }}" defer></script>
+  <script src="{{ url_for('static', filename='analytics.js', v='20261012-5') }}" defer></script>
 </head>
 <body>
   {% set active_page = 'analytics' %}{% include '_site_header.html' %}
@@ -32,7 +32,7 @@
         <div id="analytics-imagemaid-summary" class="analytics-summary" aria-label="ImageMaid lifetime totals"></div>
       </div>
       <div class="analytics-breakdowns">{{ breakdown('Versions', 'imagemaid-versions') }}{{ breakdown('Modes', 'imagemaid-modes') }}{{ breakdown('Platforms', 'imagemaid-platforms') }}{{ breakdown('Branches', 'imagemaid-branches') }}</div>
-      <div class="analytics-section"><div class="section-heading"><h2>Daily cleanup</h2></div><div class="analytics-table-wrap"><table><thead><tr><th>Date</th><th>Logs</th><th>Completed runs</th><th>Plex image bloat files removed</th><th>Space recovered</th></tr></thead><tbody id="analytics-imagemaid-days"></tbody></table></div></div>
+      <div class="analytics-section"><div class="section-heading"><h2>Daily cleanup</h2></div><div class="analytics-table-wrap"><table><thead><tr><th>Date</th><th>Logs</th><th>Completed runs</th><th>Plex image bloat files removed</th><th>Plex image bloat space recovered</th></tr></thead><tbody id="analytics-imagemaid-days"></tbody></table></div></div>
     </details>
     <details class="analytics-group">
       <summary><span>{{ tool_icon('plex') }}Plex</span></summary>
