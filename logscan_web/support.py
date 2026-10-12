@@ -17,6 +17,17 @@ DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 DISCORD_USER_AGENT = "Kometa-Logscan/1.0 (+https://github.com/Kometa-Team/Logscan)"
 ACCOUNT_SESSION_SECONDS = 30 * 24 * 60 * 60
 SUPPORT_ROLE_FALLBACK_SECONDS = 8 * 60 * 60
+INTEGRITY_LABELS = {
+    "clean": "Verified / clean",
+    "modified": "Modified",
+    "check_unavailable": "Check unavailable",
+    "check_failed": "Check failed",
+    "not_verified": "Not verified",
+    "disabled": "Disabled",
+    "not_reported": "Not reported",
+    "not_applicable": "Not applicable",
+    "unknown": "Unknown result",
+}
 
 
 def discord_session_user() -> dict | None:
@@ -201,6 +212,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         launcher_filter = request.args.get("launcher", "all").casefold()
         branch_filter = request.args.get("branch", "all").casefold()
         severity_filter = request.args.get("severity", "all").casefold()
+        integrity_filter = request.args.get("integrity", "all").casefold()
         sort_key = request.args.get("sort", "created_at")
         direction = request.args.get("direction", "desc")
         page_size_value = request.args.get("page_size", "25").casefold()
@@ -247,6 +259,10 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             rows = [row for row in rows if row["counts"][severity_filter] > 0]
         elif severity_filter == "none":
             rows = [row for row in rows if row["finding_count"] == 0]
+        if integrity_filter in INTEGRITY_LABELS:
+            rows = [row for row in rows if row["integrity_state"] == integrity_filter]
+        else:
+            integrity_filter = "all"
 
         sorters = {
             "title": lambda row: row["filename"].casefold(),
@@ -287,6 +303,8 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             launcher_filter=launcher_filter,
             branch_filter=branch_filter,
             severity_filter=severity_filter,
+            integrity_filter=integrity_filter,
+            integrity_labels=INTEGRITY_LABELS,
             sort_key=sort_key,
             direction=direction,
             discord_user=user,
@@ -424,6 +442,20 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     uploader = overview.get("uploaded_by") or "Web upload"
     source = overview.get("upload_source") or ("discord" if overview.get("message_url") else "web")
     filename = record.get("filename") or "Untitled log"
+    integrity = metadata.get("kometa_integrity") or {}
+    integrity_state = integrity.get("state", "unknown") if integrity.get("detected") else "not_reported"
+    if metadata.get("tool_name", "kometa") != "kometa":
+        integrity_state = "not_applicable"
+    elif integrity.get("detected"):
+        if integrity.get("errors") or integrity_state == "check_failed":
+            integrity_state = "check_failed"
+        elif any((integrity.get("counts") or {}).get(key) or integrity.get(key) for key in ("modified", "missing", "added")):
+            integrity_state = "modified"
+    if integrity_state not in INTEGRITY_LABELS:
+        integrity_state = "unknown"
+    integrity_label = INTEGRITY_LABELS[integrity_state]
+    if integrity_state == "clean":
+        integrity_label = "Verified" if integrity.get("source") == "kometa" else "Clean"
     row = {
         "tool_name": metadata.get("tool_name", "kometa"),
         "tool_label": "ImageMaid" if metadata.get("tool_name") == "imagemaid" else "Kometa",
@@ -454,6 +486,8 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         "quickstart_run": bool(metadata.get("quickstart_run")),
         "quickstart_version": metadata.get("quickstart_version"),
         "quickstart_branch": metadata.get("quickstart_branch") or "unknown",
+        "integrity_state": integrity_state,
+        "integrity_label": integrity_label,
         "complete": bool(metadata.get("complete")),
         "message_url": overview.get("message_url"),
     }

@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -12,7 +13,7 @@ from urllib.error import URLError
 from flask import Flask
 
 from logscan_web.storage import ScanStore
-from logscan_web.support import DISCORD_USER_AGENT, _discord_request, create_support_blueprint
+from logscan_web.support import DISCORD_USER_AGENT, INTEGRITY_LABELS, _discord_request, _support_row, create_support_blueprint
 
 
 class SupportConsoleTests(unittest.TestCase):
@@ -471,6 +472,92 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertNotIn("discord-example.log", master)
         self.assertNotIn("nightly-example.log", master)
         self.assertIn('<option value="master" selected>Master</option>', master)
+
+    def test_inventory_integrity_states_include_native_and_quickstart_reports(self):
+        self.authorize_session()
+        filenames = {}
+        for state in INTEGRITY_LABELS:
+            filename = f"integrity-{state}.log"
+            filenames[state] = filename
+            result = SimpleNamespace(
+                filename=filename,
+                recommendations=[],
+                metadata={"kometa_integrity": {"detected": state != "not_reported", "state": state, "source": "kometa"}},
+                overview={"uploaded_by_id": "42"},
+                categories=[],
+            )
+            self.store.create(filename, filename.encode(), result)
+        all_rows = self.client.get("/support/logs?view=all&page_size=all").get_data(as_text=True)
+        self.assertIn("Integrity: Verified", all_rows)
+        for state, filename in filenames.items():
+            with self.subTest(state=state):
+                body = self.client.get(f"/support/logs?view=all&integrity={state}").get_data(as_text=True)
+                self.assertIn(f'data-title="{filename}"', body)
+                self.assertIn(f'class="support-integrity integrity-{state}"', body)
+                self.assertIn(f'<option value="{state}" selected>', body)
+                self.assertIn("data-active-filters", body)
+                for other_state, other_filename in filenames.items():
+                    if other_state != state:
+                        self.assertNotIn(f'data-title="{other_filename}"', body)
+        self.store.update_metadata(self.scan_id, kometa_integrity={"detected": True, "state": "clean", "source": "run_marker"})
+        quickstart = self.client.get("/support/logs?integrity=clean&launcher=quickstart").get_data(as_text=True)
+        self.assertIn('data-title="discord-example.log"', quickstart)
+        self.assertIn("Integrity: Clean", quickstart)
+        self.assertNotIn('data-title="integrity-clean.log"', quickstart)
+
+    def test_inventory_integrity_distinguishes_missing_unknown_and_imagemaid(self):
+        now = datetime.now(UTC)
+        record = self.store.get(self.scan_id)
+        self.assertEqual(_support_row(record, 3600, now)["integrity_state"], "not_reported")
+        for integrity, expected in (
+            ({"detected": True, "state": "new_status"}, "unknown"),
+            ({"detected": False, "state": "clean"}, "not_reported"),
+            ({"detected": True, "state": "clean", "modified": ["modules/logs.py"]}, "modified"),
+            ({"detected": True, "state": "clean", "counts": {"missing": 3}}, "modified"),
+            ({"detected": True, "state": "clean", "errors": ["Baseline request failed"]}, "check_failed"),
+            ({"detected": True, "state": "check_unavailable"}, "check_unavailable"),
+        ):
+            with self.subTest(integrity=integrity):
+                record["metadata"]["kometa_integrity"] = integrity
+                self.assertEqual(_support_row(record, 3600, now)["integrity_state"], expected)
+        record["metadata"].update(tool_name="imagemaid", kometa_integrity={})
+        self.assertEqual(_support_row(record, 3600, now)["integrity_state"], "not_applicable")
+        self.assertEqual(_support_row(record, 3600, now)["integrity_label"], "Not applicable")
+
+    def test_inventory_integrity_filter_survives_sorting_and_pagination(self):
+        self.authorize_session()
+        for index in range(11):
+            filename = f"modified-{index}.log"
+            result = SimpleNamespace(
+                filename=filename,
+                recommendations=[],
+                metadata={"kometa_integrity": {"detected": True, "state": "modified"}},
+                overview={"uploaded_by_id": "42"},
+                categories=[],
+            )
+            self.store.create(filename, filename.encode(), result)
+        first = self.client.get("/support/logs?integrity=modified&page_size=10").get_data(as_text=True)
+        self.assertIn("Page 1 of 2", first)
+        self.assertIn("integrity=modified", first)
+        self.assertIn("direction=asc", first)
+        self.assertIn("page=2", first)
+        second = self.client.get("/support/logs?integrity=modified&page_size=10&page=2&sort=title").get_data(as_text=True)
+        self.assertIn("Page 2 of 2", second)
+        self.assertIn("integrity=modified", second)
+        self.assertNotIn('data-title="discord-example.log"', second)
+        invalid = self.client.get("/support/logs?integrity=bogus").get_data(as_text=True)
+        self.assertIn('<option value="all" selected>All integrity results</option>', invalid)
+        self.assertIn('data-title="discord-example.log"', invalid)
+
+    def test_integrity_filter_does_not_expose_other_users_uploads(self):
+        self.store.update_metadata(self.scan_id, kometa_integrity={"detected": True, "state": "modified"})
+        with self.client.session_transaction() as account:
+            account["support_authorized_at"] = 9999999999
+            account["discord_user"] = {"id": "different-user", "username": "Other member"}
+            account["support_access"] = False
+        body = self.client.get("/support/logs?view=all&integrity=modified").get_data(as_text=True)
+        self.assertNotIn('data-title="discord-example.log"', body)
+        self.assertIn("0 matching logs", body)
 
     def test_schema_count_is_backed_by_persisted_validation_metadata(self):
         self.authorize_session()

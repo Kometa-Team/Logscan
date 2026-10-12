@@ -224,10 +224,18 @@ class DetectorOccurrenceTests(unittest.TestCase):
             store = ScanStore(directory)
             scan_id, token = store.create("meta.log", content, result)
             before = store.get(scan_id)
-            with patch.dict("os.environ", SCAN_STORE=directory), patch("logscan_web.app.threading.Thread") as thread:
-                create_app()
+            with (
+                patch.dict("os.environ", SCAN_STORE=directory),
+                patch("logscan_web.app.threading.Thread") as thread,
+                patch("logscan_web.app.AnonymousAnalyticsStore.record_success") as success,
+            ):
+                app = create_app()
                 migration = next(call.kwargs["target"] for call in thread.call_args_list if call.kwargs.get("name") == "retained-scan-migration")
                 migration()
+                with patch("logscan_web.app.scan_archive_path") as scan:
+                    migration()
+                    scan.assert_not_called()
+                success.assert_not_called()
             after = store.get(scan_id)
             for key in ("id", "created_at", "delete_token_hash"):
                 self.assertEqual(after[key], before[key])
@@ -240,6 +248,24 @@ class DetectorOccurrenceTests(unittest.TestCase):
             integrity_finding = next(item for item in after["recommendations"] if item["id"] == "source_integrity_modified")
             self.assertIn("modules/logs.py", integrity_finding["message"])
             self.assertEqual(integrity_finding["evidence_lines"], after["metadata"]["kometa_integrity"]["evidence_lines"])
+            app.config.update(
+                TESTING=True,
+                DISCORD_CLIENT_ID="test-client",
+                DISCORD_CLIENT_SECRET="test-secret",
+                DISCORD_GUILD_ID="test-guild",
+                DISCORD_SUPPORT_ROLE_IDS={"test-role"},
+                LOGSCAN_SECRET_KEY="test-secret",
+                DISCORD_BOT_TOKEN="",
+            )
+            client = app.test_client()
+            with client.session_transaction() as account:
+                account["support_authorized_at"] = 9999999999
+                account["discord_user"] = {"id": "42", "username": "Tester"}
+                account["support_access"] = False
+            console = client.get("/support/logs?integrity=modified").get_data(as_text=True)
+            self.assertIn('data-title="meta.log"', console)
+            self.assertIn('class="support-integrity integrity-modified"', console)
+            self.assertIn("Integrity: Modified", console)
             self.assertTrue(store.delete(scan_id, token))
 
 
