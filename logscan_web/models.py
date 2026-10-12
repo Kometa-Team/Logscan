@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 import re
 from typing import Literal
 
-
 Category = Literal["critical", "error", "warning", "schema", "advice"]
 
 

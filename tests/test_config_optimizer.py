@@ -7,7 +7,6 @@ import yaml
 
 from logscan_web.config_optimizer import MAX_CONFIG_BYTES, optimize_config
 
-
 CONFIG = """# yaml-language-server: $schema=https://example.test/schema.json
 plex:
   url: '(redacted)'
@@ -41,9 +40,14 @@ class ConfigOptimizerTests(unittest.TestCase):
         result = optimize_config(config)
         self.assert_equivalent(config, result)
         self.assertEqual(len(result["changes"]), 1)
-        self.assertEqual(result["changes"][0]["locations"], [
-            "config.libraries.Movies.settings", "config.libraries.Shows.settings", "config.libraries.Anime.settings",
-        ])
+        self.assertEqual(
+            result["changes"][0]["locations"],
+            [
+                "config.libraries.Movies.settings",
+                "config.libraries.Shows.settings",
+                "config.libraries.Anime.settings",
+            ],
+        )
         self.assertIn("<<: *logscan_shared_1", result["optimized_config"])
         self.assertIn("timeout: 60", result["optimized_config"])
         self.assertIn("# yaml-language-server:", result["optimized_config"])
@@ -65,7 +69,9 @@ class ConfigOptimizerTests(unittest.TestCase):
         self.assertEqual(optimize_config(config)["status"], "unchanged")
 
     def test_identical_ordered_lists_are_reused_without_deduplicating_items(self):
-        config = "a:\n  overlay_files: [{default: ribbon}, {default: ratings}, {default: ribbon}]\nb:\n  overlay_files: [{default: ribbon}, {default: ratings}, {default: ribbon}]\n"
+        config = (
+            "a:\n  overlay_files: [{default: ribbon}, {default: ratings}, {default: ribbon}]\nb:\n  overlay_files: [{default: ribbon}, {default: ratings}, {default: ribbon}]\n"
+        )
         result = optimize_config(config)
         self.assert_equivalent(config, result)
         self.assertIn("*logscan_shared_1", result["optimized_config"])
@@ -150,6 +156,7 @@ class ConfigOptimizerTests(unittest.TestCase):
 
     def test_equivalence_failure_blocks_download(self):
         from ruamel.yaml import YAML
+
         with patch.object(YAML, "dump", side_effect=lambda _self, stream: stream.write("changed: true\n")):
             with self.assertRaisesRegex(ValueError, "changed resolved values"):
                 optimize_config(CONFIG)
@@ -158,10 +165,12 @@ class ConfigOptimizerTests(unittest.TestCase):
 class ConfigOptimizerApiTests(unittest.TestCase):
     def setUp(self):
         from logscan_web.storage import ScanStore
+
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         with patch.dict("os.environ", {"SCAN_STORE": self.directory.name, "TMDB_API_KEY": ""}), patch("threading.Thread.start"):
             from logscan_web.app import create_app
+
             self.app = create_app()
             self.app.config["TESTING"] = True
         self.client = self.app.test_client()

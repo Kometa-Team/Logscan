@@ -2,13 +2,11 @@
 
 import re
 
-
 _LEVELS = ("critical", "error", "warning", "info", "debug", "trace")
 _LEVEL_PATTERN = re.compile(rb"\[(CRITICAL|ERROR|WARNING|INFO|DEBUG|TRACE)\]", re.I)
 _LINE_BREAK_PATTERN = re.compile(rb"\r\n|\r|\n")
 _VALIDATION_PATTERN = re.compile(
-    r"(?P<report>\bValidation\s+Report)(?:\s*\((?P<level>[^)\r\n]*)\))?"
-    r"|\[validator\.py:\d+\][^\r\n]*?\bResult:\s*(?P<result>[^|\r\n]+)",
+    r"(?P<report>\bValidation\s+Report)(?:\s*\((?P<level>[^)\r\n]*)\))?" r"|\[validator\.py:\d+\][^\r\n]*?\bResult:\s*(?P<result>[^|\r\n]+)",
     re.I,
 )
 _VALIDATION_BYTES_PATTERN = re.compile(_VALIDATION_PATTERN.pattern.encode("ascii"), re.I)

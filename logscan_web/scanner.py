@@ -22,13 +22,21 @@ from .rules.base import TextRule, evaluate_text_rules_bytes
 from .categories import category_configuration
 from .log_facts import count_log_occurrences, extract_validation_summary
 
-
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_DEPTH = 3
 STREAM_SCAN_THRESHOLD = 64 * 1024 * 1024
 ALLOWED_SUFFIXES = {".txt", ".log", ".yml", ".yaml"}
 ARCHIVE_SUFFIXES = {
-    ".zip", ".7z", ".tar", ".tgz", ".gz", ".bz2", ".tbz2", ".xz", ".txz", ".zst",
+    ".zip",
+    ".7z",
+    ".tar",
+    ".tgz",
+    ".gz",
+    ".bz2",
+    ".tbz2",
+    ".xz",
+    ".txz",
+    ".zst",
 }
 
 
@@ -45,8 +53,7 @@ def extract_missing_people(content: str) -> list[dict[str, str | bool]]:
     """
     people: dict[str, bool] = {}
     for match in re.finditer(
-        r"Detail: tmdb_person updated poster to \[URL\] https?://[^\s|]+"
-        r"(?:\s*\|)?\s*\n.*?\n.*?\n.*?Finished (?P<name>.+?) Collection",
+        r"Detail: tmdb_person updated poster to \[URL\] https?://[^\s|]+" r"(?:\s*\|)?\s*\n.*?\n.*?\n.*?Finished (?P<name>.+?) Collection",
         content,
         re.IGNORECASE,
     ):
@@ -54,18 +61,14 @@ def extract_missing_people(content: str) -> list[dict[str, str | bool]]:
         if name:
             people[name] = True
     for match in re.finditer(
-        r"Collection Warning: No Poster Found at https://raw\.githubusercontent\.com/"
-        r"Kometa-Team/People-Images[^\s]*?/(?P<name>[^/\s]+?)(?:\.[A-Za-z0-9]+)?(?=\s|$)",
+        r"Collection Warning: No Poster Found at https://raw\.githubusercontent\.com/" r"Kometa-Team/People-Images[^\s]*?/(?P<name>[^/\s]+?)(?:\.[A-Za-z0-9]+)?(?=\s|$)",
         content,
         re.IGNORECASE,
     ):
         name = unquote(re.sub(r"\.[A-Za-z0-9]+$", "", match.group("name"))).strip()
         if name and name not in people:
             people[name] = False
-    return [
-        {"name": name, "tmdb_image_found": has_image}
-        for name, has_image in people.items()
-    ]
+    return [{"name": name, "tmdb_image_found": has_image} for name, has_image in people.items()]
 
 
 def _validate_archive_names(names: list[str]) -> list[str]:
@@ -88,7 +91,9 @@ def _combine_nested_files(files: list[tuple[str, bytes]], archive_depth: int) ->
         try:
             _filename, prepared = prepare_scan_input(filename, content, archive_depth)
         except ScanError as exc:
-            is_nested_archive = Path(filename).suffix.lower() in ARCHIVE_SUFFIXES or filename.lower().endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst"))
+            is_nested_archive = Path(filename).suffix.lower() in ARCHIVE_SUFFIXES or filename.lower().endswith(
+                (".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst")
+            )
             if is_nested_archive and str(exc) == "The archive does not contain any files to scan.":
                 continue
             raise
@@ -172,7 +177,9 @@ def _extract_gzip(filename: str, content_bytes: bytes, archive_depth: int) -> tu
 
 
 def _extract_bzip2(
-    filename: str, content_bytes: bytes, archive_depth: int,
+    filename: str,
+    content_bytes: bytes,
+    archive_depth: int,
 ) -> tuple[str, bytes]:
     try:
         with bz2.BZ2File(BytesIO(content_bytes), mode="rb") as archive:
@@ -183,7 +190,9 @@ def _extract_bzip2(
 
 
 def _extract_xz(
-    filename: str, content_bytes: bytes, archive_depth: int,
+    filename: str,
+    content_bytes: bytes,
+    archive_depth: int,
 ) -> tuple[str, bytes]:
     try:
         with lzma.LZMAFile(BytesIO(content_bytes), mode="rb") as archive:
@@ -205,7 +214,9 @@ def _decompress_zstandard(content_bytes: bytes) -> bytes:
 
 
 def _extract_zstandard(
-    filename: str, content_bytes: bytes, archive_depth: int,
+    filename: str,
+    content_bytes: bytes,
+    archive_depth: int,
 ) -> tuple[str, bytes]:
     return _prepare_decompressed_log(
         filename,
@@ -228,6 +239,7 @@ def _prepare_decompressed_log(
     inner_filename = Path(filename).stem
     _inner_filename, extracted = prepare_scan_input(inner_filename, extracted, archive_depth)
     return f"{inner_filename}.log", extracted
+
 
 def _extract_7z(filename: str, content_bytes: bytes, archive_depth: int) -> tuple[str, bytes]:
     try:
@@ -256,6 +268,7 @@ def _extract_7z(filename: str, content_bytes: bytes, archive_depth: int) -> tupl
     if not extracted:
         raise ScanError("The 7-Zip archive does not contain any text to scan.")
     return f"{Path(filename).stem}.log", extracted
+
 
 def prepare_scan_input(filename: str, content_bytes: bytes, archive_depth: int = 0) -> tuple[str, bytes]:
     """Validate an upload and return the text that should be stored and scanned."""
@@ -310,16 +323,11 @@ def _plain_title(value: str) -> str:
 def _strip_emojis(value: str) -> str:
     """Remove emoji glyphs and selectors while preserving ordinary punctuation."""
     value = re.sub(
-        "["
-        "\U0001F1E6-\U0001F1FF"
-        "\U0001F300-\U0001FAFF"
-        "\u2300-\u23FF"
-        "\u2600-\u27BF"
-        "]+",
+        "[" "\U0001f1e6-\U0001f1ff" "\U0001f300-\U0001faff" "\u2300-\u23ff" "\u2600-\u27bf" "]+",
         "",
         value or "",
     )
-    return value.replace("\uFE0F", "").replace("\u200D", "")
+    return value.replace("\ufe0f", "").replace("\u200d", "")
 
 
 def _severity(first_line: str) -> str:
@@ -328,20 +336,50 @@ def _severity(first_line: str) -> str:
     if first_line.startswith("⚠"):
         return "warning"
     title = _plain_title(first_line).lower()
-    if any(term in title for term in (
-        "failed", "invalid", "error", "vulnerable", "exceeds available",
-        "required api key", "required service", "unhandled", "incomplete",
-        "unreadable", "subscription", "prerequisite", "api limit",
-        "request limit", "could not be parsed", "already contains",
-        "image file is missing", "font file is missing", "unknown plex library",
-        "plex library was not found", "connection timed out",
-    )):
+    if any(
+        term in title
+        for term in (
+            "failed",
+            "invalid",
+            "error",
+            "vulnerable",
+            "exceeds available",
+            "required api key",
+            "required service",
+            "unhandled",
+            "incomplete",
+            "unreadable",
+            "subscription",
+            "prerequisite",
+            "api limit",
+            "request limit",
+            "could not be parsed",
+            "already contains",
+            "image file is missing",
+            "font file is missing",
+            "unknown plex library",
+            "plex library was not found",
+            "connection timed out",
+        )
+    ):
         return "critical"
-    if any(term in title for term in (
-        "warning", "legacy", "detected", "matched no items", "no matching",
-        "low memory", "memory below", "insufficient memory", "run order",
-        "maintenance", "run exceeds", "rounding issue",
-    )):
+    if any(
+        term in title
+        for term in (
+            "warning",
+            "legacy",
+            "detected",
+            "matched no items",
+            "no matching",
+            "low memory",
+            "memory below",
+            "insufficient memory",
+            "run order",
+            "maintenance",
+            "run exceeds",
+            "rounding issue",
+        )
+    ):
         return "warning"
     return "advice"
 
@@ -384,6 +422,7 @@ def normalized_installation(version: str | None) -> str:
     if re.search(r"\(python(?:\s|\d)", lowered):
         return "Native Python"
     return "Unknown"
+
 
 def apply_documentation_branch(recommendations: list[dict], branch: str) -> None:
     """Point Kometa Wiki links at the scanned release channel's documentation."""
@@ -478,11 +517,7 @@ def extract_plex_configurations(content: str) -> list[dict[str, object]]:
             sections.append(_plex_configuration_section(current, len(sections) + 1))
             current = None
             continue
-        if (
-            re.search(r"\bScanning\b", message)
-            or "Library Connection Failed" in message
-            or re.match(r"^(?:Finished\b|Run Time:|Start Time:)", message, re.I)
-        ):
+        if re.search(r"\bScanning\b", message) or "Library Connection Failed" in message or re.match(r"^(?:Finished\b|Run Time:|Start Time:)", message, re.I):
             if current:
                 sections.append(_plex_configuration_section(current, len(sections) + 1))
             current = None
@@ -518,11 +553,16 @@ def plex_server_summaries(sections: list[dict[str, object]]) -> list[dict[str, s
             servers.append(server)
     return servers
 
+
 def plex_analytics(sections: list[dict[str, object]]) -> dict[str, list[str]]:
     """Return bounded Plex categories that are safe to persist as aggregates."""
     values = {
-        "versions": [], "platforms": [], "update_channels": [],
-        "library_types": [], "agents": [], "scanners": [],
+        "versions": [],
+        "platforms": [],
+        "update_channels": [],
+        "library_types": [],
+        "agents": [],
+        "scanners": [],
     }
     for section in sections:
         lines = [str(line) for line in section.get("lines", [])]
@@ -562,12 +602,7 @@ def _runtime_seconds(value: str) -> int | None:
     )
     if not match:
         return None
-    return (
-        int(match.group("days") or 0) * 86400
-        + int(match.group("hours")) * 3600
-        + int(match.group("minutes")) * 60
-        + int(match.group("seconds"))
-    )
+    return int(match.group("days") or 0) * 86400 + int(match.group("hours")) * 3600 + int(match.group("minutes")) * 60 + int(match.group("seconds"))
 
 
 def _log_timestamp(line: str) -> datetime | None:
@@ -657,6 +692,8 @@ def extract_section_run_times(content: str) -> list[dict[str, object]]:
             runtime["reported_duration"] = reported_duration
         runtimes.append(runtime)
     return sorted(runtimes, key=lambda item: int(item["seconds"]), reverse=True)
+
+
 def _log_overview(
     filename: str,
     content: str,
@@ -667,18 +704,13 @@ def _log_overview(
 ) -> dict:
     yaml_findings = [item for item in recommendations if item["severity"] == "schema"]
     yaml_status = (
-        f"{len(yaml_findings)} configuration validation issue"
-        f"{'' if len(yaml_findings) == 1 else 's'} detected in log"
-        if yaml_findings
-        else "Live schema validation pending"
+        f"{len(yaml_findings)} configuration validation issue" f"{'' if len(yaml_findings) == 1 else 's'} detected in log" if yaml_findings else "Live schema validation pending"
     )
     completed_run = re.search(
         r"Start Time:\s*(?P<start>.*?)\s+Finished:\s*(?P<end>.*?)\s+Run Time:\s*(?P<runtime>[^|\r\n]+)",
         content,
     )
-    plex_configurations = enrich_plex_configurations(
-        extract_plex_configurations(content), quickstart
-    )
+    plex_configurations = enrich_plex_configurations(extract_plex_configurations(content), quickstart)
     return {
         "log_name": filename,
         "finding_count": len(recommendations),
@@ -690,10 +722,7 @@ def _log_overview(
         "run_command": _first_value(content, "Run Command"),
         "start_time": _date_first(completed_run.group("start").strip()) if completed_run else _first_value(content, "Started"),
         "finished": _date_first(completed_run.group("end").strip()) if completed_run else _first_value(content, "Finished"),
-        "run_time": (
-            completed_run.group("runtime").strip()
-            if completed_run else run_time
-        ),
+        "run_time": (completed_run.group("runtime").strip() if completed_run else run_time),
         "yaml_validation": yaml_status,
         "yaml_issue_count": len(yaml_findings),
         "section_run_times": extract_section_run_times(content),
@@ -718,24 +747,61 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
             contextual_rules.append(rule)
 
     sample_terms = (
-        b"version:", b"branch:", b"kometa integrity:",
-        b"[quickstart]", b"config created by quickstart", b"quickstart:",
-        b"kometa runtime mode:", b"libraries configured with quickstart:",
-        b"information on library:", b"content count:",
-        b"# os:", b"# docker:", b"# cpu:", b"# python:", b"# git:",
-        b"# quickstart port:", b"# quickstart debug:", b"# quickstart theme:",
-        b"# quickstart optimize template defaults:", b"# quickstart config archive history:",
-        b"# quickstart kometa log retention:", b"# quickstart imagemaid log retention:",
+        b"version:",
+        b"branch:",
+        b"kometa integrity:",
+        b"[quickstart]",
+        b"config created by quickstart",
+        b"quickstart:",
+        b"kometa runtime mode:",
+        b"libraries configured with quickstart:",
+        b"information on library:",
+        b"content count:",
+        b"# os:",
+        b"# docker:",
+        b"# cpu:",
+        b"# python:",
+        b"# git:",
+        b"# quickstart port:",
+        b"# quickstart debug:",
+        b"# quickstart theme:",
+        b"# quickstart optimize template defaults:",
+        b"# quickstart config archive history:",
+        b"# quickstart kometa log retention:",
+        b"# quickstart imagemaid log retention:",
         b"# quickstart session lifetime days:",
-        b"finished:", b"finished ", b"run time:", b"start time:", b"started:",
-        b"platform:", b"memory:", b"available memory:", b"run command:",
-        b"plex db cache setting:", b"overlay_path:", b"overlay_files:", b"--time",
-        b"plex configuration", b"using asset directory", b"scheduled maintenance", b"service_unavailable",
-        b"connected to server", b"running on", b"plexpass:", b"connected to library",
-        b"type:", b"agent:", b"scanner:", b"ratings source:",
-        b"library connection successful", b"library connection failed",
-        b"scanning metadata", b"run_order:",
-        b"- operations", b"mass_user_rating_update", b"mass_episode_user_ratings_update",
+        b"finished:",
+        b"finished ",
+        b"run time:",
+        b"start time:",
+        b"started:",
+        b"platform:",
+        b"memory:",
+        b"available memory:",
+        b"run command:",
+        b"plex db cache setting:",
+        b"overlay_path:",
+        b"overlay_files:",
+        b"--time",
+        b"plex configuration",
+        b"using asset directory",
+        b"scheduled maintenance",
+        b"service_unavailable",
+        b"connected to server",
+        b"running on",
+        b"plexpass:",
+        b"connected to library",
+        b"type:",
+        b"agent:",
+        b"scanner:",
+        b"ratings source:",
+        b"library connection successful",
+        b"library connection failed",
+        b"scanning metadata",
+        b"run_order:",
+        b"- operations",
+        b"mass_user_rating_update",
+        b"mass_episode_user_ratings_update",
     )
     missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found")
     sampled_lines: dict[int, str] = {}
@@ -810,10 +876,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         chunk_start = chunk_end
 
     line_count = lines_before_chunk + int(bool(content_length) and content_bytes[content_length - 1] != 10)
-    sampled = [
-        "\n" * max(0, number - previous - 1) + sampled_lines[number]
-        for previous, number in zip([0, *sorted(sampled_lines)[:-1]], sorted(sampled_lines))
-    ]
+    sampled = ["\n" * max(0, number - previous - 1) + sampled_lines[number] for previous, number in zip([0, *sorted(sampled_lines)[:-1]], sorted(sampled_lines))]
     if not marker_found:
         raise ScanError("This does not appear to be a complete Kometa log file.")
 
@@ -827,8 +890,11 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     validation_summary = extract_validation_summary(content_bytes)
     complete_log = complete_log or bool(validation_summary.get("validation_result"))
     context = ScanContext.from_content(
-        filename, sample_content, kometa_version=kometa_version,
-        run_time=detected_run_time, complete=complete_log,
+        filename,
+        sample_content,
+        kometa_version=kometa_version,
+        run_time=detected_run_time,
+        complete=complete_log,
     )
     findings.extend(finding for rule in contextual_rules for finding in rule.evaluate(context))
     normalized = [finding.as_dict() for finding in findings]
@@ -850,17 +916,18 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         "header_found": kometa_version is not None,
         "line_count": line_count,
         "size_bytes": len(content_bytes),
-        "counts": {
-            level: sum(item["severity"] == level for item in normalized)
-            for level in ("critical", "error", "warning", "schema", "advice")
-        },
+        "counts": {level: sum(item["severity"] == level for item in normalized) for level in ("critical", "error", "warning", "schema", "advice")},
     }
     return ScanResult(
         filename=filename,
         recommendations=normalized,
         metadata=metadata,
         overview=_log_overview(
-            filename, sample_content, kometa_version, detected_run_time, normalized,
+            filename,
+            sample_content,
+            kometa_version,
+            detected_run_time,
+            normalized,
             quickstart_metadata["quickstart"],
         ),
         categories=category_configuration(),
@@ -891,7 +958,10 @@ def extract_kometa_integrity(content: str) -> dict:
                 "checked_at": None,
                 "commit": None,
                 "counts": {"modified": 0, "missing": 0, "added": 0},
-                "modified": [], "missing": [], "added": [], "errors": [],
+                "modified": [],
+                "missing": [],
+                "added": [],
+                "errors": [],
                 "details": [],
                 "source": "config" if comment else "run",
                 "evidence_lines": [number],
@@ -920,11 +990,16 @@ def extract_kometa_integrity(content: str) -> dict:
                     current["counts"][category.casefold()] = int(count)
             elif value and value not in current[key]:
                 current[key].append(value)
-        elif message.startswith((
-            "WARNING: Installed Kometa files", "Use Force update", "No pristine baseline.",
-            "Integrity checking is limited", "Unable to verify the pristine baseline",
-            "Unable to resolve the managed Kometa",
-        )):
+        elif message.startswith(
+            (
+                "WARNING: Installed Kometa files",
+                "Use Force update",
+                "No pristine baseline.",
+                "Integrity checking is limited",
+                "Unable to verify the pristine baseline",
+                "Unable to resolve the managed Kometa",
+            )
+        ):
             current["details"].append(message)
         else:
             current = None
@@ -940,7 +1015,11 @@ def extract_quickstart_metadata(content: str) -> dict:
     marker = re.search(r"\[Quickstart\]\s+Run marker:[^\r\n]*", content, re.IGNORECASE)
     if marker:
         lines.append(marker.group(0))
-    block = re.search(r"^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+(?:Start|Begin)[ \t]*\r?$(?P<body>.*?)^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+End[ \t]*\r?$", content, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+    block = re.search(
+        r"^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+(?:Start|Begin)[ \t]*\r?$(?P<body>.*?)^[ \t]*\[Quickstart\]\s+(?:Metadata|Context)\s+End[ \t]*\r?$",
+        content,
+        re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    )
     if block:
         lines.extend(block.group("body").splitlines())
     messages = [_log_message(line).lstrip("# ").strip() for line in content.splitlines()]
@@ -1015,14 +1094,31 @@ def extract_quickstart_metadata(content: str) -> dict:
     flags = [item.strip() for item in re.split(r"[,;]", flags_value) if item.strip()]
     mode = values.get("mode") or values.get("runtime_mode")
     allowed_metadata = {
-        "platform", "workspace", "config", "runtime", "launcher", "os", "docker",
-        "cpu", "memory", "python", "git", "port", "debug", "theme",
-        "optimize_template_defaults", "config_archive_history", "kometa_log_retention",
-        "imagemaid_log_retention", "session_lifetime_days",
+        "platform",
+        "workspace",
+        "config",
+        "runtime",
+        "launcher",
+        "os",
+        "docker",
+        "cpu",
+        "memory",
+        "python",
+        "git",
+        "port",
+        "debug",
+        "theme",
+        "optimize_template_defaults",
+        "config_archive_history",
+        "kometa_log_retention",
+        "imagemaid_log_retention",
+        "session_lifetime_days",
     }
     metadata = {key: value for key, value in values.items() if key in allowed_metadata and value and value.casefold() not in {"private", "redacted", "(redacted)"}}
     quickstart.update({"detected": bool(marker or block or header_detected), "version": version, "branch": branch, "mode": mode, "flags": flags, "metadata": metadata})
     return {"quickstart_run": quickstart["detected"], "quickstart_version": version, "quickstart_branch": branch, "quickstart": quickstart}
+
+
 def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     filename, content_bytes = prepare_scan_input(filename, content_bytes)
     if not content_bytes:
@@ -1072,17 +1168,18 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "header_found": kometa_version is not None,
         "line_count": content.count("\n") + int(bool(content) and not content.endswith("\n")),
         "size_bytes": len(content_bytes),
-        "counts": {
-            level: sum(item["severity"] == level for item in normalized)
-            for level in ("critical", "error", "warning", "schema", "advice")
-        },
+        "counts": {level: sum(item["severity"] == level for item in normalized) for level in ("critical", "error", "warning", "schema", "advice")},
     }
     return ScanResult(
         filename=filename,
         recommendations=normalized,
         metadata=metadata,
         overview=_log_overview(
-            filename, content, kometa_version, detected_run_time, normalized,
+            filename,
+            content,
+            kometa_version,
+            detected_run_time,
+            normalized,
             quickstart_metadata["quickstart"],
         ),
         categories=category_configuration(),
@@ -1170,8 +1267,10 @@ def scan_archive_path(filename: str, path: Path) -> list[tuple[str, bytes | Path
         return [(filename, path, _scan_large_path(filename, path))]
     return scan_archive_logs(filename, path.read_bytes())
 
+
 def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, bytes | Path, ScanResult]]:
     """Return one scan input and result for every valid Kometa log in a ZIP."""
+
     def collect(name: str, content: bytes, depth: int) -> list[tuple[str, bytes, ScanResult]]:
         if Path(name).suffix.lower() == ".zip":
             if depth >= MAX_ARCHIVE_DEPTH:
@@ -1278,7 +1377,9 @@ def _find_scannable_zstandard_tar(path: Path) -> list[tuple[str, int]]:
 
 
 def _find_scannable_compressed_log(
-    filename: str, path: Path, suffix: str,
+    filename: str,
+    path: Path,
+    suffix: str,
 ) -> list[tuple[str, int]]:
     compressed = None
     try:
@@ -1302,6 +1403,7 @@ def _find_scannable_compressed_log(
     if found:
         return [(Path(filename).stem, extracted_size)]
     raise ScanError("The archive does not contain a complete Kometa log file.")
+
 
 def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int]]:
     """Identify logs in a spooled upload without retaining the upload in memory."""
@@ -1345,6 +1447,7 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
     except zipfile.BadZipFile as exc:
         raise ScanError("The selected ZIP file is invalid.") from exc
     raise ScanError("The archive does not contain a complete Kometa log file.")
+
 
 def find_scannable_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, int]]:
     """Permissively identify Kometa logs before the strict scan validates every entry."""

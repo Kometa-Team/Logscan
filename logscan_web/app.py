@@ -17,14 +17,37 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from flask import Flask, abort, jsonify, render_template, request, send_file, url_for, session
+from flask import Flask, abort, jsonify, render_template, request, send_file, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
 from .config_optimizer import optimize_config
 from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
-from .scanner import ALLOWED_SUFFIXES, ARCHIVE_SUFFIXES, MAX_FILE_BYTES, ScanError, extract_quickstart_metadata, find_scannable_archive_logs, find_scannable_upload_path, prepare_scan_input, scan_archive_logs, scan_archive_path, scan_content_size, scan_log
-from .storage import AnonymousAnalyticsStore, PeopleStore, PopularPeopleCacheStore, PopularPeopleCheckStore, PopularPeopleExclusionStore, PopularPeopleFlagStore, ScanStore, TMDbFindCacheStore, UsageStatsStore
+from .scanner import (
+    ALLOWED_SUFFIXES,
+    ARCHIVE_SUFFIXES,
+    MAX_FILE_BYTES,
+    ScanError,
+    extract_quickstart_metadata,
+    find_scannable_archive_logs,
+    find_scannable_upload_path,
+    prepare_scan_input,
+    scan_archive_logs,
+    scan_archive_path,
+    scan_content_size,
+    scan_log,
+)
+from .storage import (
+    AnonymousAnalyticsStore,
+    PeopleStore,
+    PopularPeopleCacheStore,
+    PopularPeopleCheckStore,
+    PopularPeopleExclusionStore,
+    PopularPeopleFlagStore,
+    ScanStore,
+    TMDbFindCacheStore,
+    UsageStatsStore,
+)
 from .support import ACCOUNT_SESSION_SECONDS, create_support_blueprint, discord_session_user, support_role_refresh_required, support_session_authorized, support_session_role_hint
 
 LOG_INDEX_STRIDE = 1000
@@ -94,7 +117,6 @@ def _schema_directive_advice(metadata: dict) -> dict | None:
         ),
         "evidence_lines": [],
     }
-    return f"{size:.1f} GB"
 
 
 def _is_archive_upload(filename: str) -> bool:
@@ -118,18 +140,23 @@ def _finalize_result_metrics(result, archive_compressed_size: int | None, archiv
         return
     ratio = archive_uncompressed_size / archive_compressed_size if archive_compressed_size else 0
     reduction = (1 - (archive_compressed_size / archive_uncompressed_size)) * 100 if archive_uncompressed_size else 0
-    result.metadata.update({
-        "archive_compressed_size": archive_compressed_size,
-        "archive_uncompressed_size": archive_uncompressed_size,
-        "archive_compression_ratio": ratio,
-        "archive_reduction_percent": reduction,
-    })
-    overview.update({
-        "archive_compressed_size_display": _format_bytes(archive_compressed_size),
-        "archive_uncompressed_size_display": _format_bytes(archive_uncompressed_size),
-        "archive_compression_ratio": f"{ratio:.2f}:1",
-        "archive_reduction_percent": f"{reduction:.1f}%",
-    })
+    result.metadata.update(
+        {
+            "archive_compressed_size": archive_compressed_size,
+            "archive_uncompressed_size": archive_uncompressed_size,
+            "archive_compression_ratio": ratio,
+            "archive_reduction_percent": reduction,
+        }
+    )
+    overview.update(
+        {
+            "archive_compressed_size_display": _format_bytes(archive_compressed_size),
+            "archive_uncompressed_size_display": _format_bytes(archive_uncompressed_size),
+            "archive_compression_ratio": f"{ratio:.2f}:1",
+            "archive_reduction_percent": f"{reduction:.1f}%",
+        }
+    )
+
 
 def _stored_log_index(path: Path) -> dict:
     stat = path.stat()
@@ -189,6 +216,7 @@ def _stored_log_lines(path: Path, index: dict, start: int, count: int) -> list[s
         while len(lines) < count and (raw_line := source.readline()):
             lines.append(raw_line.decode("utf-8", errors="replace").rstrip("\r\n"))
     return lines
+
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
@@ -251,7 +279,10 @@ def _person_name_key(value: str | None) -> str:
 
 
 def add_missing_people_recommendations(
-    result, candidates: list[dict], repository_people: dict[str, str], people_url: str | None = None,
+    result,
+    candidates: list[dict],
+    repository_people: dict[str, str],
+    people_url: str | None = None,
 ) -> None:
     """Add advice for missing people images, split by repository availability."""
     found = []
@@ -268,8 +299,7 @@ def add_missing_people_recommendations(
         add_advice(
             "missing_people_images_available",
             "Missing people images are available in Kometa's repository",
-            "Missing person images were identified in this log, but are already available in the Kometa People Images repository. "
-            f"\n\nPeople: {people}.",
+            "Missing person images were identified in this log, but are already available in the Kometa People Images repository. " f"\n\nPeople: {people}.",
             "Delete the collection related to each listed person so Kometa can recreate it with the available image.",
         )
     if pending:
@@ -277,8 +307,7 @@ def add_missing_people_recommendations(
         add_advice(
             "missing_people_images_pending",
             "Missing people images need to be created",
-            "Missing person images were identified in this log. The Kometa team have been made aware and will action these as soon as possible. "
-            f"\nPeople: {people}.",
+            "Missing person images were identified in this log. The Kometa team have been made aware and will action these as soon as possible. " f"\nPeople: {people}.",
             "Wait for the People Images repository to be updated, then rerun Kometa to create the affected collection image."
             + (f" Review the submitted people here: {people_url}" if people_url else ""),
         )
@@ -328,14 +357,8 @@ def create_app() -> Flask:
     app.config["DISCORD_CLIENT_SECRET"] = os.environ.get("DISCORD_CLIENT_SECRET", "")
     app.config["DISCORD_BOT_TOKEN"] = os.environ.get("DISCORD_BOT_TOKEN", "")
     app.config["DISCORD_GUILD_ID"] = os.environ.get("DISCORD_GUILD_ID", "")
-    app.config["DISCORD_SUPPORT_ROLE_IDS"] = {
-        role.strip()
-        for role in os.environ.get("DISCORD_SUPPORT_ROLE_IDS", "").split(",")
-        if role.strip()
-    }
-    app.config["DISCORD_REDIRECT_URI"] = os.environ.get(
-        "DISCORD_REDIRECT_URI", "http://127.0.0.1:5000/support/callback"
-    )
+    app.config["DISCORD_SUPPORT_ROLE_IDS"] = {role.strip() for role in os.environ.get("DISCORD_SUPPORT_ROLE_IDS", "").split(",") if role.strip()}
+    app.config["DISCORD_REDIRECT_URI"] = os.environ.get("DISCORD_REDIRECT_URI", "http://127.0.0.1:5000/support/callback")
     app.config["LOGSCAN_SECRET_KEY"] = os.environ.get("LOGSCAN_SECRET_KEY", "")
     app.secret_key = app.config["LOGSCAN_SECRET_KEY"] or secrets.token_bytes(32)
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(seconds=ACCOUNT_SESSION_SECONDS)
@@ -406,10 +429,7 @@ def create_app() -> Flask:
             return
         now = time.time()
         with scan_jobs_lock:
-            for expired_id in [
-                key for key, value in scan_jobs.items()
-                if now - value.get("updated_at", now) > 3600
-            ]:
+            for expired_id in [key for key, value in scan_jobs.items() if now - value.get("updated_at", now) > 3600]:
                 scan_jobs.pop(expired_id, None)
             job = scan_jobs.setdefault(job_id, {"started_at": now})
             job.update(phase=phase, updated_at=now)
@@ -419,6 +439,7 @@ def create_app() -> Flask:
                 job["redirect_url"] = redirect_url
             if result is not None:
                 job["result"] = result
+
     popular_people_payload_cache: dict[tuple, list[dict]] = {}
     popular_people_payload_lock = threading.Lock()
 
@@ -431,6 +452,7 @@ def create_app() -> Flask:
         try:
             with urlopen(Request(request_url, headers={"Accept": "application/json"}), timeout=10) as response:
                 import json
+
                 return json.loads(response.read().decode("utf-8"))
         except (HTTPError, URLError, TimeoutError, ValueError):
             app.logger.warning("TMDb lookup failed for %s", path)
@@ -449,10 +471,7 @@ def create_app() -> Flask:
                 except (HTTPError, URLError, TimeoutError, UnicodeDecodeError):
                     app.logger.warning("Unable to fetch the %s people-image README.", label)
                     continue
-                images[label] = {
-                    _person_name_key(name): url
-                    for name, url in re.findall(r"^\* \[([^]]+)]\((https://[^)]+)\)$", readme, re.MULTILINE)
-                }
+                images[label] = {_person_name_key(name): url for name, url in re.findall(r"^\* \[([^]]+)]\((https://[^)]+)\)$", readme, re.MULTILINE)}
             kometa_images_cache.update(expires_at=time.monotonic() + KOMETA_IMAGE_CACHE_SECONDS, images=images)
             return images
 
@@ -466,17 +485,20 @@ def create_app() -> Flask:
             }
         """
         try:
-            with urlopen(Request(
-                "https://caching.graphql.imdb.com/",
-                data=json.dumps({"query": query}).encode("utf-8"),
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Origin": "https://www.imdb.com",
-                    "User-Agent": "Mozilla/5.0 (compatible; Kometa-Logscan/1.0)",
-                    "x-imdb-client-name": "imdb-web-next-localized",
-                },
-            ), timeout=15) as response:
+            with urlopen(
+                Request(
+                    "https://caching.graphql.imdb.com/",
+                    data=json.dumps({"query": query}).encode("utf-8"),
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "Origin": "https://www.imdb.com",
+                        "User-Agent": "Mozilla/5.0 (compatible; Kometa-Logscan/1.0)",
+                        "x-imdb-client-name": "imdb-web-next-localized",
+                    },
+                ),
+                timeout=15,
+            ) as response:
                 chart = json.loads(response.read().decode("utf-8"))
         except (HTTPError, URLError, TimeoutError, ValueError):
             app.logger.warning("Unable to fetch IMDb StarMeter from GraphQL.")
@@ -586,15 +608,17 @@ def create_app() -> Flask:
             name = person.get("name", "Unknown person")
             if not person_id or not _has_current_tmdb_image(person) or _person_name_key(name) in primary_images:
                 continue
-            _record, is_new = people_store.upsert_with_status({
-                "key": f"tmdb-{person_id}",
-                "name": name,
-                "original_name": name,
-                "tmdb_id": person_id,
-                "tmdb_image_found": True,
-                "requested_by": [AUTOMATED_TOP_PEOPLE_REQUESTER],
-                "provenance_tags": [AUTOMATED_TOP_PEOPLE_TAG],
-            })
+            _record, is_new = people_store.upsert_with_status(
+                {
+                    "key": f"tmdb-{person_id}",
+                    "name": name,
+                    "original_name": name,
+                    "tmdb_id": person_id,
+                    "tmdb_image_found": True,
+                    "requested_by": [AUTOMATED_TOP_PEOPLE_REQUESTER],
+                    "provenance_tags": [AUTOMATED_TOP_PEOPLE_TAG],
+                }
+            )
             created += int(is_new)
         if created:
             analytics.record_people_submitted(created)
@@ -674,26 +698,30 @@ def create_app() -> Flask:
                     known_for.append({"title": title, "url": f"https://www.themoviedb.org/{media_type}/{credit_id}"})
             name_key = _person_name_key(name)
             repo_image = kometa_images.get("Kometa Repo Image", {}).get(name_key)
-            variant_images = [
-                {"label": label, "url": urls[name_key]}
-                for label, urls in kometa_images.items()
-                if label != "Kometa Repo Image" and name_key in urls
-            ]
-            payload.append({
-                "tmdb_id": person_id, "name": name,
-                "tmdb_person_url": f"https://www.themoviedb.org/person/{person_id}" if person_id else None,
-                "tmdb_images_url": f"https://www.themoviedb.org/person/{person_id}/images/profiles" if person_id else None,
-                "imdb_person_url": f"https://www.imdb.com/name/{person['imdb_id']}/" if person.get("imdb_id") else None,
-                "tmdb_image_url": f"https://image.tmdb.org/t/p/original{profile_path}" if profile_path else None,
-                "known_for_department": person.get("known_for_department"), "known_for": known_for,
-                "tmdb_image": {
-                    "preview_url": f"https://image.tmdb.org/t/p/w342{profile_path}",
-                    "download_url": url_for("download_tmdb_image", image_path=profile_path, name=name),
-                } if profile_path else None,
-                "kometa_image": repo_image,
-                "kometa_variant_images": variant_images,
-                "flag_reason": flags.get(person_id, {}).get("reason") if person_id else None,
-            })
+            variant_images = [{"label": label, "url": urls[name_key]} for label, urls in kometa_images.items() if label != "Kometa Repo Image" and name_key in urls]
+            payload.append(
+                {
+                    "tmdb_id": person_id,
+                    "name": name,
+                    "tmdb_person_url": f"https://www.themoviedb.org/person/{person_id}" if person_id else None,
+                    "tmdb_images_url": f"https://www.themoviedb.org/person/{person_id}/images/profiles" if person_id else None,
+                    "imdb_person_url": f"https://www.imdb.com/name/{person['imdb_id']}/" if person.get("imdb_id") else None,
+                    "tmdb_image_url": f"https://image.tmdb.org/t/p/original{profile_path}" if profile_path else None,
+                    "known_for_department": person.get("known_for_department"),
+                    "known_for": known_for,
+                    "tmdb_image": (
+                        {
+                            "preview_url": f"https://image.tmdb.org/t/p/w342{profile_path}",
+                            "download_url": url_for("download_tmdb_image", image_path=profile_path, name=name),
+                        }
+                        if profile_path
+                        else None
+                    ),
+                    "kometa_image": repo_image,
+                    "kometa_variant_images": variant_images,
+                    "flag_reason": flags.get(person_id, {}).get("reason") if person_id else None,
+                }
+            )
         return payload
 
     def normalized_kometa_version(value: str | None) -> str:
@@ -734,11 +762,7 @@ def create_app() -> Flask:
         return {"missing", "trending"}
 
     def categorized_people_tags(person: dict) -> dict[str, list[str]]:
-        requesters = [
-            f"Requested by {requester['name']}"
-            for requester in person.get("requested_by", [])
-            if requester.get("name")
-        ]
+        requesters = [f"Requested by {requester['name']}" for requester in person.get("requested_by", []) if requester.get("name")]
         discovery = []
         if "trending" in person.get("sources", []):
             discovery.append("Trending")
@@ -770,9 +794,7 @@ def create_app() -> Flask:
         category_order = {"availability": 0, "discovery": 1, "tmdb": 2, "requester": 3}
         return [
             {"category": category, "tag": tag, "count": count}
-            for (category, tag), count in sorted(
-                counts.items(), key=lambda item: (category_order[item[0][0]], item[0][1].casefold())
-            )
+            for (category, tag), count in sorted(counts.items(), key=lambda item: (category_order[item[0][0]], item[0][1].casefold()))
         ]
 
     def filter_people_by_tag(people: list[dict], query: str) -> list[dict]:
@@ -783,10 +805,7 @@ def create_app() -> Flask:
         wildcarded = "*" in query or "?" in query
         expression = re.escape(query).replace(r"\*", ".*").replace(r"\?", ".")
         pattern = re.compile(f"^{expression}$" if wildcarded else f".*{expression}.*")
-        return [
-            person for person in people
-            if any(pattern.fullmatch(tag.casefold()) for tag in searchable_people_tags(person))
-        ]
+        return [person for person in people if any(pattern.fullmatch(tag.casefold()) for tag in searchable_people_tags(person))]
 
     def filter_people_by_selected_tags(people: list[dict], selected: list[str], available: list[dict]) -> list[dict]:
         if not selected:
@@ -801,10 +820,7 @@ def create_app() -> Flask:
 
         def matches(person: dict) -> bool:
             groups = categorized_people_tags(person)
-            return all(
-                selected_tags & {tag.casefold() for tag in groups.get(category, [])}
-                for category, selected_tags in selected_by_category.items()
-            )
+            return all(selected_tags & {tag.casefold() for tag in groups.get(category, [])} for category, selected_tags in selected_by_category.items())
 
         return [person for person in people if matches(person)]
 
@@ -827,11 +843,7 @@ def create_app() -> Flask:
                 combined[f"tmdb-{person['id']}"] = {**person, "sources": person_sources}
 
         if "missing" in sources:
-            trending_by_name = {
-                person.get("name", "").casefold(): person
-                for person in combined.values()
-                if person.get("name")
-            }
+            trending_by_name = {person.get("name", "").casefold(): person for person in combined.values() if person.get("name")}
             for record in people_store.list():
                 if _person_name_key(record.get("name")) in primary_images:
                     analytics.record_addressed([record])
@@ -856,11 +868,13 @@ def create_app() -> Flask:
 
         people = list(combined.values())
         flags = popular_people_flags.list()
-        people.sort(key=lambda person: (
-            0 if "missing" in person["sources"] else 1,
-            person.get("starmeter_rank", POPULAR_PEOPLE_LIMIT + 1),
-            person.get("name", "").casefold(),
-        ))
+        people.sort(
+            key=lambda person: (
+                0 if "missing" in person["sources"] else 1,
+                person.get("starmeter_rank", POPULAR_PEOPLE_LIMIT + 1),
+                person.get("name", "").casefold(),
+            )
+        )
         payload = popular_people_payload(people, flags)
         for item, person in zip(payload, people):
             record = person.get("missing_record", {})
@@ -885,8 +899,13 @@ def create_app() -> Flask:
         return payload
 
     def save_missing_people(
-        candidates: list[dict], *, filename: str, log_url: str, source_url: str | None,
-        uploaded_by: str | None = None, uploaded_by_id: str | None = None,
+        candidates: list[dict],
+        *,
+        filename: str,
+        log_url: str,
+        source_url: str | None,
+        uploaded_by: str | None = None,
+        uploaded_by_id: str | None = None,
     ) -> list[dict]:
         saved = []
         for candidate in candidates:
@@ -900,19 +919,21 @@ def create_app() -> Flask:
             tmdb_image_found = bool((image_data or {}).get("profiles", []))
             key_seed = str(tmdb_id) if tmdb_id else name.casefold()
             key = f"tmdb-{tmdb_id}" if tmdb_id else f"name-{hashlib.sha256(key_seed.encode()).hexdigest()[:16]}"
-            person, is_new = people_store.upsert_with_status({
-                "key": key,
-                "name": match.get("name", name) if match else name,
-                "original_name": name,
-                "tmdb_id": tmdb_id,
-                "tmdb_image_found": tmdb_image_found,
-                "log_tmdb_image_found": bool(candidate["tmdb_image_found"]),
-                "log_name": filename,
-                "log_url": log_url,
-                "source_url": source_url,
-                "requested_by": [{"name": uploaded_by, "id": uploaded_by_id}] if uploaded_by else [],
-                "provenance_tags": ["Log Upload"],
-            })
+            person, is_new = people_store.upsert_with_status(
+                {
+                    "key": key,
+                    "name": match.get("name", name) if match else name,
+                    "original_name": name,
+                    "tmdb_id": tmdb_id,
+                    "tmdb_image_found": tmdb_image_found,
+                    "log_tmdb_image_found": bool(candidate["tmdb_image_found"]),
+                    "log_name": filename,
+                    "log_url": log_url,
+                    "source_url": source_url,
+                    "requested_by": [{"name": uploaded_by, "id": uploaded_by_id}] if uploaded_by else [],
+                    "provenance_tags": ["Log Upload"],
+                }
+            )
             person["people_url"] = url_for("people_page", tags="Missing Kometa", _external=True)
             person["is_new"] = is_new
             saved.append(person)
@@ -933,27 +954,14 @@ def create_app() -> Flask:
         first = new_people[0]
         if len(new_people) > 2:
             names = "\n".join(f"- {person['name']}" for person in new_people)
-            people_summary = (
-                f"**People:**\n{names}\n"
-                f"[Review all missing people images]({url_for('people_page', _external=True)})"
-            )
+            people_summary = f"**People:**\n{names}\n" f"[Review all missing people images]({url_for('people_page', _external=True)})"
         else:
             names = "\n".join(
-                f"- [{person['name']}]({person['people_url']}) — **TMDb Image Found:** "
-                f"{'Yes' if person.get('tmdb_image_found') else 'No'}"
-                for person in new_people
+                f"- [{person['name']}]({person['people_url']}) — **TMDb Image Found:** " f"{'Yes' if person.get('tmdb_image_found') else 'No'}" for person in new_people
             )
             people_summary = f"**People:**\n{names}"
-        source_line = (
-            f"**Log Source:** [Click Here]({first['source_url']})\n"
-            if first.get("source_url") else "**Log Source:** Not available\n"
-        )
-        message = (
-            f"**Log Name:** `{first['log_name']}`\n"
-            f"**Log URL:** [Click Here]({first['log_url']})\n"
-            f"{source_line}"
-            f"{people_summary}"
-        )
+        source_line = f"**Log Source:** [Click Here]({first['source_url']})\n" if first.get("source_url") else "**Log Source:** Not available\n"
+        message = f"**Log Name:** `{first['log_name']}`\n" f"**Log URL:** [Click Here]({first['log_url']})\n" f"{source_line}" f"{people_summary}"
         try:
             payload = json.dumps({"content": message[:2000], "flags": 4}).encode("utf-8")
             webhook_request = Request(
@@ -979,10 +987,7 @@ def create_app() -> Flask:
             app.logger.warning("Unable to send missing-person Discord webhook: %s", exc)
 
     def backfill_schema_validation_counts():
-        records = [
-            record for record in store.list()
-            if not _schema_validation_is_fresh(record.get("metadata") or {})
-        ]
+        records = [record for record in store.list() if not _schema_validation_is_fresh(record.get("metadata") or {})]
         if not records:
             return
         app.logger.info("Backfilling schema validation counts for %d retained scan(s).", len(records))
@@ -1016,10 +1021,7 @@ def create_app() -> Flask:
         app.logger.info("Backfilled schema validation counts for %d of %d retained scan(s).", completed, len(records))
 
     def backfill_scan_analysis():
-        records = [
-            record for record in store.list()
-            if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION
-        ]
+        records = [record for record in store.list() if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION]
         if not records:
             return
         app.logger.info("Reprocessing %d retained scan(s) with analysis version %d.", len(records), ANALYSIS_VERSION)
@@ -1040,10 +1042,16 @@ def create_app() -> Flask:
 
             previous_metadata = record.get("metadata") or {}
             for key in (
-                "archive_compressed_size", "archive_uncompressed_size", "archive_compression_ratio",
-                "archive_reduction_percent", "schema_validation_count", "schema_validation_branch",
+                "archive_compressed_size",
+                "archive_uncompressed_size",
+                "archive_compression_ratio",
+                "archive_reduction_percent",
+                "schema_validation_count",
+                "schema_validation_branch",
                 "schema_directive_missing",
-                "schema_validation_failures", "schema_validation_version", "schema_validation_checked_at",
+                "schema_validation_failures",
+                "schema_validation_version",
+                "schema_validation_checked_at",
             ):
                 if key in previous_metadata:
                     result.metadata[key] = previous_metadata[key]
@@ -1056,13 +1064,8 @@ def create_app() -> Flask:
 
             enriched_ids = {"missing_people_images_available", "missing_people_images_pending"}
             current_ids = {item.get("id") for item in result.recommendations}
-            result.recommendations.extend(
-                item for item in (record.get("recommendations") or [])
-                if item.get("id") in enriched_ids and item.get("id") not in current_ids
-            )
-            result.recommendations.sort(
-                key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]]
-            )
+            result.recommendations.extend(item for item in (record.get("recommendations") or []) if item.get("id") in enriched_ids and item.get("id") not in current_ids)
+            result.recommendations.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
             _finalize_result_metrics(
                 result,
                 previous_metadata.get("archive_compressed_size"),
@@ -1073,10 +1076,7 @@ def create_app() -> Flask:
         app.logger.info("Reprocessed %d of %d retained scan(s).", completed, len(records))
 
     def backfill_quickstart_metadata():
-        records = [
-            record for record in store.list()
-            if "quickstart_run" not in (record.get("metadata") or {})
-        ]
+        records = [record for record in store.list() if "quickstart_run" not in (record.get("metadata") or {})]
         if not records:
             return
         app.logger.info("Backfilling Quickstart metadata for %d retained scan(s).", len(records))
@@ -1087,9 +1087,7 @@ def create_app() -> Flask:
             if path is None:
                 continue
             try:
-                launcher_metadata = extract_quickstart_metadata(
-                    path.read_text(encoding="utf-8", errors="replace")
-                )
+                launcher_metadata = extract_quickstart_metadata(path.read_text(encoding="utf-8", errors="replace"))
             except OSError as exc:
                 app.logger.warning("Quickstart metadata backfill failed for scan %s: %s", scan_id, exc)
                 continue
@@ -1180,10 +1178,7 @@ def create_app() -> Flask:
         if directive_advice and not any(item.get("id") == directive_advice["id"] for item in recommendations):
             recommendations.append(directive_advice)
         public["recommendations"] = recommendations
-        counts = {
-            severity: sum(item.get("severity") == severity for item in recommendations)
-            for severity in ("critical", "error", "warning", "schema", "advice")
-        }
+        counts = {severity: sum(item.get("severity") == severity for item in recommendations) for severity in ("critical", "error", "warning", "schema", "advice")}
         if isinstance(schema_count, int):
             counts["schema"] = schema_count
         metadata["counts"] = counts
@@ -1196,12 +1191,14 @@ def create_app() -> Flask:
         if compressed_size and uncompressed_size:
             ratio = float(metadata.get("archive_compression_ratio") or (uncompressed_size / compressed_size))
             reduction = float(metadata.get("archive_reduction_percent") or ((1 - compressed_size / uncompressed_size) * 100))
-            overview.update({
-                "archive_compressed_size_display": _format_bytes(compressed_size),
-                "archive_uncompressed_size_display": _format_bytes(uncompressed_size),
-                "archive_compression_ratio": f"{ratio:.2f}:1",
-                "archive_reduction_percent": f"{reduction:.1f}%",
-            })
+            overview.update(
+                {
+                    "archive_compressed_size_display": _format_bytes(compressed_size),
+                    "archive_uncompressed_size_display": _format_bytes(uncompressed_size),
+                    "archive_compression_ratio": f"{ratio:.2f}:1",
+                    "archive_reduction_percent": f"{reduction:.1f}%",
+                }
+            )
         public["expires_at"] = int(datetime.fromisoformat(record["created_at"]).timestamp() + RETENTION_SECONDS)
         return render_template("index.html", initial_scan=public, initial_batch=None)
 
@@ -1211,7 +1208,10 @@ def create_app() -> Flask:
         if batch is None:
             abort(404)
         public_url = url_for("batch_page", batch_id=batch_id, _external=True)
-        public_scans = [{key: scan[key] for key in ("id", "filename", "result_url", "expires_at")} | {"batch_public_url": public_url, "unscanned_files": batch.get("unscanned_files", [])} for scan in batch["scans"]]
+        public_scans = [
+            {key: scan[key] for key in ("id", "filename", "result_url", "expires_at")} | {"batch_public_url": public_url, "unscanned_files": batch.get("unscanned_files", [])}
+            for scan in batch["scans"]
+        ]
         return render_template("index.html", initial_scan=None, initial_batch=public_scans)
 
     @app.get("/batch/<batch_id>/admin/<token>")
@@ -1454,19 +1454,12 @@ def create_app() -> Flask:
                         reason = "ZIP contains no valid Kometa logs" if suffix == ".zip" else "Not a valid Kometa log file"
                     unscanned_files.append({"filename": entry.filename, "reason": reason})
         archive_compressed_size = scan_content_size(content) if _is_archive_upload(upload_filename) else None
-        archive_uncompressed_size = (
-            sum(scan_content_size(scan_content) for _name, scan_content, _result in scans)
-            if archive_compressed_size is not None else None
-        )
+        archive_uncompressed_size = sum(scan_content_size(scan_content) for _name, scan_content, _result in scans) if archive_compressed_size is not None else None
         for filename, content, result in scans:
             result.metadata["analysis_version"] = ANALYSIS_VERSION
             if not app.config.get("TESTING"):
                 try:
-                    log_content = (
-                        content.read_text(encoding="utf-8", errors="replace")
-                        if isinstance(content, Path)
-                        else content.decode("utf-8", errors="replace")
-                    )
+                    log_content = content.read_text(encoding="utf-8", errors="replace") if isinstance(content, Path) else content.decode("utf-8", errors="replace")
                     schema_failures = validate_config(log_content)
                     result.metadata["schema_validation_count"] = len(schema_failures)
                     result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
@@ -1515,7 +1508,21 @@ def create_app() -> Flask:
                 uploaded_by=uploaded_by,
                 uploaded_by_id=uploaded_by_id,
             )
-            payloads.append({"id": scan_id, "filename": result.filename, "recommendations": result.recommendations, "metadata": result.metadata, "overview": result.overview, "categories": result.categories, "result_url": result_url, "delete_token": delete_token, "expires_at": expires_at, "uploaded_by_bot": is_bot, "missing_people": missing_people})
+            payloads.append(
+                {
+                    "id": scan_id,
+                    "filename": result.filename,
+                    "recommendations": result.recommendations,
+                    "metadata": result.metadata,
+                    "overview": result.overview,
+                    "categories": result.categories,
+                    "result_url": result_url,
+                    "delete_token": delete_token,
+                    "expires_at": expires_at,
+                    "uploaded_by_bot": is_bot,
+                    "missing_people": missing_people,
+                }
+            )
         submitted_people = [person for payload in payloads for person in payload["missing_people"]]
         submitted_count = sum(bool(person.get("is_new")) for person in submitted_people)
         processed_lines = sum(payload["metadata"].get("line_count", 0) for payload in payloads)
@@ -1528,25 +1535,15 @@ def create_app() -> Flask:
             versions=[normalized_kometa_version(payload["metadata"].get("kometa_version")) for payload in payloads],
             kometa_branches=[safe_branch(payload["metadata"].get("kometa_branch"), {"master", "develop", "nightly"}) for payload in payloads],
             launchers=["quickstart" if payload["metadata"].get("quickstart_run") else "direct" for payload in payloads],
-            quickstart_versions=[
-                normalized_quickstart_version(payload["metadata"].get("quickstart_version"))
-                for payload in payloads if payload["metadata"].get("quickstart_run")
-            ],
+            quickstart_versions=[normalized_quickstart_version(payload["metadata"].get("quickstart_version")) for payload in payloads if payload["metadata"].get("quickstart_run")],
             quickstart_branches=[
-                safe_branch(payload["metadata"].get("quickstart_branch"), {"master", "develop"})
-                for payload in payloads if payload["metadata"].get("quickstart_run")
+                safe_branch(payload["metadata"].get("quickstart_branch"), {"master", "develop"}) for payload in payloads if payload["metadata"].get("quickstart_run")
             ],
             kometa_platforms=[payload["metadata"].get("runtime_platform", "Unknown") for payload in payloads],
             installation_methods=[payload["metadata"].get("installation_method", "Unknown") for payload in payloads],
-            quickstart_platforms=[
-                payload["metadata"].get("runtime_platform", "Unknown")
-                for payload in payloads if payload["metadata"].get("quickstart_run")
-            ],
+            quickstart_platforms=[payload["metadata"].get("runtime_platform", "Unknown") for payload in payloads if payload["metadata"].get("quickstart_run")],
             plex={
-                key: [
-                    value for payload in payloads
-                    for value in payload["overview"].get("plex_analytics", {}).get(key, [])
-                ]
+                key: [value for payload in payloads for value in payload["overview"].get("plex_analytics", {}).get(key, [])]
                 for key in ("versions", "platforms", "update_channels", "library_types", "agents", "scanners")
             },
             recommendations=[item for payload in payloads for item in payload["recommendations"]],
@@ -1590,15 +1587,18 @@ def create_app() -> Flask:
                             versions[branch] = response.read().decode("utf-8").strip()
                     except (HTTPError, URLError, TimeoutError, UnicodeDecodeError):
                         versions[branch] = None
-                _kometa_version_cache.update({
-                    "checked_at": datetime.now(UTC).isoformat(),
-                    "expires_at": now + KOMETA_VERSION_CACHE_SECONDS,
-                    "versions": versions,
-                })
+                _kometa_version_cache.update(
+                    {
+                        "checked_at": datetime.now(UTC).isoformat(),
+                        "expires_at": now + KOMETA_VERSION_CACHE_SECONDS,
+                        "versions": versions,
+                    }
+                )
             return jsonify(
                 checked_at=_kometa_version_cache["checked_at"],
                 **_kometa_version_cache["versions"],
             )
+
     @app.get("/api/analytics")
     def usage_analytics():
         return jsonify(analytics.snapshot())
@@ -1621,7 +1621,7 @@ def create_app() -> Flask:
             return jsonify(error=f"Page must be between 1 and {total_pages}."), 400
         first_index = (page - 1) * per_page
         return jsonify(
-            people=candidates[first_index:first_index + per_page],
+            people=candidates[first_index : first_index + per_page],
             page=page,
             total=len(candidates),
             total_pages=total_pages,
@@ -1812,10 +1812,7 @@ def create_app() -> Flask:
             abort(404)
         metadata = record.get("metadata") or {}
         cached_failures = metadata.get("schema_validation_failures")
-        if (
-            isinstance(cached_failures, list)
-            and _schema_validation_is_fresh(metadata)
-        ):
+        if isinstance(cached_failures, list) and _schema_validation_is_fresh(metadata):
             return jsonify(
                 branch=metadata.get("schema_validation_branch", "master"),
                 failures=cached_failures,

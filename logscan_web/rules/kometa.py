@@ -46,16 +46,15 @@ class PlexSecurityRule:
         return self.evaluate_bytes(context.content)
 
     def evaluate_bytes(self, content) -> list[Finding]:
-        return findings_from_lines(self.definition, (
-            number for number, version in _server_versions(content)
-            if self.vulnerable_low <= self._version_tuple(version) <= self.vulnerable_high
-        ))
+        return findings_from_lines(
+            self.definition, (number for number, version in _server_versions(content) if self.vulnerable_low <= self._version_tuple(version) <= self.vulnerable_high)
+        )
 
 
 def _server_versions(content):
     pattern = re.compile(
-        PlexSecurityRule.version_pattern.pattern if isinstance(content, str)
-        else PlexSecurityRule.version_pattern.pattern.encode("ascii"), re.I,
+        PlexSecurityRule.version_pattern.pattern if isinstance(content, str) else PlexSecurityRule.version_pattern.pattern.encode("ascii"),
+        re.I,
     )
     for number, start, end in matching_line_spans(text_pattern(("Connected to server",), content), content):
         match = pattern.search(content, start, end)
@@ -109,15 +108,10 @@ class RatingRoundingRule:
         return self.evaluate_bytes(context.content)
 
     def evaluate_bytes(self, content) -> list[Finding]:
-        if not any(
-            self.affected_low < PlexSecurityRule._version_tuple(version) < self.affected_high
-            for _number, version in _server_versions(content)
-        ):
+        if not any(self.affected_low < PlexSecurityRule._version_tuple(version) < self.affected_high for _number, version in _server_versions(content)):
             return []
         pattern = text_pattern(("mass_user_rating_update", "mass_episode_user_ratings_update"), content)
-        return findings_from_lines(self.definition, (
-            number for number, _start, _end in matching_line_spans(pattern, content)
-        ))
+        return findings_from_lines(self.definition, (number for number, _start, _end in matching_line_spans(pattern, content)))
 
 
 CUSTOM_DETECTORS = {

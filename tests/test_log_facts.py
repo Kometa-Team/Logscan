@@ -8,7 +8,6 @@ from unittest.mock import patch
 from logscan_web.log_facts import count_log_occurrences
 from logscan_web.scanner import scan_archive_path, scan_log
 
-
 HEADER = "[kometa.py:1] [INFO] | Version: 2.2.2 |\n"
 
 
@@ -43,10 +42,7 @@ class LogFactsTests(unittest.TestCase):
 
     def test_validation_terminal_outcomes_are_complete_without_runtime(self):
         for outcome in ("PASSED", "FAILED", "SKIPPED"):
-            for result in self.scans(
-                "[kometa.py:441] [INFO] | Validation Report (structure+schema) |\n"
-                f"[validator.py:100] [INFO] | Result: {outcome} |\n"
-            ):
+            for result in self.scans("[kometa.py:441] [INFO] | Validation Report (structure+schema) |\n" f"[validator.py:100] [INFO] | Result: {outcome} |\n"):
                 with self.subTest(outcome=outcome, result=result.metadata):
                     self.assertTrue(result.metadata["complete"])
                     self.assertTrue(result.metadata["validation_run"])
@@ -68,18 +64,13 @@ class LogFactsTests(unittest.TestCase):
             self.assertIn("incomplete_log", [item["id"] for item in result.recommendations])
 
     def test_unrelated_result_does_not_complete_validation(self):
-        for result in self.scans(
-            "[kometa.py:441] [INFO] | Validation Report (syntax) |\n"
-            "[other.py:100] [INFO] | Result: PASSED |\n"
-        ):
+        for result in self.scans("[kometa.py:441] [INFO] | Validation Report (syntax) |\n" "[other.py:100] [INFO] | Result: PASSED |\n"):
             self.assertFalse(result.metadata["complete"])
             self.assertIsNone(result.metadata["validation_result"])
 
     def test_new_validation_report_clears_old_terminal_result(self):
         for result in self.scans(
-            "[kometa.py:441] [INFO] | Validation Report (syntax) |\n"
-            "[validator.py:100] [INFO] | Result: PASSED |\n"
-            "[kometa.py:441] [INFO] | Validation Report (full) |\n"
+            "[kometa.py:441] [INFO] | Validation Report (syntax) |\n" "[validator.py:100] [INFO] | Result: PASSED |\n" "[kometa.py:441] [INFO] | Validation Report (full) |\n"
         ):
             self.assertFalse(result.metadata["complete"])
             self.assertIsNone(result.metadata["validation_result"])
@@ -87,9 +78,7 @@ class LogFactsTests(unittest.TestCase):
 
     def test_stream_validation_result_beyond_sampling_limit(self):
         for result in self.scans(
-            "[kometa.py:441] [INFO] | Validation Report (full) |\n"
-            + "[other.py:100] [INFO] | Result: intermediate |\n" * 205
-            + "[validator.py:100] [INFO] | Result: PASSED |\n"
+            "[kometa.py:441] [INFO] | Validation Report (full) |\n" + "[other.py:100] [INFO] | Result: intermediate |\n" * 205 + "[validator.py:100] [INFO] | Result: PASSED |\n"
         ):
             self.assertTrue(result.metadata["complete"])
             self.assertEqual(result.metadata["validation_result"], "passed")
@@ -126,8 +115,7 @@ class LogFactsTests(unittest.TestCase):
         from logscan_web.app import app, ANALYSIS_VERSION
         from logscan_web.storage import ScanStore
 
-        data = (HEADER + "[kometa.py:2] [ERROR] | TMDb Error: Invalid API key |\n" * 3
-                + "[validator.py:100] [INFO] | Result: FAILED |\n").encode()
+        data = (HEADER + "[kometa.py:2] [ERROR] | TMDb Error: Invalid API key |\n" * 3 + "[validator.py:100] [INFO] | Result: FAILED |\n").encode()
         result = scan_log("meta.log", data)
         result.metadata.update(analysis_version=ANALYSIS_VERSION, schema_validation_count=0)
         store = ScanStore(app.config["SCAN_STORE"])

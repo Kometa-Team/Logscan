@@ -124,13 +124,15 @@ class ScanStore:
             record = self.get(scan_id)
             if record is None:
                 return False
-            record.update({
-                "filename": result.filename,
-                "recommendations": result.recommendations,
-                "metadata": result.metadata,
-                "overview": result.overview,
-                "categories": result.categories,
-            })
+            record.update(
+                {
+                    "filename": result.filename,
+                    "recommendations": result.recommendations,
+                    "metadata": result.metadata,
+                    "overview": result.overview,
+                    "categories": result.categories,
+                }
+            )
             result_path = self.root / scan_id / "result.json"
             temporary = self.root / scan_id / "result.json.tmp"
             temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
@@ -232,12 +234,25 @@ class AnonymousAnalyticsStore:
                     self._increment(day.setdefault("sources", {}), "legacy", difference)
             data["legacy_usage_imported"] = True
             self._write(data)
+
     def record_success(
-        self, *, logs: int, lines: int, bytes_processed: int, source: str,
-        batch: bool, versions: list[str], kometa_branches: list[str], launchers: list[str],
-        quickstart_versions: list[str], quickstart_branches: list[str],
-        recommendations: list[dict], people: int, plex: dict[str, list[str]] | None = None,
-        kometa_platforms: list[str] | None = None, quickstart_platforms: list[str] | None = None,
+        self,
+        *,
+        logs: int,
+        lines: int,
+        bytes_processed: int,
+        source: str,
+        batch: bool,
+        versions: list[str],
+        kometa_branches: list[str],
+        launchers: list[str],
+        quickstart_versions: list[str],
+        quickstart_branches: list[str],
+        recommendations: list[dict],
+        people: int,
+        plex: dict[str, list[str]] | None = None,
+        kometa_platforms: list[str] | None = None,
+        quickstart_platforms: list[str] | None = None,
         installation_methods: list[str] | None = None,
     ) -> None:
         with self.lock:
@@ -267,9 +282,11 @@ class AnonymousAnalyticsStore:
                 self._increment(day["installation_methods"], method)
             plex = plex or {}
             for source_key, analytics_key in (
-                ("versions", "plex_versions"), ("platforms", "plex_platforms"),
+                ("versions", "plex_versions"),
+                ("platforms", "plex_platforms"),
                 ("update_channels", "plex_update_channels"),
-                ("library_types", "plex_library_types"), ("agents", "plex_agents"),
+                ("library_types", "plex_library_types"),
+                ("agents", "plex_agents"),
                 ("scanners", "plex_scanners"),
             ):
                 for value in plex.get(source_key, []):
@@ -325,16 +342,36 @@ class AnonymousAnalyticsStore:
         totals = self._empty_day()
         for day in data["days"].values():
             for key in (
-                "successful_logs", "lines_processed", "bytes_processed", "people_submitted",
-                "people_addressed", "address_seconds_total", "address_duration_count", "batches",
+                "successful_logs",
+                "lines_processed",
+                "bytes_processed",
+                "people_submitted",
+                "people_addressed",
+                "address_seconds_total",
+                "address_duration_count",
+                "batches",
             ):
                 totals[key] += day.get(key, 0)
             for key in (
-                "sources", "rejections", "rejection_sources", "kometa_versions", "kometa_branches",
-                "launchers", "quickstart_versions", "quickstart_branches", "kometa_platforms", "quickstart_platforms",
+                "sources",
+                "rejections",
+                "rejection_sources",
+                "kometa_versions",
+                "kometa_branches",
+                "launchers",
+                "quickstart_versions",
+                "quickstart_branches",
+                "kometa_platforms",
+                "quickstart_platforms",
                 "installation_methods",
-                "plex_versions", "plex_platforms", "plex_update_channels", "plex_library_types",
-                "plex_agents", "plex_scanners", "recommendations_by_id", "recommendations_by_severity",
+                "plex_versions",
+                "plex_platforms",
+                "plex_update_channels",
+                "plex_library_types",
+                "plex_agents",
+                "plex_scanners",
+                "recommendations_by_id",
+                "recommendations_by_severity",
             ):
                 for label, count in day.get(key, {}).items():
                     self._increment(totals[key], label, count)
@@ -342,6 +379,7 @@ class AnonymousAnalyticsStore:
         seconds = totals.pop("address_seconds_total")
         totals["average_address_seconds"] = round(seconds / count) if count else None
         return totals
+
     @staticmethod
     def _increment(values: dict, key: str, amount: int = 1) -> None:
         safe_key = str(key or "unknown")[:80]
@@ -350,15 +388,32 @@ class AnonymousAnalyticsStore:
     @staticmethod
     def _empty_day() -> dict:
         return {
-            "successful_logs": 0, "lines_processed": 0, "bytes_processed": 0,
-            "people_submitted": 0, "people_addressed": 0, "address_seconds_total": 0,
-            "address_duration_count": 0, "batches": 0, "sources": {}, "rejections": {},
-            "rejection_sources": {}, "kometa_versions": {}, "kometa_branches": {},
-            "launchers": {}, "quickstart_versions": {}, "quickstart_branches": {},
-            "kometa_platforms": {}, "quickstart_platforms": {}, "installation_methods": {},
+            "successful_logs": 0,
+            "lines_processed": 0,
+            "bytes_processed": 0,
+            "people_submitted": 0,
+            "people_addressed": 0,
+            "address_seconds_total": 0,
+            "address_duration_count": 0,
+            "batches": 0,
+            "sources": {},
+            "rejections": {},
+            "rejection_sources": {},
+            "kometa_versions": {},
+            "kometa_branches": {},
+            "launchers": {},
+            "quickstart_versions": {},
+            "quickstart_branches": {},
+            "kometa_platforms": {},
+            "quickstart_platforms": {},
+            "installation_methods": {},
             "recommendations_by_id": {},
-            "plex_versions": {}, "plex_platforms": {}, "plex_update_channels": {},
-            "plex_library_types": {}, "plex_agents": {}, "plex_scanners": {},
+            "plex_versions": {},
+            "plex_platforms": {},
+            "plex_update_channels": {},
+            "plex_library_types": {},
+            "plex_agents": {},
+            "plex_scanners": {},
             "recommendations_by_severity": {},
         }
 
@@ -506,30 +561,26 @@ class PeopleStore:
             if existing:
                 incoming_requesters = person.get("requested_by", [])
                 incoming_provenance_tags = person.get("provenance_tags", [])
-                existing.update({
-                    key: value
-                    for key, value in person.items()
-                    if value is not None and key not in {"requested_by", "provenance_tags"}
-                })
+                existing.update({key: value for key, value in person.items() if value is not None and key not in {"requested_by", "provenance_tags"}})
                 requesters = list(existing.get("requested_by", []))
                 for requester in incoming_requesters:
                     requester_id = requester.get("id")
                     requester_name = requester.get("name", "").casefold()
-                    match = next((item for item in requesters if (
-                        requester_id and item.get("id") == requester_id
-                    ) or (
-                        not requester_id and requester_name and item.get("name", "").casefold() == requester_name
-                    )), None)
+                    match = next(
+                        (
+                            item
+                            for item in requesters
+                            if (requester_id and item.get("id") == requester_id) or (not requester_id and requester_name and item.get("name", "").casefold() == requester_name)
+                        ),
+                        None,
+                    )
                     if match:
                         match.update({key: value for key, value in requester.items() if value})
                     else:
                         requesters.append(requester)
                 if requesters:
                     existing["requested_by"] = requesters
-                provenance_tags = [
-                    str(tag) for tag in existing.get("provenance_tags", [])
-                    if isinstance(tag, str) and tag
-                ]
+                provenance_tags = [str(tag) for tag in existing.get("provenance_tags", []) if isinstance(tag, str) and tag]
                 for tag in incoming_provenance_tags:
                     if isinstance(tag, str) and tag and tag not in provenance_tags:
                         provenance_tags.append(tag)
@@ -701,7 +752,9 @@ class PopularPeopleCheckStore:
             values = json.loads(self.path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-        return {int(person_id): checked_at for person_id, checked_at in values.items() if str(person_id).isdigit() and isinstance(checked_at, str)} if isinstance(values, dict) else {}
+        return (
+            {int(person_id): checked_at for person_id, checked_at in values.items() if str(person_id).isdigit() and isinstance(checked_at, str)} if isinstance(values, dict) else {}
+        )
 
     def _write(self, records: dict[int, str]) -> None:
         temporary = self.path.with_suffix(".tmp")
@@ -748,8 +801,8 @@ class PopularPeopleFlagStore:
             values = json.loads(self.path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-        return {
-            int(person_id): record
-            for person_id, record in values.items()
-            if str(person_id).isdigit() and isinstance(record, dict) and isinstance(record.get("reason"), str)
-        } if isinstance(values, dict) else {}
+        return (
+            {int(person_id): record for person_id, record in values.items() if str(person_id).isdigit() and isinstance(record, dict) and isinstance(record.get("reason"), str)}
+            if isinstance(values, dict)
+            else {}
+        )

@@ -10,7 +10,6 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import YAMLError
 from ruamel.yaml.mergevalue import MergeValue
 
-
 MAX_CONFIG_BYTES = 2 * 1024 * 1024
 MAX_YAML_EVENTS = 30000
 MAX_DEPTH = 80
@@ -21,8 +20,7 @@ def _line_counts(original, optimized):
     before = len(original.splitlines())
     after = len(optimized.splitlines())
     saved = before - after
-    return {"before": before, "after": after, "saved": saved,
-            "reduction_percent": round(saved * 100 / before, 1) if before else 0}
+    return {"before": before, "after": after, "saved": saved, "reduction_percent": round(saved * 100 / before, 1) if before else 0}
 
 
 def _signature(value, ancestors=frozenset(), ordered=False):
@@ -31,8 +29,7 @@ def _signature(value, ancestors=frozenset(), ordered=False):
             raise ValueError("Recursive YAML aliases cannot be optimized.")
         ancestors = ancestors | {id(value)}
         if isinstance(value, dict):
-            pairs = [(_signature(key, ancestors, ordered), _signature(item, ancestors, ordered))
-                     for key, item in value.items()]
+            pairs = [(_signature(key, ancestors, ordered), _signature(item, ancestors, ordered)) for key, item in value.items()]
             return ("mapping", tuple(pairs if ordered else sorted(pairs, key=repr)))
         return ("sequence", tuple(_signature(item, ancestors, ordered) for item in value))
     return (type(value).__name__, repr(value))
@@ -107,9 +104,15 @@ def optimize_config(config: str) -> dict:
             source.yaml_set_anchor(f"logscan_shared_{index}", always_dump=True)
             anchor_names.add(source.anchor.value)
         name = source.anchor.value
-        change = changes.setdefault(name, {
-            "anchor": name, "source": source_path, "locations": [source_path], "kind": kind,
-        })
+        change = changes.setdefault(
+            name,
+            {
+                "anchor": name,
+                "source": source_path,
+                "locations": [source_path],
+                "kind": kind,
+            },
+        )
         change["locations"].append(target_path)
 
     def visit(value, parent=None, key=None, path="config", role="root"):
@@ -161,9 +164,7 @@ def optimize_config(config: str) -> dict:
 
     visit(document)
     if not changes:
-        return {"status": "unchanged", "changes": [], "diff": "", "optimized_config": None,
-                "line_counts": _line_counts(config, config),
-                "message": "No useful repetition found."}
+        return {"status": "unchanged", "changes": [], "diff": "", "optimized_config": None, "line_counts": _line_counts(config, config), "message": "No useful repetition found."}
     stream = StringIO()
     round_trip.dump(document, stream)
     optimized = stream.getvalue()
@@ -173,10 +174,10 @@ def optimize_config(config: str) -> dict:
     except (yaml.YAMLError, RecursionError) as exc:
         raise ValueError("The proposed YAML could not be verified; no download was generated.") from exc
     return {
-        "status": "optimized", "changes": list(changes.values()),
+        "status": "optimized",
+        "changes": list(changes.values()),
         "line_counts": _line_counts(config, optimized),
         "optimized_config": optimized,
-        "diff": "".join(unified_diff([line + "\n" for line in config.splitlines()], optimized.splitlines(keepends=True),
-                                     fromfile="original.yml", tofile="anchored.yml")),
+        "diff": "".join(unified_diff([line + "\n" for line in config.splitlines()], optimized.splitlines(keepends=True), fromfile="original.yml", tofile="anchored.yml")),
         "message": "Resolved config values verified unchanged.",
     }
