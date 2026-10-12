@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-3') }}">
   <script id="initial-scan" type="application/json">{{ initial_scan|tojson }}</script>
   <script id="initial-batch" type="application/json">{{ initial_batch|tojson }}</script>
-  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20261012-1') }}" defer></script>
+  <script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='app.js', v='20261012-5') }}" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -36,7 +36,7 @@
       <dl class="usage-stats cleanup-totals" aria-label="Cumulative ImageMaid cleanup">
         <div><dt>ImageMaid logs uploaded</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_logs_uploaded) }}</dd></div>
         <div><dt>Plex image bloat files removed</dt><dd>{{ "{:,}".format(usage_stats.imagemaid_files_removed) }}</dd></div>
-        <div><dt>ImageMaid space recovered</dt><dd>{{ usage_stats.imagemaid_space_recovered }}</dd></div>
+        <div><dt>Plex image bloat space recovered</dt><dd>{{ usage_stats.imagemaid_space_recovered }}</dd></div>
       </dl>
       <p class="usage-since">Tracking since {{ usage_stats.tracking_since }}</p>
     </section>

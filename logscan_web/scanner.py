@@ -16,7 +16,7 @@ from urllib.parse import unquote
 import py7zr
 import zstandard as zstd
 
-from .models import ScanContext
+from .models import Finding, ScanContext
 from .rules import RuleRegistry, migrated_rules
 from .rules.base import TextRule, evaluate_text_rules_bytes
 from .categories import category_configuration
@@ -465,13 +465,15 @@ def kometa_branch_from_version(version: str | None) -> str:
     return match.group(1).casefold() if match else "unknown"
 
 
-def _log_message(line: str) -> str:
+def _log_message(line: str, *, strip: bool = True) -> str:
     """Return the readable message from a Kometa log line."""
     match = re.match(
         r"^(?:\[[^\]]+\]\s+)*\[[^\]]+\.py:\d+\]\s+\[[A-Z]+\]\s*\|\s?(.*?)\s*\|?\s*$",
         line,
     )
-    return match.group(1).strip() if match else line.strip().strip("|").strip()
+    if strip:
+        return match.group(1).strip() if match else line.strip().strip("|").strip()
+    return match.group(1) if match else re.sub(r"^\s*\| ?", "", line).rstrip().removesuffix("|").rstrip()
 
 
 def _plex_configuration_section(lines: list[str], number: int) -> dict[str, object]:
@@ -770,6 +772,8 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         b"version:",
         b"branch:",
         b"kometa integrity:",
+        b"source integrity:",
+        b"source integrity summary",
         b"[quickstart]",
         b"config created by quickstart",
         b"quickstart:",
@@ -834,7 +838,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     chunk_start = 0
     lines_before_chunk = 0
     sample_hits = {term: 0 for term in sample_terms}
-    unlimited_sample_terms = {b"finished ", b"run time:", b"kometa integrity:"}
+    unlimited_sample_terms = {b"finished ", b"run time:", b"kometa integrity:", b"source integrity:", b"source integrity summary"}
 
     def decoded_line(start: int) -> tuple[str, int]:
         end = content_bytes.find(b"\n", start)
@@ -874,8 +878,8 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
                 if lowered_term == b"run_order:" and line_end < content_length:
                     next_line, _next_end = decoded_line(line_end + 1)
                     sampled_lines.setdefault(current_line + 1, next_line)
-                if lowered_term == b"kometa integrity:":
-                    # Quickstart reports up to 20 diagnostics per file category.
+                if lowered_term in {b"kometa integrity:", b"source integrity:"}:
+                    # Both reporters list up to 20 paths per file category.
                     report_end = line_end
                     for offset in range(1, 101):
                         if report_end >= content_length:
@@ -917,6 +921,8 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         complete=complete_log,
     )
     findings.extend(finding for rule in contextual_rules for finding in rule.evaluate(context))
+    integrity = extract_kometa_integrity(sample_content)
+    findings.extend(_integrity_findings(integrity))
     normalized = [finding.as_dict() for finding in findings]
     apply_documentation_branch(normalized, kometa_branch)
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
@@ -925,7 +931,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         "kometa_version": kometa_version,
         "newest_version_at_run": _first_value(sample_content, "Newest Version"),
         "kometa_branch": kometa_branch,
-        "kometa_integrity": extract_kometa_integrity(sample_content),
+        "kometa_integrity": integrity,
         **quickstart_metadata,
         "runtime_platform": normalized_platform(runtime_platform),
         "installation_method": normalized_installation(kometa_version),
@@ -955,8 +961,115 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     )
 
 
+def _extract_source_integrity(content: str) -> dict | None:
+    """Read the native startup result without adopting later summary results."""
+    result = None
+    category = None
+    category_indent = 0
+    summary = False
+    for number, line in enumerate(content.splitlines(), 1):
+        raw_message = _log_message(line, strip=False)
+        message = raw_message.strip()
+        if re.fullmatch(r"[=\s]*Source Integrity Summary \(startup check\)[=\s]*", message, re.I):
+            if result is not None:
+                break
+            summary = True
+        header = re.fullmatch(r"Source Integrity:\s*(.+)", message, re.I)
+        if header:
+            if result is not None:
+                break
+            reported = header.group(1).strip()
+            state = "unknown"
+            if reported.casefold() == "verified":
+                state = "clean"
+            elif reported.casefold() == "modified":
+                state = "modified"
+            elif re.fullmatch(r"Check unavailable(?:\s*\(.*\))?", reported, re.I):
+                state = "check_unavailable"
+            elif re.fullmatch(r"Disabled(?:\s*\(.*\))?", reported, re.I):
+                state = "disabled"
+            reason = re.search(r"\((.*)\)$", reported)
+            result = {
+                "detected": True,
+                "state": state,
+                "reported_state": reported,
+                "checked_at": None,
+                "commit": None,
+                "counts": {"modified": 0, "missing": 0, "added": 0},
+                "modified": [],
+                "missing": [],
+                "added": [],
+                "errors": [],
+                "details": [reason.group(1)] if reason else [],
+                "source": "kometa",
+                "report_location": "summary" if summary else "startup",
+                "evidence_lines": [number],
+            }
+            continue
+        if result is None:
+            continue
+        heading = re.fullmatch(r"(Modified|Missing|Added):", message, re.I)
+        if result["state"] == "modified" and heading:
+            category = heading.group(1).casefold()
+            category_indent = len(raw_message) - len(raw_message.lstrip())
+        elif category and message and len(raw_message) - len(raw_message.lstrip()) > category_indent:
+            if message not in result[category]:
+                result[category].append(message)
+                remaining = re.fullmatch(r"(\d+) more", message)
+                result["counts"][category] += int(remaining.group(1)) if remaining else 1
+        else:
+            break
+        result["evidence_lines"].append(number)
+    return result
+
+
+def _integrity_findings(integrity: dict) -> list[Finding]:
+    if not integrity.get("detected"):
+        return []
+    state = integrity["state"]
+    if state == "modified":
+        key, severity, title = "modified", "warning", "Kometa source integrity: modified files"
+        description = "The integrity report confirms differences from the upstream source baseline. This is a support diagnostic, not a run-blocking error."
+        solution = "Review the listed changes. If they were not intentional, restore the official Kometa source files using your installation's update method."
+    elif state == "clean":
+        key, severity, title = "verified", "advice", "Kometa source integrity: verified"
+        description = "The reported integrity check found no source-file differences from its upstream baseline."
+        solution = "No integrity-related action is needed. Verification applies to the reported check, not to later file changes."
+    elif state == "disabled":
+        key, severity, title = "disabled", "advice", "Kometa source integrity: check disabled"
+        description = "Source integrity checking was disabled. Local source files were not verified; this does not indicate detected file changes."
+        solution = "Enable source-integrity checking for a future run if verification is needed."
+    elif state in {"check_unavailable", "check_failed", "not_verified", "not_applicable"}:
+        key, severity, title = "unavailable", "advice", "Kometa source integrity: check unavailable"
+        description = "The source comparison was not completed. Local files were not verified; an unavailable check or timeout does not indicate detected file changes."
+        solution = "Review the reported reason and retry the integrity check when it is available. Kometa can continue running without a completed check."
+    else:
+        return []
+    origin = "Kometa startup check" if integrity.get("source") == "kometa" else "Quickstart integrity report"
+    if integrity.get("report_location") == "summary":
+        origin += " (reported in the end-of-run summary)"
+    details = [f"**{title}**", f"Issue: {description}", f"Integrity result: {integrity['reported_state']}", f"Report source: {origin}"]
+    for label, field in (("Installed commit", "commit"), ("Checked at", "checked_at")):
+        if integrity.get(field):
+            details.append(f"{label}: {integrity[field]}")
+    if state == "modified":
+        for category in ("modified", "missing", "added"):
+            values = integrity.get(category, [])
+            details.append(f"{category.title()} files ({integrity.get('counts', {}).get(category, len(values))}):")
+            details.extend(f"- {value}" for value in values)
+            if not values:
+                details.append("- No file paths reported" if integrity.get("counts", {}).get(category) else "- None reported")
+    details.extend(integrity.get("errors", []))
+    details.extend(integrity.get("details", []))
+    details.extend(["", f"Proposed solution: {solution}"])
+    return [Finding(f"source_integrity_{key}", severity, title, description, solution, tuple(integrity.get("evidence_lines", [])), "\n".join(details))]
+
+
 def extract_kometa_integrity(content: str) -> dict:
-    """Read Quickstart's integrity report, preferring run markers over config comments."""
+    """Prefer Kometa's native result, then Quickstart run markers over comments."""
+    native = _extract_source_integrity(content)
+    if native is not None:
+        return native
     states = {"clean", "modified", "not_verified", "not_applicable", "check_failed"}
     result = {"detected": False, "state": "not_reported"}
     current = None
@@ -1168,7 +1281,8 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
     registry = RuleRegistry()
     for rule in migrated_rules():
         registry.register(rule)
-    normalized = [finding.as_dict() for finding in registry.evaluate(context)]
+    integrity = extract_kometa_integrity(content)
+    normalized = [finding.as_dict() for finding in [*registry.evaluate(context), *_integrity_findings(integrity)]]
     apply_documentation_branch(normalized, kometa_branch)
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
 
@@ -1178,7 +1292,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "kometa_version": kometa_version,
         "newest_version_at_run": _first_value(content, "Newest Version"),
         "kometa_branch": kometa_branch,
-        "kometa_integrity": extract_kometa_integrity(content),
+        "kometa_integrity": integrity,
         **quickstart_metadata,
         "runtime_platform": normalized_platform(runtime_platform),
         "installation_method": normalized_installation(kometa_version),

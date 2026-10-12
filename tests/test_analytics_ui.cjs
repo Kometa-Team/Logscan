@@ -30,7 +30,7 @@ test("service totals include ImageMaid cleanup without opening an accordion", ()
   assert.equal(metrics.length, 12);
   assert.equal(metrics[0].children[0].textContent, "Kometa logs uploaded");
   assert.equal(metrics[1].children[0].textContent, "ImageMaid logs uploaded");
-  for (const [label, value] of [["Kometa logs uploaded", "523"], ["ImageMaid logs uploaded", "3"], ["Plex image bloat files removed", "27,448"], ["ImageMaid space recovered", "1.5 MB"], ["Missing people images identified", "38"], ["Missing people images resolved", "18"]]) {
+  for (const [label, value] of [["Kometa logs uploaded", "523"], ["ImageMaid logs uploaded", "3"], ["Plex image bloat files removed", "27,448"], ["Plex image bloat space recovered", "1.5 MB"], ["Missing people images identified", "38"], ["Missing people images resolved", "18"]]) {
     const metric = metrics.find(item => item.children[0].textContent === label);
     assert.equal(metric.children[1].textContent, value);
   }
@@ -46,7 +46,7 @@ test("ImageMaid summary handles analytics stores without cleanup data", () => {
   const metrics = nodes.get("#analytics-summary").children;
   assert.equal(metrics.find(item => item.children[0].textContent === "Kometa logs uploaded").children[1].textContent, "0");
   assert.equal(metrics.find(item => item.children[0].textContent === "ImageMaid logs uploaded").children[1].textContent, "0");
-  assert.equal(metrics.find(item => item.children[0].textContent === "ImageMaid space recovered").children[1].textContent, "0 B");
+  assert.equal(metrics.find(item => item.children[0].textContent === "Plex image bloat space recovered").children[1].textContent, "0 B");
 });
 
 test("Findings uses the Logscan logo in its accordion header", () => {
