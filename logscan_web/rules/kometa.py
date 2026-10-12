@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import ClassVar
 
-from .base import TextRule
+from .base import TextRule, findings_from_lines, matching_line_spans, text_pattern
 from ..models import Finding, ScanContext
 from ..recommendations import RULES, RULES as RECOMMENDATION_RULES
 
@@ -43,22 +43,25 @@ class PlexSecurityRule:
         return int(major), int(minor), int(patch), int(build)
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        evidence = tuple(
-            number
-            for number, line in enumerate(context.lines, start=1)
-            if (match := self.version_pattern.search(line))
-            and self.vulnerable_low <= self._version_tuple(match.group(1)) <= self.vulnerable_high
-        )
-        if not evidence:
-            return []
-        return [Finding(
-            self.id,
-            self.definition.category,
-            self.definition.title,
-            self.definition.description,
-            self.definition.solution,
-            evidence,
-        )]
+        return self.evaluate_bytes(context.content)
+
+    def evaluate_bytes(self, content) -> list[Finding]:
+        return findings_from_lines(self.definition, (
+            number for number, version in _server_versions(content)
+            if self.vulnerable_low <= self._version_tuple(version) <= self.vulnerable_high
+        ))
+
+
+def _server_versions(content):
+    pattern = re.compile(
+        PlexSecurityRule.version_pattern.pattern if isinstance(content, str)
+        else PlexSecurityRule.version_pattern.pattern.encode("ascii"), re.I,
+    )
+    for number, start, end in matching_line_spans(text_pattern(("Connected to server",), content), content):
+        match = pattern.search(content, start, end)
+        if match:
+            version = match.group(1)
+            yield number, version if isinstance(version, str) else version.decode("ascii")
 
 
 @dataclass(frozen=True)
@@ -71,15 +74,24 @@ class RunOrderRule:
         return self.definition.id
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        evidence = []
-        previous_number = None
-        previous_line = None
-        for number, line in enumerate(context.lines, 1):
-            if previous_line is not None and "run_order:" in previous_line.lower() and "- operations" not in line.lower():
-                evidence.append(previous_number)
-            previous_number, previous_line = number, line
-        return [Finding(self.id, self.definition.category, self.definition.title,
-                        self.definition.description, self.definition.solution, tuple(evidence))] if evidence else []
+        return self.evaluate_bytes(context.content)
+
+    def evaluate_bytes(self, content) -> list[Finding]:
+        breaks = re.compile(r"\r\n|\r|\n" if isinstance(content, str) else rb"\r\n|\r|\n")
+        operations = text_pattern(("- operations",), content)
+
+        def matching_numbers():
+            for number, _start, end in matching_line_spans(text_pattern(("run_order:",), content), content):
+                line_break = breaks.match(content, end)
+                if line_break is None or line_break.end() == len(content):
+                    continue
+                next_start = line_break.end()
+                next_break = breaks.search(content, next_start)
+                next_end = next_break.start() if next_break else len(content)
+                if operations.search(content, next_start, next_end) is None:
+                    yield number
+
+        return findings_from_lines(self.definition, matching_numbers())
 
 
 @dataclass(frozen=True)
@@ -94,18 +106,18 @@ class RatingRoundingRule:
         return self.definition.id
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        return self.evaluate_bytes(context.content)
+
+    def evaluate_bytes(self, content) -> list[Finding]:
         if not any(
-            (match := PlexSecurityRule.version_pattern.search(line))
-            and self.affected_low < PlexSecurityRule._version_tuple(match.group(1))
-            < self.affected_high
-            for line in context.lines
+            self.affected_low < PlexSecurityRule._version_tuple(version) < self.affected_high
+            for _number, version in _server_versions(content)
         ):
             return []
-        evidence = tuple(number for number, line in enumerate(context.lines, 1)
-                         if "mass_user_rating_update" in line.lower()
-                         or "mass_episode_user_ratings_update" in line.lower())
-        return [Finding(self.id, self.definition.category, self.definition.title,
-                        self.definition.description, self.definition.solution, evidence)] if evidence else []
+        pattern = text_pattern(("mass_user_rating_update", "mass_episode_user_ratings_update"), content)
+        return findings_from_lines(self.definition, (
+            number for number, _start, _end in matching_line_spans(pattern, content)
+        ))
 
 
 CUSTOM_DETECTORS = {

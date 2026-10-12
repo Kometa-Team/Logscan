@@ -710,6 +710,12 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
     text_rules = [rule for rule in rules if isinstance(rule, TextRule)]
     custom_rules = [rule for rule in rules if not isinstance(rule, TextRule)]
     findings = evaluate_text_rules_bytes(text_rules, content_bytes)
+    contextual_rules = []
+    for rule in custom_rules:
+        if (evaluate_bytes := getattr(rule, "evaluate_bytes", None)) is not None:
+            findings.extend(evaluate_bytes(content_bytes))
+        else:
+            contextual_rules.append(rule)
 
     sample_terms = (
         b"version:", b"branch:", b"kometa integrity:",
@@ -824,7 +830,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         filename, sample_content, kometa_version=kometa_version,
         run_time=detected_run_time, complete=complete_log,
     )
-    findings.extend(finding for rule in custom_rules for finding in rule.evaluate(context))
+    findings.extend(finding for rule in contextual_rules for finding in rule.evaluate(context))
     normalized = [finding.as_dict() for finding in findings]
     apply_documentation_branch(normalized, kometa_branch)
     normalized.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
