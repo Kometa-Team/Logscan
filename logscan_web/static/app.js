@@ -2,7 +2,7 @@ const form = document.querySelector("#upload-form");
 const input = document.querySelector("#log-file");
 const dropZone = document.querySelector("#drop-zone");
 const filePill = document.querySelector("#file-pill");
-const status = document.querySelector("#form-status");
+const formStatus = document.querySelector("#form-status");
 const scanButton = document.querySelector("#scan-button");
 const uploadErrorDetails = document.querySelector("#upload-error-details");
 const unexpectedFileList = document.querySelector("#unexpected-file-list");
@@ -190,7 +190,7 @@ function showOverview(group, overview) {
             link.title = "Open Discord message";
             definition.append(document.createElement("br"), "Discord Message: ", link);
           }
-        } catch (_error) {
+        } catch {
           // Uploader attribution is still useful when a legacy message URL is malformed.
         }
       }
@@ -361,8 +361,8 @@ function selectedFiles(files) {
   filePill.textContent = chosenFiles.length === 1
     ? `${chosen.name} · ${formatBytes(chosen.size)}`
     : chosenFiles.length ? `${chosenFiles.length} files selected · ${formatBytes(chosenFiles.reduce((total, file) => total + file.size, 0))}` : "LOG, TXT, or YAML · ZIP, 7Z, TAR, GZIP, BZIP2, XZ, or Zstandard · up to 1 GB each";
-  status.textContent = chosenFiles.length ? `${chosenFiles.length} file${chosenFiles.length === 1 ? "" : "s"} selected` : "Ready to scan";
-  status.classList.remove("error");
+  formStatus.textContent = chosenFiles.length ? `${chosenFiles.length} file${chosenFiles.length === 1 ? "" : "s"} selected` : "Ready to scan";
+  formStatus.classList.remove("error");
   uploadErrorDetails.hidden = true;
 }
 
@@ -1657,7 +1657,7 @@ async function loadCurrentKometaVersions(data) {
       current_develop_version: versions.develop || "Unavailable",
       current_versions_checked: versions.checked_at ? new Date(versions.checked_at).toLocaleString() : "Unavailable",
     });
-  } catch (_error) {
+  } catch {
     Object.assign(data.overview, {
       current_comparison_branch: "Unavailable",
       current_branch_version: "Unavailable",
@@ -1864,7 +1864,7 @@ function renderCompletedJob(result) {
     unscanned_files: result.unscanned_files || [],
   }));
   batchScans = scans;
-  status.textContent = `${scans.length} scan${scans.length === 1 ? "" : "s"} complete`;
+  formStatus.textContent = `${scans.length} scan${scans.length === 1 ? "" : "s"} complete`;
   dropZone.classList.remove("loading");
   scanButton.disabled = false;
   if (scans.length > 1) {
@@ -1887,10 +1887,10 @@ async function refreshScanStatus(jobId, recover = false) {
   const phaseLabel = job.phase === "queued" && job.queue_position
     ? `Waiting for scanner · Queue position ${job.queue_position} (${aheadLabel})`
     : scanPhaseLabels[job.phase] || "Scanning";
-  status.textContent = `${phaseLabel} · ${elapsedLabel(job.elapsed_seconds || 0)}`;
+  formStatus.textContent = `${phaseLabel} · ${elapsedLabel(job.elapsed_seconds || 0)}`;
   if (job.phase === "failed") {
-    status.textContent = job.error || "The scan could not be completed.";
-    status.classList.add("error");
+    formStatus.textContent = job.error || "The scan could not be completed.";
+    formStatus.classList.add("error");
     sessionStorage.removeItem("activeScanJob");
     stopScanStatus();
     dropZone.classList.remove("loading");
@@ -1917,14 +1917,14 @@ form.addEventListener("submit", async (event) => {
   if (!files.length) return;
   dropZone.classList.add("loading");
   scanButton.disabled = true;
-  status.textContent = `Scanning 0 of ${files.length} logs…`;
-  status.classList.remove("error");
+  formStatus.textContent = `Scanning 0 of ${files.length} logs…`;
+  formStatus.classList.remove("error");
   const jobId = crypto.randomUUID();
   sessionStorage.setItem("activeScanJob", jobId);
   watchScanStatus(jobId);
   try {
     const failures = [];
-    status.textContent = `Scanning ${files.length} log${files.length === 1 ? "" : "s"}…`;
+    formStatus.textContent = `Scanning ${files.length} log${files.length === 1 ? "" : "s"}…`;
     const body = new FormData();
     files.forEach((file) => body.append("log", file));
     const response = await fetch("/api/scan", { method: "POST", body, headers: { "X-Scan-Job-ID": jobId } });
@@ -1945,7 +1945,7 @@ form.addEventListener("submit", async (event) => {
       location.href = data.batch_admin_url;
       return;
     }
-    status.textContent = failures.length
+    formStatus.textContent = failures.length
       ? `${completed.length} scan${completed.length === 1 ? "" : "s"} complete; ${uploadFailureSummary(failures)}`
       : `${completed.length} scan${completed.length === 1 ? "" : "s"} complete`;
     batchScans = completed;
@@ -1958,7 +1958,7 @@ form.addEventListener("submit", async (event) => {
     const marker = "Unexpected files:";
     if (error.message.includes(marker)) {
       const [summary, names] = error.message.split(marker, 2);
-      status.textContent = summary.trim();
+      formStatus.textContent = summary.trim();
       unexpectedFileList.replaceChildren(...names.split(",").map((name) => {
         const item = document.createElement("li");
         item.textContent = name.trim();
@@ -1966,14 +1966,14 @@ form.addEventListener("submit", async (event) => {
       }));
       uploadErrorDetails.hidden = false;
     } else {
-      status.textContent = error.message;
+      formStatus.textContent = error.message;
     }
-    status.classList.add("error");
+    formStatus.classList.add("error");
     // A lost connection does not mean the server stopped scanning. Keep the
     // job ID so this tab (or a refreshed one) can recover the result.
     if (error instanceof TypeError) {
-      status.textContent = "Connection interrupted. Checking scan status…";
-      status.classList.remove("error");
+      formStatus.textContent = "Connection interrupted. Checking scan status…";
+      formStatus.classList.remove("error");
       watchScanStatus(jobId, true);
       return;
     }
@@ -2035,7 +2035,7 @@ shareBatchResults.addEventListener("click", async () => {
 });
 deleteBatch.addEventListener("click", async () => {
   const privateUrl = batchScans[0]?.batch_private_url;
-  if (!privateUrl || !await ConfirmDialog.show({
+  if (!privateUrl || !await window.ConfirmDialog.show({
     title: "Delete all batch logs?",
     message: "This permanently deletes every log and scan result in this batch.",
     confirmText: "Delete all",
@@ -2065,6 +2065,7 @@ function downloadConfig() {
   return true;
 }
 function filenamePart(value) {
+  // eslint-disable-next-line no-control-regex -- Strip control codes from download filenames.
   return String(value || "").trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "");
 }
 
@@ -2160,7 +2161,7 @@ document.querySelector("#optimization-dialog").addEventListener("click", (event)
   if (event.target === event.currentTarget) event.currentTarget.close();
 });
 document.querySelector("#delete-scan").addEventListener("click", async () => {
-  if (!currentScanId || !deleteToken || !await ConfirmDialog.show({ title: "Delete this scan?", message: "This permanently deletes the log and its scan results.", confirmText: "Delete scan" })) return;
+  if (!currentScanId || !deleteToken || !await window.ConfirmDialog.show({ title: "Delete this scan?", message: "This permanently deletes the log and its scan results.", confirmText: "Delete scan" })) return;
   const response = await fetch(`/api/scans/${encodeURIComponent(currentScanId)}`, {
     method: "DELETE",
     headers: { "X-Delete-Token": deleteToken },

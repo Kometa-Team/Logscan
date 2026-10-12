@@ -252,6 +252,7 @@ root (Python 3.13):
 
 ```powershell
 py -3.13 -m pip install -r requirements.txt -r requirements-dev.txt
+npm ci
 py -3.13 -m pre_commit install
 ```
 
@@ -264,21 +265,27 @@ node --test tests/test_occurrence_ui.cjs
 ```
 
 On Linux or macOS, replace `py -3.13` with `python` from an activated Python 3.13
-virtual environment. JavaScript tests require Node.js 22 or newer.
+virtual environment. The JavaScript tools require Node.js 22.18 or newer.
 
 Pre-commit checks YAML and JSON syntax, merge conflicts, filename case conflicts,
 whitespace, and requirements ordering, then runs Ruff and Black. Ruff uses the
 initial Quickstart rule set (`E4`, `E7`, `E9`, `F`); Black and Ruff share a
-180-character line length. Hooks can fix files; review their changes before
+180-character line length. ESLint checks browser scripts and Node tests, and
+CSpell checks Markdown prose, excluding code blocks and inline code. Project
+names are listed in `cspell.json`; add legitimate technical terms there instead
+of ignoring misspelled prose. Hooks can fix files; review their changes before
 committing. Run either Python check separately with:
 
 ```powershell
 py -3.13 -m ruff check .
 py -3.13 -m black --check .
+npm run lint:js
+npm run spellcheck
 ```
 
 CI runs these file checks and both regression suites on pull requests and pushes
-to `main`. Dependabot checks Python dependencies and GitHub Actions daily.
+to `main`. Dependabot checks Python dependencies, JavaScript development tools,
+and GitHub Actions daily.
 
 ## Included files
 

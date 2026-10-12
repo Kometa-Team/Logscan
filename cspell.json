@@ -1,0 +1,11 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "useGitignore": true,
+  "ignorePaths": ["node_modules/**", ".venv/**", "data/**", ".git/**"],
+  "ignoreRegExpList": [
+    "/^\\s*(`{3,}|~{3,})[^\\n]*\\n[\\s\\S]*?^\\s*\\1\\s*$/gm",
+    "/`+[^`\\n]*`+/g"
+  ],
+  "words": ["DDNS", "Kometa", "Logscan", "Saltbox", "StarMeter", "TMDb", "Traefik", "WSGI"]
+}
