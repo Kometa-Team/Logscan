@@ -6,8 +6,8 @@
   <title>Analytics | Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-1') }}">
-  <script src="{{ url_for('static', filename='analytics.js', v='20261012-1') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-2') }}">
+  <script src="{{ url_for('static', filename='analytics.js', v='20261012-2') }}" defer></script>
 </head>
 <body>
   {% set active_page = 'analytics' %}{% include '_site_header.html' %}
@@ -43,7 +43,7 @@
       <div class="analytics-breakdowns">{{ breakdown('Run launcher', 'launchers') }}{{ breakdown('Versions', 'quickstart-versions') }}{{ breakdown('Branches', 'quickstart-branches') }}{{ breakdown('Platforms', 'quickstart-platforms') }}</div>
     </details>
     <details class="analytics-group">
-      <summary><span>Findings</span></summary>
+      <summary><span>{{ tool_icon('logscan') }}Findings</span></summary>
       <div class="analytics-breakdowns">{{ breakdown('Recommendation severity', 'severity') }}</div>
       <div class="analytics-section"><div class="section-heading"><h2>Frequent recommendations</h2></div><div id="analytics-recommendations" class="metric-bars wide"></div></div>
     </details>

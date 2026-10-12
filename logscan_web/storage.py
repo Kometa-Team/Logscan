@@ -609,9 +609,16 @@ class AnonymousAnalyticsStore:
             data = {}
         if not isinstance(data, dict):
             data = {}
+        days = data.get("days") if isinstance(data.get("days"), dict) else {}
+        # Before tool-level tracking, every successful scan was a Kometa log.
+        for day in days.values():
+            tools = day.setdefault("tools", {})
+            unclassified = max(0, day.get("successful_logs", 0) - sum(tools.values()))
+            if unclassified:
+                self._increment(tools, "kometa", unclassified)
         return {
             "started_at": data.get("started_at") if isinstance(data.get("started_at"), str) else datetime.now(UTC).isoformat(),
-            "days": data.get("days") if isinstance(data.get("days"), dict) else {},
+            "days": days,
             "addressed_keys": data.get("addressed_keys") if isinstance(data.get("addressed_keys"), list) else [],
             "legacy_usage_imported": data.get("legacy_usage_imported") is True,
         }

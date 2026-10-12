@@ -16,9 +16,13 @@ function formatDuration(seconds) {
 
 function renderMetrics(selector, items) {
   const target = document.querySelector(selector);
-  items.forEach(([label, value]) => {
+  items.forEach(([label, value, tool]) => {
     const item = document.createElement("div");
     const heading = document.createElement("span"); heading.textContent = label;
+    if (tool) {
+      const icon = document.createElement("img"); icon.src = `/static/${tool}.png`; icon.alt = ""; icon.className = "tool-icon";
+      heading.className = "metric-label"; heading.prepend(icon);
+    }
     const total = document.createElement("strong"); total.textContent = value;
     item.append(heading, total); target.append(item);
   });
@@ -35,6 +39,9 @@ function renderSummary(totals) {
     ["People addressed", number.format(totals.people_addressed)],
     ["Average time to address", formatDuration(totals.average_address_seconds)],
     ["Rejected uploads", number.format(Object.values(totals.rejections).reduce((sum, value) => sum + value, 0))],
+    ["ImageMaid logs", number.format(totals.tools?.imagemaid || 0), "imagemaid"],
+    ["ImageMaid files removed", number.format(totals.imagemaid_files_removed || 0), "imagemaid"],
+    ["ImageMaid space recovered", formatBytes(totals.imagemaid_bytes_recovered || 0), "imagemaid"],
   ]);
   const seconds = totals.imagemaid_runtime_seconds || 0;
   renderMetrics("#analytics-imagemaid-summary", [
