@@ -16,14 +16,26 @@ KOMETA_CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/Kometa-Team/Kometa
 SCHEMA_CACHE_SECONDS = 60 * 60
 
 
-def schema_branch_for_log(log_content: str) -> str:
+def _log_lines(log_content: str | Path):
+    if isinstance(log_content, Path):
+        with log_content.open(encoding="utf-8", errors="replace") as source:
+            yield from source
+    else:
+        yield from log_content.splitlines()
+
+
+def schema_branch_for_log(log_content: str | Path) -> str:
     """Match schema validation to the logged Kometa release channel."""
-    versions = re.findall(r"(?:Newest )?Version:\s*([^\r\n|]+)", log_content, flags=re.IGNORECASE)
-    version_text = " ".join(versions).lower()
-    if "nightly" in version_text:
-        return "develop"
-    if "develop" in version_text:
-        return "develop"
+    pattern = re.compile(r"Version:\s*([^\r\n|]+)", re.IGNORECASE)
+    # The literal prefix avoids retrying an optional 'Newest ' at every byte.
+    if isinstance(log_content, Path):
+        versions = (match for line in _log_lines(log_content) if "version:" in line.lower() for match in pattern.finditer(line))
+    else:
+        versions = pattern.finditer(log_content)
+    for match in versions:
+        version = match.group(1).lower()
+        if "nightly" in version or "develop" in version:
+            return "develop"
     return "master"
 
 
@@ -42,12 +54,13 @@ class RecommendationRule:
         return [number for number, line in enumerate(content.splitlines(), start=1) if any(needle in line.lower() for needle in needles)] if needles else []
 
 
-def extract_redacted_config(log_content: str) -> tuple[str, list[int]]:
+def extract_redacted_config(log_content: str | Path) -> tuple[str, list[int]]:
     """Return Kometa's redacted config block and its source log-line numbers."""
     started = False
     extracted: list[tuple[str, int]] = []
     tagged_config = re.compile(r"\[config\.py:\d+\]\s+\[([A-Z]+)\]\s*\|(.*)$")
-    for line_number, line in enumerate(log_content.splitlines(), start=1):
+    for line_number, line in enumerate(_log_lines(log_content), start=1):
+        line = line.rstrip("\r\n")
         if not started:
             if "Redacted Config" in line:
                 started = True
@@ -65,7 +78,7 @@ def extract_redacted_config(log_content: str) -> tuple[str, list[int]]:
     return "\n".join(line[1:] if line.startswith(" ") else line for line, _number in extracted), [line_number for _line, line_number in extracted]
 
 
-def has_yaml_language_server_directive(log_content: str) -> bool:
+def has_yaml_language_server_directive(log_content: str | Path) -> bool:
     config_text, _log_lines = extract_redacted_config(log_content)
     return bool(re.search(r"^\s*#\s*yaml-language-server:\s*\$schema=", config_text, flags=re.IGNORECASE | re.MULTILINE))
 
@@ -355,7 +368,7 @@ def _load_config_schema(branch: str, *, memory_cache: dict[str, dict] | None, ca
 
 
 def validate_redacted_config(
-    log_content: str,
+    log_content: str | Path,
     *,
     schema_cache: dict[str, dict] | None = None,
     schema_cache_dir: str | Path | None = None,

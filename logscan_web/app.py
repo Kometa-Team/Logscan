@@ -415,7 +415,7 @@ def create_app() -> Flask:
     schema_cache_dir = Path(app.config["SCAN_STORE"]) / ".schema-cache"
     schema_cache_lock = threading.Lock()
 
-    def validate_config(log_content: str) -> list[dict]:
+    def validate_config(log_content: str | Path) -> list[dict]:
         """Validate using the process cache without serializing validation work."""
         return validate_redacted_config(
             log_content,
@@ -1002,7 +1002,7 @@ def create_app() -> Flask:
             if path is None:
                 continue
             try:
-                log_content = path.read_text(encoding="utf-8", errors="replace")
+                log_content = path
                 failures = validate_config(log_content)
                 count = len(failures)
             except ValueError:
@@ -1470,7 +1470,7 @@ def create_app() -> Flask:
             result.metadata["analysis_version"] = ANALYSIS_VERSION
             if result.metadata.get("tool_name", "kometa") == "kometa" and not app.config.get("TESTING"):
                 try:
-                    log_content = content.read_text(encoding="utf-8", errors="replace") if isinstance(content, Path) else content.decode("utf-8", errors="replace")
+                    log_content = content if isinstance(content, Path) else content.decode("utf-8", errors="replace")
                     schema_failures = validate_config(log_content)
                     result.metadata["schema_validation_count"] = len(schema_failures)
                     result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
@@ -1864,7 +1864,7 @@ def create_app() -> Flask:
         if path is None:
             abort(404)
         try:
-            log_content = path.read_text(encoding="utf-8", errors="replace")
+            log_content = path
             failures = validate_config(log_content)
             branch = schema_branch_for_log(log_content)
             directive_missing = not has_yaml_language_server_directive(log_content)
