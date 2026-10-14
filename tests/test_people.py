@@ -399,6 +399,54 @@ class StreamingScanTests(unittest.TestCase):
         self.assertEqual(payload["result"]["filename"], "meta.log")
         self.assertIn("delete_token", payload["result"])
 
+    def test_production_archive_upload_validates_spooled_path_and_finishes(self):
+        job_id = "streamed-schema-upload-123456789012"
+        content = (
+            b"[kometa.py:1] [INFO] | Version: 2.5.3 (Docker: nightly) |\n"
+            b"[config.py:1] [DEBUG] | Redacted Config |\n"
+            b"[config.py:2] [DEBUG] | timeout: true |\n"
+            b"[config.py:3] [DEBUG] | |\n"
+            b"Initializing cache database at /cache\n"
+            b"[kometa.py:2] [INFO] | Finished: now Run Time: 0:01:00 |\n"
+        )
+        validated = []
+
+        def validate_path(value, **kwargs):
+            self.assertIsInstance(value, Path)
+            self.assertTrue(value.is_file())
+            validated.append(value)
+            return validate_redacted_config(value, **kwargs)
+
+        schema = {"type": "object", "properties": {"timeout": {"type": "integer"}}}
+        with (
+            patch.dict(app.config, TESTING=False),
+            patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1),
+            patch("logscan_web.app.validate_redacted_config", side_effect=validate_path),
+            patch("logscan_web.recommendations._load_config_schema", return_value=schema),
+        ):
+            response = app.test_client().post(
+                "/api/scan",
+                data={"log": (BytesIO(gzip.compress(content)), "meta.log.gz")},
+                headers={"X-Scan-Job-ID": job_id},
+            )
+            self.assertEqual(response.status_code, 202)
+            deadline = time.monotonic() + 5
+            while True:
+                payload = app.test_client().get(f"/api/scan-jobs/{job_id}").get_json()
+                if payload["phase"] in {"complete", "failed"}:
+                    break
+                if time.monotonic() >= deadline:
+                    self.fail(f"Production schema scan did not finish: {payload['phase']}")
+                time.sleep(0.01)
+            self.assertEqual(payload["phase"], "complete")
+        self.assertEqual(len(validated), 1)
+        metadata = payload["result"]["metadata"]
+        self.assertEqual(metadata["schema_validation_branch"], "develop")
+        self.assertEqual(metadata["schema_validation_count"], 1)
+        self.assertEqual(metadata["schema_validation_failures"][0]["line"], 3)
+        self.assertIn("result_url", payload["result"])
+        self.assertIn("delete_token", payload["result"])
+
     def test_signed_in_web_upload_preserves_verified_identity_through_background_scan(self):
         client = app.test_client()
         with client.session_transaction() as discord_session:
