@@ -219,6 +219,9 @@ If Cloudflare proxies the hostname, its plan-specific request-body limit still a
 
 ## Scan results
 
+Plex version security assessments and their shared source workflow are described
+in [Plex security advisory assessments](docs/plex-security.md).
+
 Scan results retain the findings count and separately show **Log occurrences**:
 the number of critical, error, warning, info, debug, and trace log entries.
 Repeated entries count separately, while one entry may produce more than one

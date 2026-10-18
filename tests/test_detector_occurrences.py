@@ -145,9 +145,9 @@ class DetectorOccurrenceTests(unittest.TestCase):
 
     def test_custom_detector_applies_version_range_and_evidence_cap(self):
         rule = PlexSecurityRule(RecommendationRule("test", "critical", "Test", "Test", "Test"))
-        text = "Connected to server Safe version 1.43.0.10000\n" + "cOnNeCtEd to server Vulnerable version 1.41.8.10000\n" * (EVIDENCE_LIMIT + 5)
-        normal = rule.evaluate(ScanContext.from_content("test.log", text))[0]
-        streamed = rule.evaluate_bytes(text.encode())[0]
+        text = "Connected to server Safe version 1.43.3.10861\n" + "cOnNeCtEd to server Vulnerable version 1.41.8.10000\n" * (EVIDENCE_LIMIT + 5)
+        normal = next(item for item in rule.evaluate(ScanContext.from_content("test.log", text)) if item.category == "critical")
+        streamed = next(item for item in rule.evaluate_bytes(text.encode()) if item.category == "critical")
         self.assertEqual(normal, streamed)
         self.assertEqual(normal.occurrence_count, EVIDENCE_LIMIT + 5)
         self.assertTrue(normal.evidence_truncated)
@@ -198,7 +198,7 @@ class DetectorOccurrenceTests(unittest.TestCase):
     def test_startup_backfill_preserves_retained_record_identity_and_metadata(self):
         from logscan_web.app import ANALYSIS_VERSION, SCHEMA_VALIDATION_VERSION, create_app
 
-        self.assertEqual(ANALYSIS_VERSION, 8)
+        self.assertEqual(ANALYSIS_VERSION, 9)
         native_integrity = (
             "[integrity.py:674] [INFO] |     Source Integrity: MODIFIED |\n" "[integrity.py:674] [INFO] |     Modified: |\n" "[integrity.py:674] [INFO] |       modules/logs.py |\n"
         )

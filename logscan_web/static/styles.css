@@ -975,3 +975,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .hero .hero-copy { margin-top: 16px; font-size: .9rem; line-height: 1.5; }
   .analytics-group-total { margin-left: 0; }
 }
+/* Security assessments remain visible above the result navigation. */
+.plex-security-status { margin: 1rem 0; padding: 0.75rem 1rem; border: 1px solid currentColor; border-radius: 0.5rem; }
+.plex-security-status p { margin: 0.25rem 0; }
+.plex-security-critical { color: #ffb4b4; background: #471c24; border-color: #ef6b73; }

@@ -61,6 +61,7 @@ class Finding:
     details: str = ""
     occurrence_count: int | None = None
     evidence_truncated: bool = False
+    security_assessment: dict | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -73,4 +74,5 @@ class Finding:
             "occurrence_count": self.occurrence_count,
             "evidence_truncated": self.evidence_truncated,
             "message": self.details or f"**{self.title}**\nIssue: {self.description}\n\nProposed solution: {self.solution}",
+            **({"security_assessment": self.security_assessment} if self.security_assessment is not None else {}),
         }
