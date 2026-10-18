@@ -32,7 +32,11 @@ The older 1.41.7.0 through 1.42.0.99999 range remains available through
 `legacy_affected`, `LEGACY_LOW` and `LEGACY_HIGH`. Assessments mark overlapping
 legacy evidence with `legacy_vulnerability_affected`; the covering 2026 advisory
 produces one finding for that server rather than a second legacy warning.
-Analysis version 9 refreshes retained scans using the existing startup backfill.
+Analysis version 10 refreshes retained scans using the existing startup backfill.
+The security banner shows the date, or full date range, recorded by timestamps
+in the log. Dates retain the logger's local calendar date without assuming a
+time zone. Normal and streaming scans read the full log for this range. Missing
+or malformed dates are shown as unavailable; upload dates are never substituted.
 
 ## Shared source boundary
 

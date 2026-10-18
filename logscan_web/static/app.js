@@ -1765,7 +1765,7 @@ function applySupportDestination(data, groups, recommendations) {
   }
 }
 
-function renderPlexSecurityStatus(recommendations) {
+function renderPlexSecurityStatus(recommendations, logDateRange = null) {
   const target = document.getElementById("plex-security-status");
   if (!target) return;
   target.replaceChildren();
@@ -1776,11 +1776,11 @@ function renderPlexSecurityStatus(recommendations) {
   target.setAttribute("role", affected ? "alert" : "status");
   for (const item of assessments) {
     const row = document.createElement("p");
-    const server = item.server_name || "Unknown server";
+    const server = item.server_name ? `Plex server named: "${item.server_name}"` : "Plex server name unavailable";
     const versions = item.observations.map((value) => value.detected_version || "unavailable").join(", ") || "unavailable";
     row.textContent = item.status === "affected"
-      ? `${server}: Plex security update required. Version(s) observed in this log: ${versions}. Update to ${item.minimum_patched_version} or newer. Critical is Kometa's recommendation severity, not an official CVSS rating. `
-      : `${server}: ${item.advisory_id} assessment ${item.status}. Version(s) observed in this log: ${versions}. This assessment covers this advisory only. `;
+      ? `${server}. Plex security update required. Version(s) observed in this log: ${versions}. Update to ${item.minimum_patched_version} or newer. Critical is Kometa's recommendation severity, not an official CVSS rating. `
+      : `${server}. ${item.advisory_id} assessment ${item.status}. Version(s) observed in this log: ${versions}. This assessment covers this advisory only. `;
     const link = document.createElement("a");
     link.href = item.advisory_url;
     link.target = "_blank";
@@ -1791,7 +1791,12 @@ function renderPlexSecurityStatus(recommendations) {
   }
   if (assessments.length) {
     const note = document.createElement("p");
-    note.textContent = "These are historical log observations. The server's current version is unknown.";
+    const firstDate = logDateRange?.first?.slice(0, 10);
+    const lastDate = logDateRange?.last?.slice(0, 10);
+    const dateContext = firstDate && lastDate
+      ? firstDate === lastDate ? `Log recorded on ${firstDate}.` : `Log spans ${firstDate} to ${lastDate}.`
+      : "Log date unavailable.";
+    note.textContent = `${dateContext} The server may have been updated since this log was recorded.`;
     target.append(note);
   }
 }
@@ -1805,7 +1810,7 @@ function renderResults(data, runSchemaValidation = true) {
   deleteToken = new URLSearchParams(location.hash.slice(1)).get("delete");
   updateRetentionCountdown(data);
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
-  renderPlexSecurityStatus(recommendations);
+  renderPlexSecurityStatus(recommendations, metadata.log_date_range);
   const isImageMaid = metadata.tool_name === "imagemaid";
   for (const id of ["view-config", "toggle-viewer-content", "download-config-option", "download-both-option"]) {
     const control = document.getElementById(id);

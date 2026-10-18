@@ -20,7 +20,7 @@ from .models import Finding, ScanContext
 from .rules import RuleRegistry, migrated_rules
 from .rules.base import TextRule, evaluate_text_rules_bytes
 from .categories import category_configuration
-from .log_facts import count_log_occurrences, extract_validation_summary
+from .log_facts import count_log_occurrences, extract_log_date_range, extract_validation_summary, log_timestamp as _log_timestamp
 from .imagemaid import analyze_imagemaid, runtime_seconds
 
 MAX_FILE_BYTES = 1024 * 1024 * 1024
@@ -627,17 +627,6 @@ def _runtime_seconds(value: str) -> int | None:
     return int(match.group("days") or 0) * 86400 + int(match.group("hours")) * 3600 + int(match.group("minutes")) * 60 + int(match.group("seconds"))
 
 
-def _log_timestamp(line: str) -> datetime | None:
-    """Return the timestamp at the start of a Kometa log line."""
-    match = re.match(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:,\d+)?\]", line)
-    if not match:
-        return None
-    try:
-        return datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return None
-
-
 def _format_runtime(seconds: int) -> str:
     """Format elapsed seconds like Kometa's run-time values."""
     days, remainder = divmod(seconds, 86400)
@@ -939,6 +928,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         "complete": complete_log,
         **validation_summary,
         "log_counts": count_log_occurrences(content_bytes),
+        "log_date_range": extract_log_date_range(content_bytes),
         "header_found": kometa_version is not None,
         "line_count": line_count,
         "size_bytes": len(content_bytes),
@@ -1300,6 +1290,7 @@ def scan_log(filename: str, content_bytes: bytes) -> ScanResult:
         "complete": complete_log,
         **validation_summary,
         "log_counts": count_log_occurrences(content_bytes),
+        "log_date_range": extract_log_date_range(content_bytes),
         "header_found": kometa_version is not None,
         "line_count": content.count("\n") + int(bool(content) and not content.endswith("\n")),
         "size_bytes": len(content_bytes),
