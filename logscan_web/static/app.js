@@ -1776,11 +1776,11 @@ function renderPlexSecurityStatus(recommendations) {
   target.setAttribute("role", affected ? "alert" : "status");
   for (const item of assessments) {
     const row = document.createElement("p");
-    const server = item.server_name || "Unknown server";
+    const server = item.server_name ? `Plex server named: "${item.server_name}"` : "Plex server name unavailable";
     const versions = item.observations.map((value) => value.detected_version || "unavailable").join(", ") || "unavailable";
     row.textContent = item.status === "affected"
-      ? `${server}: Plex security update required. Version(s) observed in this log: ${versions}. Update to ${item.minimum_patched_version} or newer. Critical is Kometa's recommendation severity, not an official CVSS rating. `
-      : `${server}: ${item.advisory_id} assessment ${item.status}. Version(s) observed in this log: ${versions}. This assessment covers this advisory only. `;
+      ? `${server}. Plex security update required. Version(s) observed in this log: ${versions}. Update to ${item.minimum_patched_version} or newer. Critical is Kometa's recommendation severity, not an official CVSS rating. `
+      : `${server}. ${item.advisory_id} assessment ${item.status}. Version(s) observed in this log: ${versions}. This assessment covers this advisory only. `;
     const link = document.createElement("a");
     link.href = item.advisory_url;
     link.target = "_blank";
