@@ -125,3 +125,27 @@ def test_normal_streaming_support_and_semantic_counts(tmp_path):
         row = _support_row(record, 3600, datetime.now(UTC))
         assert row["counts"]["critical"] == 2
     assert normal.recommendations == streamed.recommendations
+
+
+def test_date_context_matches_full_log_in_normal_and_streaming_scans(tmp_path):
+    # The final timestamp occurs after the security evidence limit; it still
+    # contributes to the log date range, including multiple historical runs.
+    content = (
+        HEADER
+        + "[2023-09-25 01:23:45,678] [plex.py:1] [INFO] | Connected to server Classic Connection version 1.32.5.7349-8f4248874 |\n" * (EVIDENCE_LIMIT + 1)
+        + "[2026-10-18 01:00:00,000] [kometa.py:1] [INFO] | Next historical run |\n"
+    ).encode()
+    normal = scan_log("meta.log", content)
+    path = tmp_path / "meta.log"
+    path.write_bytes(content)
+    with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+        streamed = scan_archive_path("meta.log", path)[0][2]
+    assert normal.metadata["log_date_range"] == {"first": "2023-09-25", "last": "2026-10-18"}
+    assert streamed.metadata["log_date_range"] == normal.metadata["log_date_range"]
+
+
+@pytest.mark.parametrize("content", [b"No timestamp", b"[2026-02-30 12:00:00,123] message", b"[2026-10-18 25:00:00] message"])
+def test_missing_or_invalid_dates_are_not_fabricated(content):
+    from logscan_web.log_facts import extract_log_date_range
+
+    assert extract_log_date_range(content) is None

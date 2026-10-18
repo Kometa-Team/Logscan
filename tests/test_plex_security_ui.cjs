@@ -17,8 +17,18 @@ test("security assessment is prominent, historical, linked, and cleared between 
   assert.match(target.children[0].textContent, /observed in this log/);
   assert.match(target.children[0].textContent, /not an official CVSS/);
   assert.equal(target.children[0].children[0].textContent, "Official Plex advisory");
-  assert.match(target.children[1].textContent, /current version is unknown/);
+  assert.match(target.children[1].textContent, /Log date unavailable/);
+  assert.match(target.children[1].textContent, /may have been updated since/);
   context.renderPlexSecurityStatus([]);
   assert.equal(target.hidden, true);
   assert.equal(target.children.length, 0);
+});
+
+test("dates come from the log and retain ranges across historical runs", () => {
+  const recommendations = [{ security_assessment: { status: "patched", server_name: "Classic Connection", observations: [], advisory_id: "PLEX-PMS-2026-09" } }];
+  context.renderPlexSecurityStatus(recommendations, { first: "2023-09-25", last: "2023-09-25" });
+  assert.match(target.children[0].textContent, /Plex server named: "Classic Connection"/);
+  assert.match(target.children[1].textContent, /Log recorded on 2023-09-25/);
+  context.renderPlexSecurityStatus(recommendations, { first: "2023-09-25", last: "2026-10-18" });
+  assert.match(target.children[1].textContent, /Log spans 2023-09-25 to 2026-10-18/);
 });
