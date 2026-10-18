@@ -1765,6 +1765,37 @@ function applySupportDestination(data, groups, recommendations) {
   }
 }
 
+function renderPlexSecurityStatus(recommendations) {
+  const target = document.getElementById("plex-security-status");
+  if (!target) return;
+  target.replaceChildren();
+  const assessments = recommendations.map((item) => item.security_assessment).filter(Boolean);
+  target.hidden = assessments.length === 0;
+  const affected = assessments.some((item) => item.status === "affected");
+  target.className = affected ? "plex-security-status plex-security-critical" : "plex-security-status";
+  target.setAttribute("role", affected ? "alert" : "status");
+  for (const item of assessments) {
+    const row = document.createElement("p");
+    const server = item.server_name || "Unknown server";
+    const versions = item.observations.map((value) => value.detected_version || "unavailable").join(", ") || "unavailable";
+    row.textContent = item.status === "affected"
+      ? `${server}: Plex security update required. Version(s) observed in this log: ${versions}. Update to ${item.minimum_patched_version} or newer. Critical is Kometa's recommendation severity, not an official CVSS rating. `
+      : `${server}: ${item.advisory_id} assessment ${item.status}. Version(s) observed in this log: ${versions}. This assessment covers this advisory only. `;
+    const link = document.createElement("a");
+    link.href = item.advisory_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Official Plex advisory";
+    row.append(link);
+    target.append(row);
+  }
+  if (assessments.length) {
+    const note = document.createElement("p");
+    note.textContent = "These are historical log observations. The server's current version is unknown.";
+    target.append(note);
+  }
+}
+
 function renderResults(data, runSchemaValidation = true) {
   if (data.id && data.id !== currentScanId) currentLogLines = null;
   if (data.id) {
@@ -1774,6 +1805,7 @@ function renderResults(data, runSchemaValidation = true) {
   deleteToken = new URLSearchParams(location.hash.slice(1)).get("delete");
   updateRetentionCountdown(data);
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
+  renderPlexSecurityStatus(recommendations);
   const isImageMaid = metadata.tool_name === "imagemaid";
   for (const id of ["view-config", "toggle-viewer-content", "download-config-option", "download-both-option"]) {
     const control = document.getElementById(id);
