@@ -38,6 +38,22 @@ in the log. Dates retain the logger's local calendar date without assuming a
 time zone. Normal and streaming scans read the full log for this range. Missing
 or malformed dates are shown as unavailable; upload dates are never substituted.
 
+## Support triage
+
+My uploads and the Support Console have visible Security updates and Critical
+issues shortcuts. Counts refer to logs in the authorized view, before filters
+or pagination; selecting a shortcut resets other filters. Security badges flag
+affected critical security findings and link directly to the critical results.
+They show the recorded log date or date range to give historical context.
+Patched and unknown assessments do not trigger a security badge. The broader
+Critical issues shortcut includes other critical findings as well.
+
+The Security advisories filter works with search, sorting and pagination.
+Search accepts affected server names, advisory IDs and observed Plex versions.
+Triage uses existing structured findings, including legacy security findings;
+it does not derive counts from capped evidence or query live Plex servers.
+Personal upload totals and search remain limited to that account's uploads.
+
 ## Shared source boundary
 
 The audit found separate application analyzers and no importable shared core.

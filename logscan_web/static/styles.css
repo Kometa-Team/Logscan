@@ -979,3 +979,26 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
 .plex-security-status { margin: 1rem 0; padding: 0.75rem 1rem; border: 1px solid currentColor; border-radius: 0.5rem; }
 .plex-security-status p { margin: 0.25rem 0; }
 .plex-security-critical { color: #ffb4b4; background: #471c24; border-color: #ef6b73; }
+
+.support-attention { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 20px; }
+.support-attention-link { display: inline-flex; min-height: 56px; align-items: center; gap: 12px; padding: 10px 16px; border: 1px solid var(--border); border-radius: 7px; color: var(--muted); background: #12162b; text-decoration: none; font-size: .8rem; }
+.support-attention-link strong { display: block; margin-top: 3px; font-size: 1rem; }
+.support-attention-icon { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-weight: 700; }
+.support-attention-link.has-alerts { border-color: #fb7185; background: #471c24; color: #fecdd3; }
+.support-attention-link.has-alerts .support-attention-icon { background: #fb7185; color: #200a10; }
+.support-attention-link.has-critical { border-color: #be6674; color: #fecdd3; }
+.support-attention-link[aria-current] { outline: 2px solid currentColor; outline-offset: 2px; }
+.support-attention-link:hover, .support-attention-link:focus-visible { color: white; border-color: currentColor; }
+.support-attention > p { flex: 1 1 250px; margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.6; }
+.support-table .support-row-security { background: rgba(244,63,94,.08); }
+.support-table .support-row-security:hover { background: rgba(244,63,94,.14); }
+.support-row-security .support-actions { box-shadow: inset 4px 0 #fb7185; }
+.support-row-critical .support-actions { box-shadow: inset 3px 0 #be6674; }
+.support-title > .support-attention-badge { display: inline-flex; width: fit-content; align-items: center; gap: 6px; margin-top: 9px; padding: 5px 8px; border: 1px solid currentColor; border-radius: 5px; font-size: .68rem; white-space: normal; }
+.support-attention-badge.security { background: #471c24; color: #fecdd3; }
+.support-attention-badge.critical { color: #fda4af; }
+.support-title > .support-attention-badge:hover, .support-title > .support-attention-badge:focus-visible { color: white; text-decoration: underline; }
+.support-security-date { white-space: normal; }
+@media (max-width: 560px) {
+  .support-attention-link { flex: 1 1 130px; }
+}

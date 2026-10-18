@@ -212,6 +212,7 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         launcher_filter = request.args.get("launcher", "all").casefold()
         branch_filter = request.args.get("branch", "all").casefold()
         severity_filter = request.args.get("severity", "all").casefold()
+        security_filter = "affected" if request.args.get("security", "all").casefold() == "affected" else "all"
         integrity_filter = request.args.get("integrity", "all").casefold()
         sort_key = request.args.get("sort", "created_at")
         direction = request.args.get("direction", "desc")
@@ -236,6 +237,12 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
         rows = [_support_row(record, retention_seconds, now) for record in records]
         total_logs = len(rows)
         tool_counts = {tool: sum(row["tool_name"] == tool for row in rows) for tool in ("kometa", "imagemaid")}
+        # Summarize the authorized view before filtering or pagination. Each
+        # shortcut resets other filters so its count matches the destination.
+        attention_counts = {
+            "security": sum(row["security_finding_count"] > 0 for row in rows),
+            "critical": sum(row["counts"]["critical"] > 0 for row in rows),
+        }
         if tool_filter in tool_counts:
             rows = [row for row in rows if row["tool_name"] == tool_filter]
         else:
@@ -259,6 +266,8 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             rows = [row for row in rows if row["counts"][severity_filter] > 0]
         elif severity_filter == "none":
             rows = [row for row in rows if row["finding_count"] == 0]
+        if security_filter == "affected":
+            rows = [row for row in rows if row["security_finding_count"] > 0]
         if integrity_filter in INTEGRITY_LABELS:
             rows = [row for row in rows if row["integrity_state"] == integrity_filter]
         else:
@@ -303,6 +312,8 @@ def create_support_blueprint(store, retention_seconds: int) -> Blueprint:
             launcher_filter=launcher_filter,
             branch_filter=branch_filter,
             severity_filter=severity_filter,
+            security_filter=security_filter,
+            attention_counts=attention_counts,
             integrity_filter=integrity_filter,
             integrity_labels=INTEGRITY_LABELS,
             sort_key=sort_key,
@@ -425,6 +436,12 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
     metadata = record.get("metadata") or {}
     overview = record.get("overview") or {}
     recommendations = record.get("recommendations") or []
+    security_findings = [
+        item
+        for item in recommendations
+        if item.get("severity") == "critical"
+        and ((item.get("security_assessment") or {}).get("status") == "affected" or (item.get("id") == "plex_security" and not item.get("security_assessment")))
+    ]
     stored_log_counts = metadata.get("log_counts")
     log_counts = (
         {level: int(stored_log_counts.get(level) or 0) for level in ("critical", "error", "warning", "info", "debug", "trace")} if isinstance(stored_log_counts, dict) else None
@@ -475,6 +492,8 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
         "archive_compression_ratio": float(metadata.get("archive_compression_ratio") or 0),
         "archive_reduction_percent": float(metadata.get("archive_reduction_percent") or 0),
         "finding_count": sum(counts.values()),
+        "security_finding_count": len(security_findings),
+        "log_date_range": metadata.get("log_date_range") or {},
         "schema_count_available": schema_count_available,
         "counts": counts,
         "log_counts": log_counts,
@@ -507,4 +526,11 @@ def _support_row(record: dict, retention_seconds: int, now: datetime) -> dict:
             "quickstart_branch",
         )
     ).casefold()
+    # Support can locate a server or advisory without opening every result.
+    security_terms: list[str] = []
+    for finding in security_findings:
+        assessment = finding.get("security_assessment") or {}
+        security_terms.extend(str(assessment.get(key) or "") for key in ("advisory_id", "server_name", "detected_version"))
+        security_terms.extend(str(item.get("detected_version") or "") for item in assessment.get("observations", []))
+    row["search_text"] += " " + " ".join(security_terms).casefold()
     return row
