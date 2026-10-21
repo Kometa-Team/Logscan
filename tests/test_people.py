@@ -131,7 +131,14 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         self.assertEqual(
             extract_missing_people(content),
             [
-                {"name": "Hikaru Kondô", "tmdb_image_found": False, "source_styles": ["primary"], "detection_reasons": ["no_poster_found"]},
+                {
+                    "name": "Hikaru Kondô",
+                    "tmdb_image_found": False,
+                    "source_styles": ["primary"],
+                    "detection_reasons": ["no_poster_found"],
+                    "evidence_lines": [1],
+                    "occurrence_count": 1,
+                },
             ],
         )
 

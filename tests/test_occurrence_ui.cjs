@@ -39,3 +39,22 @@ test("renders old finding bodies and contextual advice without fabricated occurr
     assert.equal(body.children.some(child => child.className.includes("occurrence-evidence-summary")), false);
   }
 });
+
+test("per-person evidence links open the exact source lines", () => {
+  const opened = [];
+  const element = () => {
+    const node = { children: [], events: {}, className: "", textContent: "", append(...items) { this.children.push(...items); }, addEventListener(event, callback) { this.events[event] = callback; } };
+    node.classList = { add(value) { node.className += ` ${value}`; }, contains(value) { return node.className.split(" ").includes(value); } };
+    return node;
+  };
+  const links = source.slice(source.indexOf("function appendLineReferenceLinks("), source.indexOf("function formatLineRanges("));
+  const renderingContext = vm.createContext({ document: { createElement: element, createTextNode: text => text }, openLogViewer: (...args) => opened.push(args), appendInlineFormatting: (node, text) => node.append(text) });
+  vm.runInContext(links + rendering, renderingContext);
+  const body = renderingContext.recommendationBody("People\nYetide Badaki\nLog line number(s): 75071, 83816\nBruce Langley\nLog line number(s): 75190, 83817", [75071, 75190, 83816, 83817]);
+  const rows = body.children.filter(node => node.className === "recommendation-meta");
+  assert.equal(rows.length, 2);
+  const buttons = rows.flatMap(row => row.children).filter(node => node.className === "line-link");
+  assert.deepEqual(buttons.map(button => button.textContent), ["75071", "83816", "75190", "83817"]);
+  buttons.forEach(button => button.events.click());
+  assert.deepEqual(opened, [[75071, 75071], [83816, 83816], [75190, 75190], [83817, 83817]]);
+});

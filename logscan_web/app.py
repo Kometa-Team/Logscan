@@ -12,6 +12,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -21,7 +22,15 @@ from flask import Flask, abort, jsonify, render_template, request, send_file, ur
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
-from .people_images import PEOPLE_IMAGE_STYLES, assess_people_images, parse_people_inventory, person_name_key as _person_name_key
+from .people_images import (
+    PEOPLE_IMAGE_STYLES,
+    PeopleImageInventories,
+    assess_people_images,
+    parse_people_inventory,
+    parse_people_readme,
+    person_name_key as _person_name_key,
+    tmdb_image_path,
+)
 from .config_optimizer import optimize_config
 from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import (
@@ -221,12 +230,13 @@ def _stored_log_lines(path: Path, index: dict, start: int, count: int) -> list[s
 
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
-ANALYSIS_VERSION = 11
+ANALYSIS_VERSION = 12
 SCHEMA_VALIDATION_VERSION = 7
 POPULAR_PEOPLE_PAGE_SIZE = 25
 TMDB_POPULAR_PAGE_SIZE = 20
 KOMETA_IMAGE_SOURCES = tuple((style.label, style.readme_url) for style in PEOPLE_IMAGE_STYLES)
 KOMETA_IMAGE_CACHE_SECONDS = 60 * 60
+KOMETA_IMAGE_RETRY_SECONDS = 5 * 60
 POPULAR_PEOPLE_CACHE_SECONDS = 24 * 60 * 60
 POPULAR_PEOPLE_LIMIT = 250
 POPULAR_PEOPLE_CHECK_SECONDS = 30 * 24 * 60 * 60
@@ -273,11 +283,17 @@ def add_missing_people_recommendations(
 ) -> None:
     """Separate verified style gaps, operational failures and pending checks."""
     groups = {"incomplete": [], "complete": [], "pending_verification": []}
+    grouped_people = {key: [] for key in groups}
     assessed = []
     for candidate in candidates:
         person = assess_people_images(candidate, repository_people)
         assessed.append(person)
+        grouped_people[person["people_image_status"]].append(person)
         details = [person["name"]]
+        if person.get("evidence_lines"):
+            details.append("Log line number(s): " + ", ".join(str(number) for number in person["evidence_lines"]))
+        if person.get("log_tmdb_image_line"):
+            details.append(f"TMDb image observed at log line number(s): {person['log_tmdb_image_line']}")
         if person.get("source_styles"):
             source_repositories = [style.repository for style in PEOPLE_IMAGE_STYLES if style.key in person["source_styles"]]
             details.append("Detected failure: " + ", ".join(source_repositories))
@@ -288,8 +304,13 @@ def add_missing_people_recommendations(
         groups[person["people_image_status"]].append("\n".join(details))
     result.metadata["missing_people_verification"] = assessed
 
-    def add_advice(identifier: str, title: str, description: str, solution: str) -> None:
-        result.recommendations.append(Finding(identifier, "advice", title, description, solution).as_dict())
+    def add_advice(identifier: str, title: str, description: str, solution: str, status: str) -> None:
+        people = grouped_people[status]
+        evidence = sorted({number for person in people for number in person.get("evidence_lines", [])})[:10_000]
+        count = sum(person.get("occurrence_count", len(person.get("evidence_lines", []))) for person in people)
+        result.recommendations.append(
+            Finding(identifier, "advice", title, description, solution, tuple(evidence), occurrence_count=count or None, evidence_truncated=count > len(evidence)).as_dict()
+        )
 
     if groups["complete"]:
         add_advice(
@@ -297,6 +318,7 @@ def add_missing_people_recommendations(
             "People posters are available in every supported style",
             "The logged poster failure remains a diagnostic finding; every applicable style is verified present.\n\n" + "\n\n".join(groups["complete"]),
             "Check the requested URL, Plex connectivity and permissions, then retry the poster update.",
+            "complete",
         )
     if groups["incomplete"]:
         add_advice(
@@ -304,13 +326,21 @@ def add_missing_people_recommendations(
             "Missing People Posters",
             "At least one applicable repository style is confirmed missing.\n\n" + "\n\n".join(groups["incomplete"]),
             "Wait for the missing style assets to be added, then rerun Kometa." + (f" Review the submitted people here: {people_url}" if people_url else ""),
+            "incomplete",
         )
     if groups["pending_verification"]:
+        failures = {}
+        for person in grouped_people["pending_verification"]:
+            for style in person["style_availability"].values():
+                if style["status"] == "unknown":
+                    failures.setdefault(style.get("reason", "Verification unavailable."), set()).add(style["label"])
+        reasons = "\n".join(f"{reason} Styles: {', '.join(sorted(labels))}." for reason, labels in failures.items())
         add_advice(
             "missing_people_images_unverified",
             "People poster verification is pending",
-            "Repository checks could not confirm completeness.\n\n" + "\n\n".join(groups["pending_verification"]),
-            "Retry verification when the repository inventories are available.",
+            "Repository checks could not confirm completeness.\n" + reasons + "\n\n" + "\n\n".join(groups["pending_verification"]),
+            "Open the People queue for current verification. Failed checks retry on the next refresh after five minutes." + (f" People queue: {people_url}" if people_url else ""),
+            "pending_verification",
         )
     if candidates:
         result.recommendations.sort(key=lambda item: {"critical": 0, "error": 1, "warning": 2, "schema": 3, "advice": 4}[item["severity"]])
@@ -365,6 +395,7 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = os.environ.get("LOGSCAN_SECURE_COOKIES", "false").casefold() in {"1", "true", "yes"}
     app.config["TMDB_API_KEY"] = os.environ.get("TMDB_API_KEY", "")
+    app.config["GITHUB_TOKEN"] = os.environ.get("GITHUB_TOKEN", "")
     app.config["DISCORD_PEOPLE_WEBHOOK_URL"] = os.environ.get("DISCORD_PEOPLE_WEBHOOK_URL", "")
     support_keys = (
         "DISCORD_CLIENT_ID",
@@ -400,7 +431,7 @@ def create_app() -> Flask:
     popular_people_store = PopularPeopleCacheStore(app.config["SCAN_STORE"])
     tmdb_find_cache = TMDbFindCacheStore(app.config["SCAN_STORE"])
     app.register_blueprint(create_support_blueprint(store, RETENTION_SECONDS))
-    kometa_images_cache = {"expires_at": 0.0, "images": {}}
+    kometa_images_cache = {"expires_at": 0.0, "images": {}, "entries": {}}
     kometa_images_lock = threading.Lock()
     popular_people_cache = {"expires_at": 0.0, "snapshot_id": "", "people": []}
     popular_people_lock = threading.Lock()
@@ -464,19 +495,59 @@ def create_app() -> Flask:
                 return kometa_images_cache["images"]
 
             def fetch_inventory(style):
+                failure = "GitHub returned an incomplete file inventory."
+                headers = {"Accept": "application/vnd.github+json", "User-Agent": "Kometa-Logscan/1.0"}
+                if app.config["GITHUB_TOKEN"]:
+                    headers["Authorization"] = f"Bearer {app.config['GITHUB_TOKEN']}"
                 try:
-                    with urlopen(Request(style.inventory_url, headers={"Accept": "application/vnd.github+json", "User-Agent": "Kometa-Logscan/1.0"}), timeout=10) as response:
+                    with urlopen(Request(style.inventory_url, headers=headers), timeout=10) as response:
                         if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
-                            return style.label, None
-                        inventory = parse_people_inventory(style, json.loads(response.read().decode("utf-8")))
-                    return style.label, inventory
-                except (OSError, ValueError):
-                    app.logger.warning("Unable to verify the %s people-image inventory.", style.label)
-                    return style.label, None
+                            failure = "GitHub returned an expired file inventory."
+                        else:
+                            inventory = parse_people_inventory(style, json.loads(response.read().decode("utf-8")))
+                            if inventory is not None:
+                                return style.label, inventory, None
+                except HTTPError as exc:
+                    failure = (
+                        "GitHub rate limit reached."
+                        if exc.code == 429 or (exc.headers or {}).get("X-RateLimit-Remaining") == "0"
+                        else f"GitHub file inventory failed (HTTP {exc.code})."
+                    )
+                except (OSError, ValueError, HTTPException):
+                    failure = "GitHub file inventory could not be reached."
+                # These repositories maintain complete generated image indexes.
+                # Fetching raw content also works when recursive tree requests fail.
+                try:
+                    with urlopen(Request(style.readme_url, headers={"Accept": "text/plain", "User-Agent": "Kometa-Logscan/1.0"}), timeout=10) as response:
+                        if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
+                            index_failure = "The repository image index was expired."
+                        else:
+                            inventory = parse_people_readme(style, response.read().decode("utf-8"))
+                            if inventory is not None:
+                                return style.label, inventory, None
+                            index_failure = "The repository image index was incomplete."
+                except HTTPError as exc:
+                    index_failure = f"The repository image index failed (HTTP {exc.code})."
+                except (OSError, ValueError, HTTPException):
+                    index_failure = "The repository image index could not be reached."
+                failure += " " + index_failure
+                app.logger.warning("Unable to verify %s: %s", style.label, failure)
+                return style.label, None, failure
 
+            entries = kometa_images_cache["entries"]
+            stale = [style for style in PEOPLE_IMAGE_STYLES if entries.get(style.label, {}).get("expires_at", 0) <= time.monotonic()]
             with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-inventory") as executor:
-                images = {label: inventory for label, inventory in executor.map(fetch_inventory, PEOPLE_IMAGE_STYLES) if inventory is not None}
-            kometa_images_cache.update(expires_at=time.monotonic() + KOMETA_IMAGE_CACHE_SECONDS, images=images)
+                for label, inventory, error in executor.map(fetch_inventory, stale):
+                    entries[label] = {
+                        "inventory": inventory,
+                        "error": error,
+                        "expires_at": time.monotonic() + (KOMETA_IMAGE_CACHE_SECONDS if inventory is not None else KOMETA_IMAGE_RETRY_SECONDS),
+                    }
+            images = PeopleImageInventories(
+                {label: entry["inventory"] for label, entry in entries.items() if entry["inventory"] is not None},
+                errors={label: entry["error"] for label, entry in entries.items() if entry["error"]},
+            )
+            kometa_images_cache.update(expires_at=min(entry["expires_at"] for entry in entries.values()), images=images)
             return images
 
     def imdb_starmeter_people() -> list[dict]:
@@ -693,7 +764,17 @@ def create_app() -> Flask:
         payload = []
         for person in people:
             person_id = person.get("id")
-            profile_path = person.get("profile_path")
+            record = person.get("missing_record", {})
+            current_path = tmdb_image_path("https://image.tmdb.org/t/p/original" + str(person.get("profile_path") or ""))
+            saved_path = tmdb_image_path("https://image.tmdb.org/t/p/original" + str(record.get("tmdb_profile_path") or ""))
+            log_path = tmdb_image_path("https://image.tmdb.org/t/p/original" + str(record.get("log_tmdb_image_path") or ""))
+            profile_path = current_path or saved_path or log_path
+            image_source = "current" if current_path else "saved" if saved_path else "log" if log_path else None
+            image_status = (
+                "available"
+                if profile_path
+                else "known_available" if record.get("tmdb_image_found") else "missing" if person.get("_tmdb_profile_checked", "profile_path" in person) else "unknown"
+            )
             name = person.get("name", "Unknown person")
             known_for = []
             for credit in person.get("known_for", [])[:3]:
@@ -713,6 +794,8 @@ def create_app() -> Flask:
                     "tmdb_images_url": f"https://www.themoviedb.org/person/{person_id}/images/profiles" if person_id else None,
                     "imdb_person_url": f"https://www.imdb.com/name/{person['imdb_id']}/" if person.get("imdb_id") else None,
                     "tmdb_image_url": f"https://image.tmdb.org/t/p/original{profile_path}" if profile_path else None,
+                    "tmdb_image_source": image_source,
+                    "tmdb_image_status": image_status,
                     "known_for_department": person.get("known_for_department"),
                     "known_for": known_for,
                     "tmdb_image": (
@@ -875,6 +958,7 @@ def create_app() -> Flask:
                         **(details or {}),
                         "id": person_id,
                         "name": (details or {}).get("name", record["name"]),
+                        "_tmdb_profile_checked": details is not None,
                         "sources": set(),
                     }
                     combined[key] = person
@@ -899,7 +983,7 @@ def create_app() -> Flask:
             metadata_tags = []
             tmdb_ready = bool(item.get("tmdb_image")) or bool(record.get("tmdb_image_found"))
             if "missing" in sources:
-                metadata_tags.append("TMDb Ready" if tmdb_ready else "Missing TMDb")
+                metadata_tags.append("TMDb Ready" if tmdb_ready else "Missing TMDb" if item["tmdb_image_status"] == "missing" else "TMDb verification pending")
             requesters = record.get("requested_by", [])
             if record and not requesters:
                 requesters = [{"name": "Unknown", "id": None}]
@@ -912,6 +996,7 @@ def create_app() -> Flask:
                 source_url=record.get("source_url"),
                 original_name=record.get("original_name", record.get("name", item["name"])),
                 requested_by=requesters,
+                log_evidence_lines=record.get("log_evidence_lines", []),
                 source_styles=record.get("source_styles", []),
                 detection_reasons=record.get("detection_reasons", []),
                 **{key: record[key] for key in ("style_availability", "people_image_status") if key in record},
@@ -943,6 +1028,7 @@ def create_app() -> Flask:
         for candidate in candidates:
             name = candidate["name"]
             existing = existing_by_name.get(_person_name_key(name))
+            log_image_path = candidate.get("log_tmdb_image_path")
             if existing and existing.get("manually_completed"):
                 continue
             if existing and existing.get("tmdb_id"):
@@ -953,12 +1039,25 @@ def create_app() -> Flask:
                 matches = (match_data or {}).get("results", [])
                 exact = [item for item in matches if _person_name_key(item.get("name")) == _person_name_key(name)]
                 match = exact[0] if len(exact) == 1 else None
+                if match is None and log_image_path:
+                    photo_matches = [item for item in exact if item.get("profile_path") == log_image_path]
+                    match = photo_matches[0] if len(photo_matches) == 1 else None
                 identity_ambiguous = bool(matches) and match is None
             tmdb_id = match.get("id") if match else None
             if tmdb_id in excluded_ids or tmdb_id in checked_ids:
                 continue
-            image_data = tmdb_get(f"/person/{tmdb_id}/images") if tmdb_id and not existing else None
-            tmdb_image_found = bool((image_data or {}).get("profiles", [])) or bool((existing or {}).get("tmdb_image_found"))
+            api_image_path = (match or {}).get("profile_path")
+            if not api_image_path and tmdb_id and not log_image_path and (not existing or not existing.get("tmdb_id")):
+                image_data = tmdb_get(f"/person/{tmdb_id}/images")
+                api_image_path = next(
+                    (
+                        image["file_path"]
+                        for image in (image_data or {}).get("profiles", [])
+                        if tmdb_image_path("https://image.tmdb.org/t/p/original" + str(image.get("file_path") or ""))
+                    ),
+                    None,
+                )
+            tmdb_image_found = bool(api_image_path or log_image_path or candidate.get("tmdb_image_found")) or bool((existing or {}).get("tmdb_image_found"))
             key_seed = str(tmdb_id) if tmdb_id else _person_name_key(name)
             key = f"tmdb-{tmdb_id}" if tmdb_id else f"name-{hashlib.sha256(key_seed.encode()).hexdigest()[:16]}"
             person, is_new = people_store.upsert_with_status(
@@ -969,6 +1068,10 @@ def create_app() -> Flask:
                     "tmdb_id": tmdb_id,
                     "identity_ambiguous": identity_ambiguous,
                     "tmdb_image_found": tmdb_image_found,
+                    "tmdb_profile_path": api_image_path,
+                    "log_tmdb_image_path": log_image_path,
+                    "log_tmdb_image_line": candidate.get("log_tmdb_image_line"),
+                    "log_evidence_lines": candidate.get("evidence_lines", []),
                     "log_tmdb_image_found": bool(candidate["tmdb_image_found"]),
                     "log_name": filename,
                     "log_url": log_url,
@@ -979,7 +1082,15 @@ def create_app() -> Flask:
                     "detection_reasons": candidate.get("detection_reasons", []),
                     "style_availability": candidate.get("style_availability", {}),
                     "people_image_status": candidate.get("people_image_status", "pending_verification"),
-                    "log_provenance": [{"log_url": log_url, "source_url": source_url, "filename": filename}],
+                    "log_provenance": [
+                        {
+                            "log_url": log_url,
+                            "source_url": source_url,
+                            "filename": filename,
+                            "evidence_lines": candidate.get("evidence_lines", []),
+                            "tmdb_image_line": candidate.get("log_tmdb_image_line"),
+                        }
+                    ],
                 }
             )
             existing_by_name[_person_name_key(name)] = person
@@ -1744,7 +1855,7 @@ def create_app() -> Flask:
         export = "\n".join(
             f"{person['tmdb_id']}|{person.get('original_name', person['name'])}"
             for person in candidates
-            if person.get("tmdb_id") and "Missing TMDb" not in person.get("metadata_tags", [])
+            if person.get("tmdb_id") and not {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
         )
         return send_file(
             BytesIO(export.encode("utf-8")),

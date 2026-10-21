@@ -5,12 +5,12 @@ import json
 from datetime import UTC, datetime
 from io import BytesIO
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 
 import pytest
 
-from logscan_web.people_images import PEOPLE_IMAGE_STYLES, assess_people_images, parse_people_inventory, person_name_key
+from logscan_web.people_images import PEOPLE_IMAGE_STYLES, assess_people_images, parse_people_inventory, parse_people_readme, person_name_key
 from logscan_web.scanner import extract_missing_people, scan_log
 from logscan_web.storage import AnonymousAnalyticsStore, PeopleStore, ScanStore
 
@@ -38,7 +38,7 @@ class Response:
         return False
 
     def read(self):
-        return json.dumps(self.value).encode()
+        return self.value.encode() if isinstance(self.value, str) else json.dumps(self.value).encode()
 
 
 @pytest.fixture
@@ -52,6 +52,7 @@ def service(tmp_path, monkeypatch):
         json.dumps({"updated_at": datetime.now(UTC).isoformat(), "people": [{"id": 909, "name": "Bruce Langley", "profile_path": "/bruce.jpg"}]}), encoding="utf-8"
     )
     state = {"missing": {"bw"}, "unavailable": set(), "truncated": set(), "stale": set(), "calls": [], "notifications": [], "matches": [{"id": 909, "name": "Bruce Langley"}]}
+    state.update(index_available=set(), http_errors={}, profile_unavailable=False, profile_missing=False)
 
     def urlopen(request, timeout=0):
         url = request.full_url
@@ -61,18 +62,29 @@ def service(tmp_path, monkeypatch):
             return Response({})
         if "api.github.com/repos/Kometa-Team/" in url:
             style = next(item for item in PEOPLE_IMAGE_STYLES if item.repository == urlsplit(url).path.split("/")[3])
+            if style.key in state["http_errors"]:
+                raise HTTPError(url, state["http_errors"][style.key], "GitHub error", {"X-RateLimit-Remaining": "57"}, None)
             if style.key in state["unavailable"]:
                 raise URLError("offline")
             paths = (
                 [] if style.key in state["missing"] else [{"type": "blob", "path": "B/Images/Bruce Langley.png" if style.key == "transparent" else "B/Images/Bruce Langley.jpg"}]
             )
             return Response({"sha": "verified", "truncated": style.key in state["truncated"], "tree": paths}, age=3601 if style.key in state["stale"] else 0)
+        if "raw.githubusercontent.com/Kometa-Team/" in url:
+            style = next(item for item in PEOPLE_IMAGE_STYLES if item.repository == urlsplit(url).path.split("/")[2])
+            if style.key not in state["index_available"]:
+                raise URLError("index offline")
+            count = 0 if style.key in state["missing"] else 1
+            entry = f"* [Bruce Langley](https://raw.githubusercontent.com/Kometa-Team/{style.repository}/master/B/Images/Bruce%20Langley.jpg)\n" if count else ""
+            return Response(f"# Kometa People Images ({count} Images)\n" + entry)
         if "/search/person?" in url:
             return Response({"results": state["matches"]})
         if "/person/909/images?" in url:
             return Response({"profiles": [{"file_path": "/bruce.jpg"}]})
         if "/person/909?" in url:
-            return Response({"id": 909, "name": "Bruce Langley", "profile_path": "/bruce.jpg"})
+            if state["profile_unavailable"]:
+                raise URLError("TMDb offline")
+            return Response({"id": 909, "name": "Bruce Langley", "profile_path": None if state["profile_missing"] else "/bruce.jpg"})
         raise AssertionError(f"Unexpected network request: {url}")
 
     monkeypatch.setattr(module, "urlopen", urlopen)
@@ -98,7 +110,12 @@ def test_exact_bruce_error_and_streaming_parity():
     with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
         streamed = scan_log("people.log", content)
     assert streamed.missing_people == normal.missing_people
-    assert normal.missing_people == [{"name": "Bruce Langley", "tmdb_image_found": False, "source_styles": ["bw", "signature"], "detection_reasons": ["url_poster_update_failed"]}]
+    assert len(normal.missing_people) == 1
+    person = normal.missing_people[0]
+    assert person["name"] == "Bruce Langley" and person["tmdb_image_found"] is False
+    assert person["source_styles"] == ["bw", "signature"]
+    assert person["evidence_lines"] == list(range(2, 2003))
+    assert person["occurrence_count"] == 2001
 
 
 @pytest.mark.parametrize("name,extension", [("Hikaru Kondô", "jpg"), ("Lupita Nyong'o", "JPG"), ("Jean-Claude Van Damme", "png"), ("张子枫", "jpg")])
@@ -137,6 +154,158 @@ def test_legacy_signals_preserve_tmdb_image_found():
     assert len(result) == 1 and result[0]["tmdb_image_found"] is True
     assert result[0]["source_styles"] == ["bw", "primary"]
     assert set(result[0]["detection_reasons"]) == {"tmdb_person_updated_poster", "no_poster_found", "url_poster_update_failed"}
+
+
+BRUCE_PROFILE = "/f4EOWUmznLqboq8Ce7jnlkHVK3Y.jpg"
+
+
+def profile_failure(name="Bruce Langley", profile=BRUCE_PROFILE):
+    return (
+        f"Updating Metadata of {name} Collection\nMethod: tmdb_person Poster: https://image.tmdb.org/t/p/original{profile}\n"
+        + "traceback detail\n" * 40
+        + poster_error(name=name)
+        + f"\nFinished {name} Collection\n"
+    )
+
+
+def test_actual_log_line_positions_images_and_streaming_parity():
+    yetide = BRUCE_ERROR.replace("B/Images/Bruce%20Langley", "Y/Images/Yetide%20Badaki")
+    messages = {
+        1: HEADER.strip(),
+        75026: "Updating Metadata of Yetide Badaki Collection",
+        75030: "Method: tmdb_person Poster: https://image.tmdb.org/t/p/original/gNqftV18TpX1lz8YIVmwYLd0dt0.jpg",
+        75071: yetide,
+        75074: "Finished Yetide Badaki Collection",
+        75145: "Updating Metadata of Bruce Langley Collection",
+        75149: f"Method: tmdb_person Poster: https://image.tmdb.org/t/p/original{BRUCE_PROFILE}",
+        75190: BRUCE_ERROR,
+        75193: "Finished Bruce Langley Collection",
+        83816: yetide,
+        83817: BRUCE_ERROR,
+    }
+    content = "\n".join(messages.get(number, "work") for number in range(1, 83827)).encode()
+    normal = scan_log("people.log", content)
+    with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+        streamed = scan_log("people.log", content)
+    assert normal.missing_people == streamed.missing_people
+    yetide, bruce = normal.missing_people
+    assert yetide["name"] == "Yetide Badaki" and yetide["evidence_lines"] == [75071, 83816]
+    assert bruce["name"] == "Bruce Langley" and bruce["evidence_lines"] == [75190, 83817]
+    assert bruce["log_tmdb_image_path"] == BRUCE_PROFILE and bruce["log_tmdb_image_line"] == 75149
+    assert yetide["log_tmdb_image_path"] == "/gNqftV18TpX1lz8YIVmwYLd0dt0.jpg"
+    assert bruce["tmdb_image_found"] is True and yetide["tmdb_image_found"] is True
+
+
+def test_collection_image_cannot_leak_to_another_person_or_from_an_untrusted_host():
+    content = profile_failure(name="Other Person") + BRUCE_ERROR
+    assert next(person for person in extract_missing_people(content) if person["name"] == "Bruce Langley").get("log_tmdb_image_path") is None
+    content = profile_failure().replace("https://image.tmdb.org/", "https://example.test/")
+    person = extract_missing_people(content)[0]
+    assert person["tmdb_image_found"] is False and "log_tmdb_image_path" not in person
+
+
+def test_repeated_people_evidence_is_capped_without_losing_occurrence_count():
+    content = (HEADER + (BRUCE_ERROR + "\n") * 10005).encode()
+    with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+        person = scan_log("large.log", content).missing_people[0]
+    assert person["occurrence_count"] == 10005
+    assert person["evidence_lines"] == list(range(2, 10002))
+
+
+@pytest.mark.parametrize("malformation", ["truncated", "host", "repository"])
+def test_fallback_inventory_rejects_incomplete_or_untrusted_indexes(malformation):
+    style = PEOPLE_IMAGE_STYLES[0]
+    readme = "# Kometa People Images (1 Images)\n* [Hikaru Kondô](https://raw.githubusercontent.com/Kometa-Team/People-Images/master/H/Images/Hikaru%20Kond%C3%B4.jpg)\n"
+    assert "hikaru kondo" in parse_people_readme(style, readme)
+    if malformation == "truncated":
+        readme = readme.replace("(1 Images)", "(2 Images)")
+    elif malformation == "host":
+        readme = readme.replace("raw.githubusercontent.com", "example.test")
+    else:
+        readme = readme.replace("People-Images/master", "People-Images-bw/master")
+    assert parse_people_readme(style, readme) is None
+
+
+@pytest.mark.parametrize("status", [403, 429, 500])
+def test_github_api_failure_uses_validated_index_and_keeps_cache(service, status):
+    state, create, root = service
+    state["http_errors"] = {style.key: status for style in PEOPLE_IMAGE_STYLES}
+    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    app = create()
+    result = upload(app)
+    assert any(finding["id"] == "missing_people_images_pending" for finding in result["recommendations"])
+    assert PeopleStore(root).list()[0]["people_image_status"] == "incomplete"
+    upload(app, poster_error("signature"))
+    assert sum("api.github.com" in url for url in state["calls"]) == 7
+    assert sum("raw.githubusercontent.com" in url for url in state["calls"]) == 7
+
+
+def test_failed_checks_explain_cause_and_retry_only_failed_styles(service, monkeypatch):
+    import time
+
+    state, create, _root = service
+    state["http_errors"] = {"bw": 500}
+    state["missing"] = set()
+    app = create()
+    result = upload(app)
+    finding = next(item for item in result["recommendations"] if item["id"] == "missing_people_images_unverified")
+    assert "HTTP 500" in finding["description"] and "index could not be reached" in finding["description"]
+    initial_calls = len(state["calls"])
+    state["http_errors"] = {}
+    now = time.monotonic()
+    monkeypatch.setattr("logscan_web.app.time.monotonic", lambda: now + 301)
+    app.test_client().get("/api/people")
+    github_requests = [url for url in state["calls"][initial_calls:] if "api.github.com" in url]
+    assert len(github_requests) == 1 and "People-Images-bw/" in github_requests[0]
+
+
+def test_unresolved_person_still_shows_trusted_image_from_log(service):
+    state, create, root = service
+    state["matches"] = [{"id": 909, "name": "Bruce Langley"}, {"id": 910, "name": "Bruce Langley"}]
+    app = create()
+    result = upload(app, profile_failure())
+    person = next(item for item in app.test_client().get("/api/people").json["people"] if item["tmdb_id"] is None)
+    assert person["tmdb_image_source"] == "log" and person["tmdb_image_status"] == "available"
+    assert person["tmdb_image"]["preview_url"] == "https://image.tmdb.org/t/p/w342" + BRUCE_PROFILE
+    assert person["metadata_tags"] == ["TMDb Ready"]
+    assert PeopleStore(root).list()[0]["log_tmdb_image_path"] == BRUCE_PROFILE
+    finding = next(item for item in result["recommendations"] if item["id"] == "missing_people_images_pending")
+    assert finding["evidence_lines"] == [44] and "Log line number(s): 44" in finding["message"]
+    assert "TMDb image observed at log line number(s): 3" in finding["message"]
+
+
+def test_log_photo_resolves_duplicate_tmdb_names_without_another_person_or_notification(service):
+    state, create, root = service
+    state["matches"] = [
+        {"id": 909, "name": "Bruce Langley", "profile_path": BRUCE_PROFILE},
+        {"id": 910, "name": "Bruce Langley", "profile_path": None},
+        {"id": 911, "name": "Bruce Langley", "profile_path": None},
+    ]
+    app = create()
+    upload(app)
+    assert PeopleStore(root).list()[0]["tmdb_id"] is None
+    upload(app, profile_failure())
+    records = PeopleStore(root).list()
+    assert len(records) == 1 and records[0]["tmdb_id"] == 909
+    assert len(state["notifications"]) == 1
+    assert app.test_client().get("/api/people/export").text == "909|Bruce Langley"
+
+
+def test_tmdb_lookup_failure_keeps_saved_preview_and_does_not_claim_image_missing(service):
+    state, create, root = service
+    state["profile_unavailable"] = True
+    cache = {"updated_at": datetime.now(UTC).isoformat(), "people": [{"id": 909, "name": "Bruce Langley", "profile_path": None}]}
+    (root / "popular_people_cache.json").write_text(json.dumps(cache), encoding="utf-8")
+    store = PeopleStore(root)
+    store.upsert({"key": "tmdb-909", "name": "Bruce Langley", "tmdb_id": 909, "tmdb_profile_path": BRUCE_PROFILE, "tmdb_image_found": True})
+    app = create()
+    person = app.test_client().get("/api/people").json["people"][0]
+    assert person["tmdb_image_source"] == "saved" and person["metadata_tags"] == ["TMDb Ready"]
+    assert person["tmdb_image_url"].endswith(BRUCE_PROFILE)
+    store.upsert({"key": "tmdb-909", "tmdb_profile_path": "", "tmdb_image_found": False})
+    person = app.test_client().get("/api/people").json["people"][0]
+    assert person["tmdb_image_status"] == "unknown" and person["metadata_tags"] == ["TMDb verification pending"]
+    assert app.test_client().get("/api/people/export").text == ""
 
 
 @pytest.mark.parametrize("missing", [{"bw"}, {"primary"}, {"bw", "rainier"}, {style.key for style in PEOPLE_IMAGE_STYLES}, set()])
@@ -254,6 +423,15 @@ def test_name_fallback_upgrades_without_duplicate_identity(tmp_path):
     assert person["log_provenance"] == [{"log_url": "/scan/one"}]
 
 
+def test_reanalysis_enriches_existing_scan_provenance_without_a_duplicate_entry(tmp_path):
+    store = PeopleStore(tmp_path)
+    store.upsert({"key": "tmdb-1", "name": "Person", "log_provenance": [{"log_url": "https://logscan.example/scan/one", "source_url": "https://example.test/message"}]})
+    record = store.upsert({"key": "tmdb-1", "log_provenance": [{"log_url": "/scan/one", "source_url": None, "evidence_lines": [75190]}]})
+    assert len(record["log_provenance"]) == 1
+    assert record["log_provenance"][0]["evidence_lines"] == [75190]
+    assert record["log_provenance"][0]["source_url"] == "https://example.test/message"
+
+
 def test_inventory_reconciliation_batches_writes_and_preserves_last_log_timestamp(tmp_path):
     store = PeopleStore(tmp_path)
     for person_id in (1, 2):
@@ -318,9 +496,10 @@ def test_historical_reanalysis_enqueues_new_candidates_without_receipts_or_stati
     from logscan_web.app import ANALYSIS_VERSION
 
     store = ScanStore(root)
-    content = (HEADER + BRUCE_ERROR).encode()
+    content = (HEADER + profile_failure()).encode()
     result = scan_log("old.log", content)
-    result.metadata["analysis_version"] = 8
+    result.metadata["analysis_version"] = 11
+    state["matches"] = [{"id": 909, "name": "Bruce Langley", "profile_path": BRUCE_PROFILE}, {"id": 910, "name": "Bruce Langley", "profile_path": None}]
     result.overview.update(upload_source="discord", uploaded_by="Old Uploader", uploaded_by_id="42", message_url="https://example.test/message")
     scan_id, _token = store.create("old.log", content, result)
     before = store.get(scan_id)
@@ -330,10 +509,12 @@ def test_historical_reanalysis_enqueues_new_candidates_without_receipts_or_stati
     after = store.get(scan_id)
     for field in ("id", "created_at", "delete_token_hash"):
         assert after[field] == before[field]
-    assert after["metadata"]["analysis_version"] == ANALYSIS_VERSION == 11
+    assert after["metadata"]["analysis_version"] == ANALYSIS_VERSION == 12
     assert after["overview"]["uploaded_by_id"] == "42"
     record = PeopleStore(root).list()[0]
     assert record["name"] == "Bruce Langley" and record["source_styles"] == ["bw"]
+    assert record["tmdb_id"] == 909 and record["log_tmdb_image_path"] == BRUCE_PROFILE
+    assert record["log_evidence_lines"] == [44] and record["log_tmdb_image_line"] == 3
     assert record["requested_by"] == [{"name": "Old Uploader", "id": "42"}]
     assert any(item["id"] == "missing_people_images_pending" for item in after["recommendations"])
     with patch("logscan_web.app.scan_archive_path") as scan:

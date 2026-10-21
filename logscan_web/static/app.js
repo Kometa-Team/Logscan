@@ -497,7 +497,7 @@ function recommendationBody(message, evidenceLines = [], configLine = 0, finding
   const lines = message.split("\n").slice(1);
   lines.forEach((line) => {
     const row = document.createElement("div");
-    if (/^\s*\d+\s+line\(s\)/i.test(line)) row.className = "recommendation-meta";
+    if (/^\s*\d+\s+line\(s\)/i.test(line) || /line number\(s\):/i.test(line)) row.className = "recommendation-meta";
     if (/^Proposed solution:/i.test(line)) row.classList.add("recommendation-solution");
     if (!line.trim()) row.classList.add("spacer");
     if (row.classList.contains("recommendation-meta")) appendRecommendationMeta(row, line);
