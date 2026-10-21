@@ -382,7 +382,9 @@ function formatBytes(bytes) {
 
 function linkLabel(url) {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
+    const destination = new URL(url, window.location.href);
+    if (destination.origin === window.location.origin && destination.pathname === "/people") return "People queue";
+    const host = destination.hostname.replace(/^www\./, "");
     if (host.endsWith("kometa.wiki")) return "Kometa documentation";
     if (host.endsWith("plex.tv")) return "Plex documentation";
     if (host.endsWith("github.com")) return "GitHub reference";
@@ -393,7 +395,7 @@ function linkLabel(url) {
 }
 
 function appendInlineFormatting(container, text) {
-  const tokenPattern = /(\*\*.+?\*\*|`[^`]+`|\[?https?:\/\/[^\s\]]+\]?)/g;
+  const tokenPattern = /(\*\*.+?\*\*|`[^`]+`|\[?https?:\/\/[^\s\]]+\]?|(?<!\S)\[?\/people(?:\?[^\s\]]*)?\]?(?=\s|$))/g;
   let cursor = 0;
   for (const match of text.matchAll(tokenPattern)) {
     container.append(document.createTextNode(text.slice(cursor, match.index)));
