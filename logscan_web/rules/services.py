@@ -5,6 +5,7 @@ import re
 from .base import EVIDENCE_LIMIT, TextRule, matching_line_spans
 from ..models import Finding, ScanContext
 from ..recommendations import RULES as RULE_DEFINITIONS
+from ..service_names import SERVICE_NAMES, configuration_documentation, service_key
 
 
 def _rule(rule_id: str, *needles: str) -> TextRule:
@@ -14,20 +15,7 @@ def _rule(rule_id: str, *needles: str) -> TextRule:
 
 # Configuration section names, display names and documentation are controlled
 # here; never copy arbitrary log contents or credentials into advice.
-API_KEY_SERVICES = {
-    "tmdb": "TMDb",
-    "omdb": "OMDb",
-    "mdblist": "MDBList",
-    "tautulli": "Tautulli",
-    "notifiarr": "Notifiarr",
-    "radarr": "Radarr",
-    "sonarr": "Sonarr",
-    "tracearr": "Tracearr",
-    "github": "GitHub",
-    "yamtrack": "YamTrack",
-    "floppy": "Floppy",
-    "flicklist": "FlickList",
-}
+API_KEY_SERVICES = SERVICE_NAMES
 
 
 class MissingApiKeyRule:
@@ -53,7 +41,7 @@ class MissingApiKeyRule:
             if not isinstance(prefix, str):
                 prefix = prefix.decode("utf-8", errors="replace")
             source = re.search(r"\b([a-z][a-z0-9_]*)\s+(?:sub-attribute|Error:)\s*$", prefix, re.I)
-            service = source[1].casefold() if source and source[1].casefold() in API_KEY_SERVICES else None
+            service = service_key(source[1]) if source else None
             evidence, count, fields = groups.setdefault(service, ([], 0, set()))
             field = match[0].split()[0]
             fields.add(field.lower() if isinstance(field, str) else field.decode().lower())
@@ -67,7 +55,7 @@ class MissingApiKeyRule:
                 title = f"{name} API key is missing"
                 description = f"The {name} API key is blank or missing. Features that depend on {name} cannot run."
                 settings = ", ".join(f"`{service}.{field}`" for field in sorted(fields))
-                solution = f"Add a valid {name} API key to {settings} in config.yml, then rerun Kometa. See https://kometa.wiki/en/latest/config/{service}/"
+                solution = f"Add a valid {name} API key to {settings} in config.yml, then rerun Kometa. See {configuration_documentation(service)}"
             else:
                 title = "API key is missing"
                 description = "An API key is blank or missing, but the affected service could not be identified from this log entry."

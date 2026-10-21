@@ -243,7 +243,15 @@ copied from Quickstart's `static/images/service-icons` directory; Logscan serves
 its own copies. Different services have separate findings and occurrence counts.
 Unidentified services retain generic advice without guessing a service or icon.
 
-Analysis version **13** automatically reprocesses logs still retained on the
+Configuration default warnings are separated by section, setting, and logged
+default. Each finding names the exact configuration field and preserves its
+source and summary line references. Service settings use their bundled icons;
+global settings use the Kometa icon. Related missing-service errors identify
+the affected builder and required connection. Guidance links to the relevant
+configuration documentation and explains optional defaults without treating
+them as required credentials.
+
+Analysis version **14** automatically reprocesses logs still retained on the
 server at startup, including newly recognized `url_poster` failures. Deploy the
 updated application and restart it (or rebuild the Docker container using the
 steps above), preserving the existing data volume. Watch for the retained-scan

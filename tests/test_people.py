@@ -1889,11 +1889,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         )
 
         result = scan_log("meta.log", content.encode())
-        finding = next(item for item in result.recommendations if item["id"] == "config_subattribute_default")
+        finding = next(item for item in result.recommendations if item["id"].startswith("config_subattribute_default_settings_verify_ssl_"))
 
         self.assertEqual(finding["severity"], "warning")
         self.assertEqual(finding["evidence_lines"], [2])
-        self.assertIn("default value shown", finding["description"])
+        self.assertIn("`settings.verify_ssl`", finding["description"])
+        self.assertIn("logged default `True`", finding["description"])
+        self.assertEqual(finding["service"], "kometa")
         self.assertIn("No change is required", finding["solution"])
 
     def test_runtime_platform_is_reduced_to_a_safe_family(self):
