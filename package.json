@@ -7,7 +7,7 @@
   "scripts": {
     "lint:js": "eslint logscan_web/static tests/*.cjs eslint.config.cjs",
     "spellcheck": "cspell --dot --no-progress --show-suggestions \"**/*.md\"",
-    "test": "node --test tests/test_occurrence_ui.cjs tests/test_analytics_ui.cjs tests/test_integrity_ui.cjs tests/test_plex_security_ui.cjs"
+    "test": "node --test tests/test_occurrence_ui.cjs tests/test_analytics_ui.cjs tests/test_integrity_ui.cjs tests/test_plex_security_ui.cjs tests/test_people_ui.cjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

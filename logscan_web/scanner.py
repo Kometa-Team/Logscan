@@ -11,12 +11,13 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from io import BytesIO
 from pathlib import Path, PurePosixPath
-from urllib.parse import unquote
 
 import py7zr
 import zstandard as zstd
 
 from .models import Finding, ScanContext
+from .people_images import merge_people_candidate, person_from_image_url
+from .plex_security import normalized_pms_version, server_observation
 from .rules import RuleRegistry, migrated_rules
 from .rules.base import TextRule, evaluate_text_rules_bytes
 from .categories import category_configuration
@@ -64,14 +65,9 @@ def detect_log_tool(content) -> str:
     raise ScanError("This does not appear to be a complete Kometa log file or a recognized ImageMaid log file.")
 
 
-def extract_missing_people(content: str) -> list[dict[str, str | bool]]:
-    """Return unique People Posters missing from a Kometa log.
-
-    This mirrors the live cog's two signals: a TMDb poster update followed by
-    its collection name, and the later "No Poster Found" warning.  The latter
-    has no TMDb source image.
-    """
-    people: dict[str, bool] = {}
+def extract_missing_people(content: str) -> list[dict]:
+    """Return unique People candidates, retaining the originating style/reason."""
+    people: dict[str, dict] = {}
     for match in re.finditer(
         r"Detail: tmdb_person updated poster to \[URL\] https?://[^\s|]+" r"(?:\s*\|)?\s*\n.*?\n.*?\n.*?Finished (?P<name>.+?) Collection",
         content,
@@ -79,16 +75,18 @@ def extract_missing_people(content: str) -> list[dict[str, str | bool]]:
     ):
         name = re.sub(r" \((?:Director|Producer|Writer)\)$", "", match.group("name").strip())
         if name:
-            people[name] = True
+            merge_people_candidate(people, {"name": name, "tmdb_image_found": True, "detection_reasons": ["tmdb_person_updated_poster"]})
     for match in re.finditer(
-        r"Collection Warning: No Poster Found at https://raw\.githubusercontent\.com/" r"Kometa-Team/People-Images[^\s]*?/(?P<name>[^/\s]+?)(?:\.[A-Za-z0-9]+)?(?=\s|$)",
+        r"(?P<reason>Collection Warning: No Poster Found at|Metadata: url_poster failed to update poster to \[URL\])\s+(?P<url>https://[^\s|]+)",
         content,
         re.IGNORECASE,
     ):
-        name = unquote(re.sub(r"\.[A-Za-z0-9]+$", "", match.group("name"))).strip()
-        if name and name not in people:
-            people[name] = False
-    return [{"name": name, "tmdb_image_found": has_image} for name, has_image in people.items()]
+        parsed = person_from_image_url(match.group("url"))
+        if parsed:
+            style, name = parsed
+            reason = "url_poster_update_failed" if match.group("reason").casefold().startswith("metadata:") else "no_poster_found"
+            merge_people_candidate(people, {"name": name, "tmdb_image_found": False, "source_styles": [style.key], "detection_reasons": [reason]})
+    return list(people.values())
 
 
 def _validate_archive_names(names: list[str]) -> list[str]:
@@ -325,7 +323,7 @@ class ScanResult:
     metadata: dict
     overview: dict
     categories: list[dict]
-    missing_people: list[dict[str, str | bool]]
+    missing_people: list[dict]
 
 
 def _plain_title(value: str) -> str:
@@ -556,19 +554,16 @@ def plex_server_summaries(sections: list[dict[str, object]]) -> list[dict[str, s
     servers: list[dict[str, str]] = []
     for section in sections:
         lines = [str(line) for line in section.get("lines", [])]
-        server_match = next(
-            (match for line in lines if (match := re.fullmatch(r"Connected to server\s+(.+?)\s+version\s+(.+)", line, re.I))),
-            None,
-        )
-        if not server_match:
+        observation = next((observed for line in lines if (observed := server_observation(line))), None)
+        if not observation:
             continue
         platform_match = next(
             (match for line in lines if (match := re.fullmatch(r"Running on\s+(.+)", line, re.I))),
             None,
         )
         server = {
-            "name": server_match.group(1).strip(),
-            "version": server_match.group(2).strip(),
+            "name": observation[0],
+            "version": observation[1],
             "platform": platform_match.group(1).strip() if platform_match else "Unknown",
         }
         if server not in servers:
@@ -589,9 +584,10 @@ def plex_analytics(sections: list[dict[str, object]]) -> dict[str, list[str]]:
     for section in sections:
         lines = [str(line) for line in section.get("lines", [])]
         for line in lines:
-            version = re.search(r"\bversion\s+(\d+\.\d+\.\d+\.\d+(?:-[A-Za-z0-9]+)?)\b", line, re.I)
+            observation = server_observation(line)
+            version = normalized_pms_version(observation[1]) if observation else None
             if version:
-                values["versions"].append(version.group(1))
+                values["versions"].append(version)
             platform = re.search(r"\bRunning on\s+(Windows|Linux|macOS|Darwin|FreeBSD)\b", line, re.I)
             if platform:
                 family = platform.group(1).casefold()
@@ -816,9 +812,9 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         b"mass_user_rating_update",
         b"mass_episode_user_ratings_update",
     )
-    missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found")
+    missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found", b"url_poster failed to update poster")
     sampled_lines: dict[int, str] = {}
-    missing_lines: list[str] = []
+    missing_people: dict[str, dict] = {}
     marker_found = False
     complete_log = False
     content_length = len(content_bytes)
@@ -883,7 +879,8 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
                     if block_end >= content_length:
                         break
                     _next_line, block_end = decoded_line(block_end + 1)
-                missing_lines.append(content_bytes[line_start:block_end].decode("utf-8", errors="replace"))
+                for candidate in extract_missing_people(content_bytes[line_start:block_end].decode("utf-8", errors="replace")):
+                    merge_people_candidate(missing_people, candidate)
         core = chunk[:core_length]
         lines_before_chunk += core.count(b"\n")
         chunk_start = chunk_end
@@ -947,7 +944,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
             quickstart_metadata["quickstart"],
         ),
         categories=category_configuration(),
-        missing_people=extract_missing_people("\n".join(missing_lines)),
+        missing_people=list(missing_people.values()),
     )
 
 
@@ -1021,15 +1018,7 @@ def _integrity_findings(integrity: dict) -> list[Finding]:
         key, severity, title = "modified", "warning", "Kometa source integrity: modified files"
         description = "The integrity report confirms differences from the upstream source baseline. This is a support diagnostic, not a run-blocking error."
         solution = "Review the listed changes. If they were not intentional, restore the official Kometa source files using your installation's update method."
-    elif state == "clean":
-        key, severity, title = "verified", "advice", "Kometa source integrity: verified"
-        description = "The reported integrity check found no source-file differences from its upstream baseline."
-        solution = "No integrity-related action is needed. Verification applies to the reported check, not to later file changes."
-    elif state == "disabled":
-        key, severity, title = "disabled", "advice", "Kometa source integrity: check disabled"
-        description = "Source integrity checking was disabled. Local source files were not verified; this does not indicate detected file changes."
-        solution = "Enable source-integrity checking for a future run if verification is needed."
-    elif state in {"check_unavailable", "check_failed", "not_verified", "not_applicable"}:
+    elif state in {"check_unavailable", "check_failed", "not_verified"}:
         key, severity, title = "unavailable", "advice", "Kometa source integrity: check unavailable"
         description = "The source comparison was not completed. Local files were not verified; an unavailable check or timeout does not indicate detected file changes."
         solution = "Review the reported reason and retry the integrity check when it is available. Kometa can continue running without a completed check."

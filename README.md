@@ -185,22 +185,49 @@ startup and hourly thereafter.
 
 The `/people` page combines missing People Posters found in uploaded logs with
 IMDb StarMeter and TMDb trending people. Each person carries `missing`, `trending`,
-or both source tags and is de-duplicated by TMDb person ID. People already present
-in the primary Kometa People Images repository automatically leave the actionable
-queue. Filters and exports use the same union so automation processes both sources.
+or both source tags and is de-duplicated by TMDb person ID, with a normalized-name
+fallback for unresolved identities. A confirmed missing image in any supported
+style keeps the person actionable, even when their primary image exists. The
+missing obligation completes only when every applicable style is verified present;
+independent trending sources remain available. Filters and exports use the same union.
 Set `TMDB_API_KEY` so the service can resolve people and load profile images.
 
 For website uploads, set `DISCORD_PEOPLE_WEBHOOK_URL` to a webhook created in
 the destination Discord channel. A non-embedding notice is posted only when a
-person is first added to the queue, preventing repeat notifications for the
+actionable person is first added to the queue, preventing repeat notifications for the
 same person. The notification links back to the filtered People queue and the
 source scan when available.
 
-The Missing and Trending filters use OR behavior and are both enabled by
-default. Export downloads the currently selected source union as
-`tmdbid|name`. Marking a person complete clears both sources; candidates also
-leave the queue automatically after their image appears in the primary Kometa
-People Images repository.
+Source and requester tags filter the unified queue. Export keeps one
+`tmdbid|name` row per person. Manual completion and exclusions retain their
+existing effect, including the temporary check on trending people.
+
+The authoritative registry is `logscan_web/people_images.py`. It includes
+`People-Images` (primary), `People-Images-bw`, `People-Images-diiivoy`,
+`People-Images-diiivoycolor`, `People-Images-rainier`, `People-Images-signature`,
+and `People-Images-transparent`. Their public repository listings were checked
+for the `master` branch and letter/`Images` filename paths; the transparent
+style uses PNG assets and the other styles use JPG assets. Legacy root image
+URLs remain recognized. No person-specific applicability exclusions are
+currently declared. Compact card details show each style's availability.
+
+The service loads complete GitHub file trees in batches of four and caches them
+for one hour, with no per-person image requests. Successful checks store the
+Git revision and verification time. Failed, truncated, malformed, or expired
+inventory responses remain unknown; they never clear outstanding candidates.
+GitHub API rate limits or outages can delay verification until the next refresh.
+Ambiguous TMDb searches remain unresolved rather than selecting the first result.
+
+Analysis version **11** automatically reprocesses logs still retained on the
+server at startup, including newly recognized `url_poster` failures. Deploy the
+updated application and restart it (or rebuild the Docker container using the
+steps above), preserving the existing data volume. Watch for the retained-scan
+reprocessing message. Existing `people.json` records gain optional style,
+verification, and upload provenance fields as they are updated; no reset or
+separate migration command is needed. Reprocessing preserves scan IDs, receipt
+tokens, upload attribution, and historical analytics, and sends no backfill
+notifications. Logs that have already expired cannot be recovered. Explicit
+manual completions are retained so reanalysis cannot recreate those obligations.
 
 ## Reverse proxy notes
 
@@ -280,7 +307,7 @@ Run the same checks used by CI:
 ```powershell
 py -3.13 -m pre_commit run --all-files
 py -3.13 -m pytest
-node --test tests/test_occurrence_ui.cjs
+npm test
 ```
 
 On Linux or macOS, replace `py -3.13` with `python` from an activated Python 3.13
