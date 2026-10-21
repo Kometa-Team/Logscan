@@ -58,3 +58,54 @@ test("per-person evidence links open the exact source lines", () => {
   buttons.forEach(button => button.events.click());
   assert.deepEqual(opened, [[75071, 75071], [83816, 83816], [75190, 75190], [83817, 83817]]);
 });
+
+function renderAdvice(text) {
+  const element = tag => ({
+    tag, children: [], className: "", textContent: "", classList: { add() {}, contains() { return false; } },
+    append(...children) { this.children.push(...children); },
+    addEventListener() {},
+  });
+  const formatting = source.slice(source.indexOf("function linkLabel("), source.indexOf("function appendLineReferenceLinks("));
+  const adviceContext = vm.createContext({
+    URL,
+    window: { location: new URL("https://logscan.kometa.team/scan/saved-scan") },
+    document: { createElement: element, createTextNode: value => value },
+  });
+  vm.runInContext(formatting + rendering, adviceContext);
+  return adviceContext.recommendationBody(`People\nProposed solution: ${text}`, []).children[0];
+}
+
+test("saved People advice links open the queue and preserve tag filters", () => {
+  for (const [url, tags] of [
+    ["/people", []],
+    ["/people?tags=Missing+Kometa", ["Missing Kometa"]],
+    ["https://logscan.kometa.team/people?tags=Missing+Kometa&tags=Requested+by+User", ["Missing Kometa", "Requested by User"]],
+  ]) {
+    const row = renderAdvice(`Wait for the missing styles. Review the submitted people here: ${url}`);
+    const link = row.children.find(child => child.tag === "a");
+    assert.equal(link?.href, url);
+    assert.equal(link.textContent, "People queue");
+    const destination = new URL(link.href, "https://logscan.kometa.team/scan/saved-scan");
+    assert.equal(destination.pathname, "/people");
+    assert.deepEqual(destination.searchParams.getAll("tags"), tags);
+  }
+});
+
+test("pending verification advice and bracketed legacy queue links stay clickable", () => {
+  const url = "/people?tags=Missing+Kometa";
+  const row = renderAdvice(`Open the People queue for current verification. People queue: [${url}] Retry later.`);
+  assert.equal(row.children.find(child => child.tag === "a")?.href, url);
+  assert.equal(row.children.at(-1), " Retry later.");
+});
+
+test("inline advice preserves documentation links, formatting and literal paths", () => {
+  const row = renderAdvice("Read **guidance** and `url_poster`: https://kometa.wiki/en/latest/ /people-other //example.test/people javascript:alert(1)");
+  assert.equal(row.children.find(child => child.tag === "strong")?.textContent, "guidance");
+  assert.equal(row.children.find(child => child.tag === "code")?.textContent, "url_poster");
+  const links = row.children.filter(child => child.tag === "a");
+  assert.equal(links.length, 1);
+  assert.equal(links[0].href, "https://kometa.wiki/en/latest/");
+  assert.equal(links[0].textContent, "Kometa documentation");
+  assert.equal(links[0].rel, "noopener noreferrer");
+  assert.equal(row.children.at(-1), " /people-other //example.test/people javascript:alert(1)");
+});

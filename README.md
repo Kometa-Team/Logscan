@@ -221,6 +221,14 @@ minutes without refetching fresh styles. No per-person image requests are needed
 An optional `GITHUB_TOKEN` increases API limits; the raw index fallback does not
 require it. Unknown statuses explain the failed checks.
 
+People advice retains both earlier outcomes: posters already available (check
+the failed update) and missing posters needing creation (review the People
+queue). Inconclusive repository checks produce separate pending-verification
+advice. Legacy `tmdb_person` poster updates and `No Poster Found` warnings remain
+supported alongside `url_poster` failures. Advice links open the People queue
+with its Missing Kometa and requester filters preserved, including relative
+links stored by historical reanalysis; this display fix needs no new reanalysis.
+
 People recommendations link to each person's physical log lines. Trusted TMDb
 image URLs reported in the same collection are retained for previews, with a
 source label when the current profile lookup is unavailable. A failed TMDb
