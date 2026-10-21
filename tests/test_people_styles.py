@@ -509,7 +509,7 @@ def test_historical_reanalysis_enqueues_new_candidates_without_receipts_or_stati
     after = store.get(scan_id)
     for field in ("id", "created_at", "delete_token_hash"):
         assert after[field] == before[field]
-    assert after["metadata"]["analysis_version"] == ANALYSIS_VERSION == 13
+    assert after["metadata"]["analysis_version"] == ANALYSIS_VERSION == 14
     assert after["overview"]["uploaded_by_id"] == "42"
     record = PeopleStore(root).list()[0]
     assert record["name"] == "Bruce Langley" and record["source_styles"] == ["bw"]

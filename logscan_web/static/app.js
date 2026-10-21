@@ -968,9 +968,9 @@ function goToNextHighlightedLine() {
 
 function appendRecommendationTitle(container, item) {
   const services = new Set(["anidb", "apprise", "floppy", "github", "gotify", "mal", "mdblist", "notifiarr", "ntfy", "omdb", "plex", "radarr", "serializd", "sonarr", "tautulli", "tmdb", "tracearr", "trakt", "yamtrack"]);
-  if (services.has(item.service)) {
+  if (services.has(item.service) || item.service === "kometa") {
     const icon = document.createElement("img");
-    icon.src = `/static/service-icons/${item.service}.png`;
+    icon.src = item.service === "kometa" ? "/static/kometa.png" : `/static/service-icons/${item.service}.png`;
     icon.className = "recommendation-service-icon";
     icon.alt = "";
     icon.width = icon.height = 24;

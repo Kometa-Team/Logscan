@@ -147,7 +147,7 @@ def test_retained_scan_reanalysis_updates_plex_versions_and_removes_patched_advi
     assert "plex_security_patched" not in public
     app.extensions["backfill_scan_analysis"]()
     after = store.get(scan_id)
-    assert after["metadata"]["analysis_version"] == ANALYSIS_VERSION == 13
+    assert after["metadata"]["analysis_version"] == ANALYSIS_VERSION == 14
     assert after["overview"]["plex_servers"][0]["version"] == version
     assert after["overview"]["plex_analytics"]["versions"] == [version]
     assert not any(item["id"] == "plex_security_patched" for item in after["recommendations"])

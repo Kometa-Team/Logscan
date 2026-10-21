@@ -34,7 +34,7 @@ The older 1.41.7.0 through 1.42.0.99999 range remains available through
 `legacy_affected`, `LEGACY_LOW` and `LEGACY_HIGH`. Assessments mark overlapping
 legacy evidence with `legacy_vulnerability_affected`; the covering 2026 advisory
 produces one finding for that server rather than a second legacy warning.
-Analysis version 13 refreshes retained scans using the existing startup backfill.
+Analysis version 14 refreshes retained scans using the existing startup backfill.
 The security assessment, Overview server cards, and Plex analytics use the
 same connection/version parser. It accepts paired quotes around a version,
 retains the full build hash, and rejects partial versions or malformed suffixes.

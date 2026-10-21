@@ -115,11 +115,11 @@ test("service findings use bundled Quickstart icons without guessing from generi
   const titleContext = vm.createContext({ document: { createElement: element } });
   const titleSource = source.slice(source.indexOf("function appendRecommendationTitle("), source.indexOf("function openRecommendationDialog("));
   vm.runInContext(titleSource, titleContext);
-  for (const service of ["mdblist", "tmdb", "omdb", "tautulli", "radarr", "sonarr", "notifiarr"]) {
+  for (const service of ["mdblist", "tmdb", "omdb", "tautulli", "radarr", "sonarr", "notifiarr", "tracearr", "kometa"]) {
     const heading = element("span");
     titleContext.appendRecommendationTitle(heading, { service, title: `${service} API key is missing` });
     assert.equal(heading.children[0].tag, "img");
-    assert.equal(heading.children[0].src, `/static/service-icons/${service}.png`);
+    assert.equal(heading.children[0].src, service === "kometa" ? "/static/kometa.png" : `/static/service-icons/${service}.png`);
     assert.equal(heading.children[0].alt, "");
     assert.equal(heading.children[1].textContent, `${service} API key is missing`);
   }

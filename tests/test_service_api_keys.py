@@ -90,9 +90,9 @@ def test_api_key_values_and_unrelated_service_names_are_not_reported():
 
 
 def test_version_12_retained_scan_is_upgraded_without_changing_identity(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCAN_STORE", str(tmp_path))
     from logscan_web.app import ANALYSIS_VERSION, create_app
 
-    monkeypatch.setenv("SCAN_STORE", str(tmp_path))
     content = (HEADER + MDBLIST_ERROR).encode()
     result = scan_log("meta.log", content)
     result.metadata["analysis_version"] = 12
@@ -108,7 +108,7 @@ def test_version_12_retained_scan_is_upgraded_without_changing_identity(tmp_path
             rescan.assert_not_called()
         analytics.assert_not_called()
     after = store.get(scan_id)
-    assert after["metadata"]["analysis_version"] == ANALYSIS_VERSION == 13
+    assert after["metadata"]["analysis_version"] == ANALYSIS_VERSION == 14
     for field in ("id", "created_at", "delete_token_hash"):
         assert after[field] == before[field]
     finding = next(item for item in after["recommendations"] if item["id"] == "api_key_missing_mdblist")
