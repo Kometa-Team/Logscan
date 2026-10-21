@@ -109,3 +109,24 @@ test("inline advice preserves documentation links, formatting and literal paths"
   assert.equal(links[0].rel, "noopener noreferrer");
   assert.equal(row.children.at(-1), " /people-other //example.test/people javascript:alert(1)");
 });
+
+test("service findings use bundled Quickstart icons without guessing from generic titles", () => {
+  const element = tag => ({ tag, children: [], append(child) { this.children.push(child); } });
+  const titleContext = vm.createContext({ document: { createElement: element } });
+  const titleSource = source.slice(source.indexOf("function appendRecommendationTitle("), source.indexOf("function openRecommendationDialog("));
+  vm.runInContext(titleSource, titleContext);
+  for (const service of ["mdblist", "tmdb", "omdb", "tautulli", "radarr", "sonarr", "notifiarr"]) {
+    const heading = element("span");
+    titleContext.appendRecommendationTitle(heading, { service, title: `${service} API key is missing` });
+    assert.equal(heading.children[0].tag, "img");
+    assert.equal(heading.children[0].src, `/static/service-icons/${service}.png`);
+    assert.equal(heading.children[0].alt, "");
+    assert.equal(heading.children[1].textContent, `${service} API key is missing`);
+  }
+  for (const service of [undefined, "new_service", "../../secret", "https://example.test/icon"]) {
+    const heading = element("span");
+    titleContext.appendRecommendationTitle(heading, { service, title: "API key is missing" });
+    assert.equal(heading.children.length, 1);
+    assert.equal(heading.children[0].textContent, "API key is missing");
+  }
+});

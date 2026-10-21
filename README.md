@@ -237,7 +237,13 @@ unresolved unless the log's profile image uniquely matches one exact-name
 candidate. Reanalysis upgrades an existing name record without duplicating the
 person, notification, or upload provenance.
 
-Analysis version **12** automatically reprocesses logs still retained on the
+API-key findings identify the affected service and configuration field, link to
+that service's documentation, and show its icon. The bundled service icons are
+copied from Quickstart's `static/images/service-icons` directory; Logscan serves
+its own copies. Different services have separate findings and occurrence counts.
+Unidentified services retain generic advice without guessing a service or icon.
+
+Analysis version **13** automatically reprocesses logs still retained on the
 server at startup, including newly recognized `url_poster` failures. Deploy the
 updated application and restart it (or rebuild the Docker container using the
 steps above), preserving the existing data volume. Watch for the retained-scan

@@ -1081,7 +1081,7 @@ RULE_SPECS = (
 DOCUMENTATION_URLS = {
     "anidb_connection": "https://kometa.wiki/en/latest/config/anidb",
     "anidb_auth": "https://kometa.wiki/en/latest/config/anidb",
-    "api_key_missing": "https://kometa.wiki/en/latest/config/trakt/?q=api",
+    "api_key_missing": "https://kometa.wiki/en/latest/config/overview/",
     "plex_version": "https://forums.plex.tv/t/refresh-endpoint-put-post-requests-started-throwing-404s-in-version-1-32-7-7484/853588",
     "cache_disabled": "https://kometa.wiki/en/latest/config/settings#cache",
     "legacy_other_award": "https://kometa.wiki/en/latest/kometa/faqs/?h=other_award#pmm-120-release-changes",
