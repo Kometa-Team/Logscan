@@ -14,8 +14,10 @@ does not fetch advisory data or probe Plex servers.
 
 The existing `PlexSecurityRule` uses this core in normal and streaming scans.
 Its stable affected finding ID remains `plex_security`; the embedded
-`security_assessment` identifies the advisory and server. Patched and unknown
-assessments use advice severity. Existing finding totals and support filters
+`security_assessment` identifies the advisory and server. Unknown assessments
+use advice severity. Patched observations remain available from the offline
+evaluator and the server version stays visible in Overview; they do not create
+advice findings or security banners. Existing finding totals and support filters
 therefore include affected servers as critical without counting repeated
 evidence as additional findings. Raw tagged log counts remain independent.
 
@@ -32,7 +34,11 @@ The older 1.41.7.0 through 1.42.0.99999 range remains available through
 `legacy_affected`, `LEGACY_LOW` and `LEGACY_HIGH`. Assessments mark overlapping
 legacy evidence with `legacy_vulnerability_affected`; the covering 2026 advisory
 produces one finding for that server rather than a second legacy warning.
-Analysis version 10 refreshes retained scans using the existing startup backfill.
+Analysis version 11 refreshes retained scans using the existing startup backfill.
+The security assessment, Overview server cards, and Plex analytics use the
+same connection/version parser. It accepts paired quotes around a version,
+retains the full build hash, and rejects partial versions or malformed suffixes.
+Operating system version lines cannot be mistaken for Plex server versions.
 The security banner shows the date, or full date range, recorded by timestamps
 in the log. Dates retain the logger's local calendar date without assuming a
 time zone. Normal and streaming scans read the full log for this range. Missing
