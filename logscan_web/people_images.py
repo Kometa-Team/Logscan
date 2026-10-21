@@ -1,6 +1,7 @@
 """Supported Kometa People Images styles and shared inventory assessment."""
 
 import re
+import hashlib
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -55,6 +56,28 @@ class PeopleImageInventory(dict):
         self.checked_at = datetime.now(UTC).isoformat()
 
 
+class PeopleImageInventories(dict):
+    """Verified indexes and safe failure explanations for unavailable styles."""
+
+    def __init__(self, images=(), *, errors=None):
+        super().__init__(images)
+        self.errors = errors or {}
+
+
+def tmdb_image_path(value: object) -> str | None:
+    """Accept only TMDb profile image URLs suitable for the existing image proxy."""
+    if not isinstance(value, str):
+        return None
+    try:
+        url = urlsplit(value)
+        if url.scheme != "https" or url.netloc != "image.tmdb.org" or url.query or url.fragment:
+            return None
+        match = re.fullmatch(r"/t/p/(?:original|w\d+)(/[A-Za-z0-9_-]+\.jpe?g)", url.path, re.I)
+        return match.group(1) if match else None
+    except ValueError:
+        return None
+
+
 def person_from_image_url(value: str) -> tuple[PeopleImageStyle, str] | None:
     """Accept only known raw GitHub repositories, branches and image paths."""
     try:
@@ -102,6 +125,31 @@ def parse_people_inventory(style: PeopleImageStyle, tree: dict) -> dict[str, str
     return PeopleImageInventory(images, tree["sha"])
 
 
+def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] | None:
+    """Validate a repository's generated image index when GitHub's tree API fails.
+
+    Every declared image must be listed and point into the expected repository.
+    Truncated or malformed documents cannot confirm absence.
+    """
+    header = re.search(r"^# Kometa People Images[^\n]*\(([\d,]+) Images\)\s*$", readme, re.M)
+    if not header:
+        return None
+    try:
+        expected_count = int(header.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    links = re.findall(r"^\* \[([^\n]+)\]\((https://[^\n]+)\)\s*$", readme, re.M)
+    if len(links) != expected_count:
+        return None
+    images = {}
+    for _name, url in links:
+        parsed = person_from_image_url(url)
+        if parsed is None or parsed[0] != style:
+            return None
+        images[person_name_key(parsed[1])] = url
+    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest())
+
+
 def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]] | None) -> dict:
     """Attach all style statuses using one cached, normalized inventory snapshot."""
     names = {person_name_key(candidate.get(field)) for field in ("name", "original_name") if candidate.get(field)}
@@ -115,6 +163,8 @@ def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]]
         else:
             status = "present" if any(name in inventory for name in names) else "missing"
         availability[style.key] = {"label": style.label, "repository": style.repository, "status": status}
+        if status == "unknown":
+            availability[style.key]["reason"] = getattr(inventories, "errors", {}).get(style.label, "Repository inventory has not been verified.")
         if isinstance(inventory, PeopleImageInventory):
             availability[style.key].update(checked_at=inventory.checked_at, revision=inventory.revision)
     states = {item["status"] for item in availability.values()}
@@ -125,7 +175,19 @@ def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]]
 def merge_people_candidate(people: dict[str, dict], candidate: dict) -> None:
     """Deduplicate repeated log events without retaining their original lines."""
     key = person_name_key(candidate["name"])
-    existing = people.setdefault(key, {**candidate, "source_styles": [], "detection_reasons": []})
+    existing = people.setdefault(key, {**candidate, "source_styles": [], "detection_reasons": [], "evidence_lines": [], "occurrence_count": 0})
     existing["tmdb_image_found"] |= candidate.get("tmdb_image_found", False)
     for field in ("source_styles", "detection_reasons"):
         existing[field] = sorted(set(existing[field]) | set(candidate.get(field, [])))
+    existing["occurrence_count"] += candidate.get("occurrence_count", 1)
+    for number in candidate.get("evidence_lines", []):
+        evidence = existing["evidence_lines"]
+        if len(evidence) < 10_000:
+            if not evidence or number > evidence[-1]:
+                evidence.append(number)
+            elif number not in evidence:
+                evidence.append(number)
+                evidence.sort()
+    if candidate.get("log_tmdb_image_path"):
+        existing["log_tmdb_image_path"] = candidate["log_tmdb_image_path"]
+        existing["log_tmdb_image_line"] = candidate.get("log_tmdb_image_line")

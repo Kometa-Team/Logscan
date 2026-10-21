@@ -211,14 +211,25 @@ style uses PNG assets and the other styles use JPG assets. Legacy root image
 URLs remain recognized. No person-specific applicability exclusions are
 currently declared. Compact card details show each style's availability.
 
-The service loads complete GitHub file trees in batches of four and caches them
-for one hour, with no per-person image requests. Successful checks store the
-Git revision and verification time. Failed, truncated, malformed, or expired
-inventory responses remain unknown; they never clear outstanding candidates.
-GitHub API rate limits or outages can delay verification until the next refresh.
-Ambiguous TMDb searches remain unresolved rather than selecting the first result.
+The service loads complete GitHub file trees in batches of four. If the API
+fails, it uses each repository's generated image index after checking the
+declared image count and every image URL. Successful checks are cached for one
+hour and store the Git revision or index hash and verification time. Failed,
+truncated, malformed, or expired inventories remain unknown; they never clear
+outstanding candidates. Failed styles retry on the next refresh after five
+minutes without refetching fresh styles. No per-person image requests are needed.
+An optional `GITHUB_TOKEN` increases API limits; the raw index fallback does not
+require it. Unknown statuses explain the failed checks.
 
-Analysis version **11** automatically reprocesses logs still retained on the
+People recommendations link to each person's physical log lines. Trusted TMDb
+image URLs reported in the same collection are retained for previews, with a
+source label when the current profile lookup is unavailable. A failed TMDb
+request is not classified as a missing image. Ambiguous searches remain
+unresolved unless the log's profile image uniquely matches one exact-name
+candidate. Reanalysis upgrades an existing name record without duplicating the
+person, notification, or upload provenance.
+
+Analysis version **12** automatically reprocesses logs still retained on the
 server at startup, including newly recognized `url_poster` failures. Deploy the
 updated application and restart it (or rebuild the Docker container using the
 steps above), preserving the existing data volume. Watch for the retained-scan

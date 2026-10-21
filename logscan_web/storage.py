@@ -13,6 +13,7 @@ import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 class ScanStore:
@@ -772,6 +773,12 @@ class PeopleStore:
                 merged = {field: list(existing.get(field, [])) for field in merged_fields}
                 for field in merged_fields:
                     for value in person.get(field, []):
+                        if field == "log_provenance" and value.get("log_url"):
+                            path = urlsplit(value["log_url"]).path
+                            previous = next((item for item in merged[field] if urlsplit(item.get("log_url") or "").path == path), None)
+                            if previous is not None:
+                                previous.update({key: item for key, item in value.items() if item is not None})
+                                continue
                         if value not in merged[field]:
                             merged[field].append(value)
                 # An unresolved repeat must not downgrade an already resolved identity.
