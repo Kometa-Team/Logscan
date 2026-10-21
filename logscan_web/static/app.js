@@ -966,18 +966,36 @@ function goToNextHighlightedLine() {
   goToHighlightedLine("next");
 }
 
+function appendRecommendationTitle(container, item) {
+  const services = new Set(["anidb", "apprise", "floppy", "github", "gotify", "mal", "mdblist", "notifiarr", "ntfy", "omdb", "plex", "radarr", "serializd", "sonarr", "tautulli", "tmdb", "tracearr", "trakt", "yamtrack"]);
+  if (services.has(item.service)) {
+    const icon = document.createElement("img");
+    icon.src = `/static/service-icons/${item.service}.png`;
+    icon.className = "recommendation-service-icon";
+    icon.alt = "";
+    icon.width = icon.height = 24;
+    container.append(icon);
+  }
+  const text = document.createElement("span");
+  text.textContent = item.title;
+  container.append(text);
+}
+
 function openRecommendationDialog(items) {
   const item = items[0];
   document.querySelector("#recommendation-severity").textContent = items.length === 1
     ? `${item.severity} recommendation`
     : `${items.length} recommendations`;
-  document.querySelector("#recommendation-title").textContent = items.length === 1 ? item.title : "Recommendations for this line";
+  const heading = document.querySelector("#recommendation-title");
+  heading.replaceChildren();
+  if (items.length === 1) appendRecommendationTitle(heading, item);
+  else heading.textContent = "Recommendations for this line";
   const content = document.querySelector("#recommendation-content");
   content.replaceChildren();
   items.forEach((recommendation) => {
     if (items.length > 1) {
       const title = document.createElement("h3");
-      title.textContent = recommendation.title;
+      appendRecommendationTitle(title, recommendation);
       content.append(title);
     }
     content.append(recommendationBody(recommendation.message, recommendation.evidence_lines, 0, recommendation));
@@ -1166,7 +1184,7 @@ function showGroup(group, recommendations) {
     dot.className = "severity-dot";
     const titleText = document.createElement("span");
     titleText.className = "recommendation-title";
-    titleText.textContent = item.title;
+    appendRecommendationTitle(titleText, item);
     const chevron = document.createElement("span");
     chevron.className = "chevron";
     chevron.textContent = "›";
