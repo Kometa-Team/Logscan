@@ -382,7 +382,9 @@ function formatBytes(bytes) {
 
 function linkLabel(url) {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
+    const destination = new URL(url, window.location.href);
+    if (destination.origin === window.location.origin && destination.pathname === "/people") return "People queue";
+    const host = destination.hostname.replace(/^www\./, "");
     if (host.endsWith("kometa.wiki")) return "Kometa documentation";
     if (host.endsWith("plex.tv")) return "Plex documentation";
     if (host.endsWith("github.com")) return "GitHub reference";
@@ -393,7 +395,7 @@ function linkLabel(url) {
 }
 
 function appendInlineFormatting(container, text) {
-  const tokenPattern = /(\*\*.+?\*\*|`[^`]+`|\[?https?:\/\/[^\s\]]+\]?)/g;
+  const tokenPattern = /(\*\*.+?\*\*|`[^`]+`|\[?https?:\/\/[^\s\]]+\]?|(?<!\S)\[?\/people(?:\?[^\s\]]*)?\]?(?=\s|$))/g;
   let cursor = 0;
   for (const match of text.matchAll(tokenPattern)) {
     container.append(document.createTextNode(text.slice(cursor, match.index)));
@@ -497,7 +499,7 @@ function recommendationBody(message, evidenceLines = [], configLine = 0, finding
   const lines = message.split("\n").slice(1);
   lines.forEach((line) => {
     const row = document.createElement("div");
-    if (/^\s*\d+\s+line\(s\)/i.test(line)) row.className = "recommendation-meta";
+    if (/^\s*\d+\s+line\(s\)/i.test(line) || /line number\(s\):/i.test(line)) row.className = "recommendation-meta";
     if (/^Proposed solution:/i.test(line)) row.classList.add("recommendation-solution");
     if (!line.trim()) row.classList.add("spacer");
     if (row.classList.contains("recommendation-meta")) appendRecommendationMeta(row, line);
@@ -964,18 +966,36 @@ function goToNextHighlightedLine() {
   goToHighlightedLine("next");
 }
 
+function appendRecommendationTitle(container, item) {
+  const services = new Set(["anidb", "apprise", "floppy", "github", "gotify", "mal", "mdblist", "notifiarr", "ntfy", "omdb", "plex", "radarr", "serializd", "sonarr", "tautulli", "tmdb", "tracearr", "trakt", "yamtrack"]);
+  if (services.has(item.service) || item.service === "kometa") {
+    const icon = document.createElement("img");
+    icon.src = item.service === "kometa" ? "/static/kometa.png" : `/static/service-icons/${item.service}.png`;
+    icon.className = "recommendation-service-icon";
+    icon.alt = "";
+    icon.width = icon.height = 24;
+    container.append(icon);
+  }
+  const text = document.createElement("span");
+  text.textContent = item.title;
+  container.append(text);
+}
+
 function openRecommendationDialog(items) {
   const item = items[0];
   document.querySelector("#recommendation-severity").textContent = items.length === 1
     ? `${item.severity} recommendation`
     : `${items.length} recommendations`;
-  document.querySelector("#recommendation-title").textContent = items.length === 1 ? item.title : "Recommendations for this line";
+  const heading = document.querySelector("#recommendation-title");
+  heading.replaceChildren();
+  if (items.length === 1) appendRecommendationTitle(heading, item);
+  else heading.textContent = "Recommendations for this line";
   const content = document.querySelector("#recommendation-content");
   content.replaceChildren();
   items.forEach((recommendation) => {
     if (items.length > 1) {
       const title = document.createElement("h3");
-      title.textContent = recommendation.title;
+      appendRecommendationTitle(title, recommendation);
       content.append(title);
     }
     content.append(recommendationBody(recommendation.message, recommendation.evidence_lines, 0, recommendation));
@@ -1164,7 +1184,7 @@ function showGroup(group, recommendations) {
     dot.className = "severity-dot";
     const titleText = document.createElement("span");
     titleText.className = "recommendation-title";
-    titleText.textContent = item.title;
+    appendRecommendationTitle(titleText, item);
     const chevron = document.createElement("span");
     chevron.className = "chevron";
     chevron.textContent = "›";

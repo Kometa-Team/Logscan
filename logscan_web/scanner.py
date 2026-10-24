@@ -15,8 +15,8 @@ from pathlib import Path, PurePosixPath
 import py7zr
 import zstandard as zstd
 
-from .models import Finding, ScanContext
-from .people_images import merge_people_candidate, person_from_image_url
+from .models import Finding, LogLines, ScanContext
+from .people_images import merge_people_candidate, person_from_image_url, person_name_key, tmdb_image_path
 from .plex_security import normalized_pms_version, server_observation
 from .rules import RuleRegistry, migrated_rules
 from .rules.base import TextRule, evaluate_text_rules_bytes
@@ -65,28 +65,63 @@ def detect_log_tool(content) -> str:
     raise ScanError("This does not appear to be a complete Kometa log file or a recognized ImageMaid log file.")
 
 
-def extract_missing_people(content: str) -> list[dict]:
-    """Return unique People candidates, retaining the originating style/reason."""
-    people: dict[str, dict] = {}
-    for match in re.finditer(
-        r"Detail: tmdb_person updated poster to \[URL\] https?://[^\s|]+" r"(?:\s*\|)?\s*\n.*?\n.*?\n.*?Finished (?P<name>.+?) Collection",
-        content,
-        re.IGNORECASE,
-    ):
-        name = re.sub(r" \((?:Director|Producer|Writer)\)$", "", match.group("name").strip())
-        if name:
-            merge_people_candidate(people, {"name": name, "tmdb_image_found": True, "detection_reasons": ["tmdb_person_updated_poster"]})
-    for match in re.finditer(
-        r"(?P<reason>Collection Warning: No Poster Found at|Metadata: url_poster failed to update poster to \[URL\])\s+(?P<url>https://[^\s|]+)",
-        content,
-        re.IGNORECASE,
-    ):
-        parsed = person_from_image_url(match.group("url"))
-        if parsed:
+class MissingPeopleCollector:
+    """Keep physical evidence and trusted TMDb images within their collection."""
+
+    def __init__(self):
+        self.people: dict[str, dict] = {}
+        self.collection_name = None
+        self.image_path = None
+        self.image_line = None
+        self.pending_update = None
+
+    def add(self, candidate: dict, number: int) -> None:
+        candidate["evidence_lines"] = [number]
+        if person_name_key(candidate["name"]) == person_name_key(self.collection_name) and self.image_path:
+            candidate.update(tmdb_image_found=True, log_tmdb_image_path=self.image_path, log_tmdb_image_line=self.image_line)
+        merge_people_candidate(self.people, candidate)
+
+    def feed(self, line: str, number: int) -> None:
+        message = _log_message(line)
+        heading = re.search(r"\b(?:Updating Metadata of|Running)\s+(.+?)\s+Collection\b", message, re.I)
+        if heading:
+            self.collection_name = re.sub(r" \((?:Director|Producer|Writer)\)$", "", heading[1].strip(), flags=re.I)
+            self.image_path = self.image_line = None
+        if self.pending_update and number - self.pending_update[0] > 4:
+            self.pending_update = None
+        poster = re.search(r"(?:Method: tmdb_person Poster:|Detail: tmdb_person updated poster to \[URL\])\s+(https?://[^\s|]+)", message, re.I)
+        if poster:
+            path = tmdb_image_path(poster[1])
+            if path and self.collection_name:
+                self.image_path, self.image_line = path, number
+            if message.casefold().startswith("detail: tmdb_person updated poster"):
+                if self.collection_name:
+                    self.add({"name": self.collection_name, "tmdb_image_found": True, "detection_reasons": ["tmdb_person_updated_poster"]}, number)
+                else:
+                    self.pending_update = (number, path)
+        failure = re.search(r"(?P<reason>Collection Warning: No Poster Found at|Metadata: url_poster failed to update poster to \[URL\])\s+(?P<url>https://[^\s|]+)", message, re.I)
+        if failure and (parsed := person_from_image_url(failure["url"])):
             style, name = parsed
-            reason = "url_poster_update_failed" if match.group("reason").casefold().startswith("metadata:") else "no_poster_found"
-            merge_people_candidate(people, {"name": name, "tmdb_image_found": False, "source_styles": [style.key], "detection_reasons": [reason]})
-    return list(people.values())
+            reason = "url_poster_update_failed" if failure["reason"].casefold().startswith("metadata:") else "no_poster_found"
+            self.add({"name": name, "tmdb_image_found": False, "source_styles": [style.key], "detection_reasons": [reason]}, number)
+        finished = re.search(r"\bFinished (.+?) Collection\b", message, re.I)
+        if finished:
+            if self.pending_update:
+                source_line, path = self.pending_update
+                name = re.sub(r" \((?:Director|Producer|Writer)\)$", "", finished[1].strip(), flags=re.I)
+                candidate = {"name": name, "tmdb_image_found": True, "detection_reasons": ["tmdb_person_updated_poster"]}
+                if path:
+                    candidate.update(log_tmdb_image_path=path, log_tmdb_image_line=source_line)
+                self.add(candidate, source_line)
+            self.collection_name = self.image_path = self.image_line = self.pending_update = None
+
+
+def extract_missing_people(content: str) -> list[dict]:
+    """Return unique candidates with evidence and collection-specific image URLs."""
+    collector = MissingPeopleCollector()
+    for number, line in enumerate(LogLines(content), 1):
+        collector.feed(line, number)
+    return list(collector.people.values())
 
 
 def _validate_archive_names(names: list[str]) -> list[str]:
@@ -812,9 +847,18 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         b"mass_user_rating_update",
         b"mass_episode_user_ratings_update",
     )
-    missing_terms = (b"tmdb_person updated poster", b"collection warning: no poster found", b"url_poster failed to update poster")
+    missing_terms = (
+        b"tmdb_person updated poster",
+        b"collection warning: no poster found",
+        b"url_poster failed to update poster",
+        b"updating metadata of ",
+        b"running ",
+        b"finished ",
+        b"method: tmdb_person poster:",
+    )
     sampled_lines: dict[int, str] = {}
-    missing_people: dict[str, dict] = {}
+    people_collector = MissingPeopleCollector()
+    last_people_line = 0
     marker_found = False
     complete_log = False
     content_length = len(content_bytes)
@@ -839,7 +883,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
         marker_found = marker_found or b"[kometa.py:" in lowered_chunk or b"[plex_meta_manager.py:" in lowered_chunk
         core_length = chunk_end - chunk_start
         matches = []
-        for term in sample_terms + missing_terms:
+        for term in dict.fromkeys(sample_terms + missing_terms):
             if term not in unlimited_sample_terms and term in sample_hits and sample_hits[term] >= 200:
                 continue
             position = lowered_chunk.find(term)
@@ -873,14 +917,9 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
                         sampled_lines.setdefault(current_line + offset, next_line)
                 encoded_line = line.lower().encode()
                 complete_log |= b"finished:" in encoded_line and b"run time:" in encoded_line
-            if lowered_term in missing_terms:
-                block_end = line_end
-                for _ in range(4 if lowered_term == b"tmdb_person updated poster" else 0):
-                    if block_end >= content_length:
-                        break
-                    _next_line, block_end = decoded_line(block_end + 1)
-                for candidate in extract_missing_people(content_bytes[line_start:block_end].decode("utf-8", errors="replace")):
-                    merge_people_candidate(missing_people, candidate)
+            if lowered_term in missing_terms and current_line != last_people_line:
+                people_collector.feed(line, current_line)
+                last_people_line = current_line
         core = chunk[:core_length]
         lines_before_chunk += core.count(b"\n")
         chunk_start = chunk_end
@@ -944,7 +983,7 @@ def _scan_large_log(filename: str, content_bytes) -> ScanResult:
             quickstart_metadata["quickstart"],
         ),
         categories=category_configuration(),
-        missing_people=list(missing_people.values()),
+        missing_people=list(people_collector.people.values()),
     )
 
 

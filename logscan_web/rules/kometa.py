@@ -147,7 +147,6 @@ def _custom_rule(rule_id: str):
 
 
 RULES = (
-    _rule("api_key_missing", "apikey is blank"),
     TextRule(
         next(rule for rule in RULES.values() if rule.id == "plex_version"),
         all_on_same_line=("1.32.7", "Connected to server"),
