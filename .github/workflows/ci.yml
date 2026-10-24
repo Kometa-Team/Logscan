@@ -59,4 +59,4 @@ jobs:
       - name: Run Python Tests
         run: python -m pytest
       - name: Run JavaScript Tests
-        run: node --test tests/test_occurrence_ui.cjs
+        run: npm test

@@ -155,10 +155,12 @@ function showOverview(group, overview) {
     ["Findings", overview.finding_count ?? overview.recommendation_count],
     ["Lines scanned", overview.line_count],
     ["Log size", overview.size_display],
-    ["Compressed archive size", overview.archive_compressed_size_display],
-    ["Uncompressed archive size", overview.archive_uncompressed_size_display],
-    ["Compression ratio", overview.archive_compression_ratio],
-    ["Archive size reduction", overview.archive_reduction_percent],
+    ...[
+      ["Compressed archive size", overview.archive_compressed_size_display],
+      ["Uncompressed archive size", overview.archive_uncompressed_size_display],
+      ["Compression ratio", overview.archive_compression_ratio],
+      ["Archive size reduction", overview.archive_reduction_percent],
+    ].filter(([, value]) => value !== undefined && value !== null && value !== ""),
     ["Start time", overview.start_time],
     ["End time", overview.finished],
     ["Run time", overview.run_time],
@@ -380,7 +382,9 @@ function formatBytes(bytes) {
 
 function linkLabel(url) {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
+    const destination = new URL(url, window.location.href);
+    if (destination.origin === window.location.origin && destination.pathname === "/people") return "People queue";
+    const host = destination.hostname.replace(/^www\./, "");
     if (host.endsWith("kometa.wiki")) return "Kometa documentation";
     if (host.endsWith("plex.tv")) return "Plex documentation";
     if (host.endsWith("github.com")) return "GitHub reference";
@@ -391,7 +395,7 @@ function linkLabel(url) {
 }
 
 function appendInlineFormatting(container, text) {
-  const tokenPattern = /(\*\*.+?\*\*|`[^`]+`|\[?https?:\/\/[^\s\]]+\]?)/g;
+  const tokenPattern = /(\*\*.+?\*\*|`[^`]+`|\[?https?:\/\/[^\s\]]+\]?|(?<!\S)\[?\/people(?:\?[^\s\]]*)?\]?(?=\s|$))/g;
   let cursor = 0;
   for (const match of text.matchAll(tokenPattern)) {
     container.append(document.createTextNode(text.slice(cursor, match.index)));
@@ -495,7 +499,7 @@ function recommendationBody(message, evidenceLines = [], configLine = 0, finding
   const lines = message.split("\n").slice(1);
   lines.forEach((line) => {
     const row = document.createElement("div");
-    if (/^\s*\d+\s+line\(s\)/i.test(line)) row.className = "recommendation-meta";
+    if (/^\s*\d+\s+line\(s\)/i.test(line) || /line number\(s\):/i.test(line)) row.className = "recommendation-meta";
     if (/^Proposed solution:/i.test(line)) row.classList.add("recommendation-solution");
     if (!line.trim()) row.classList.add("spacer");
     if (row.classList.contains("recommendation-meta")) appendRecommendationMeta(row, line);
@@ -962,18 +966,36 @@ function goToNextHighlightedLine() {
   goToHighlightedLine("next");
 }
 
+function appendRecommendationTitle(container, item) {
+  const services = new Set(["anidb", "apprise", "floppy", "github", "gotify", "mal", "mdblist", "notifiarr", "ntfy", "omdb", "plex", "radarr", "serializd", "sonarr", "tautulli", "tmdb", "tracearr", "trakt", "yamtrack"]);
+  if (services.has(item.service) || item.service === "kometa") {
+    const icon = document.createElement("img");
+    icon.src = item.service === "kometa" ? "/static/kometa.png" : `/static/service-icons/${item.service}.png`;
+    icon.className = "recommendation-service-icon";
+    icon.alt = "";
+    icon.width = icon.height = 24;
+    container.append(icon);
+  }
+  const text = document.createElement("span");
+  text.textContent = item.title;
+  container.append(text);
+}
+
 function openRecommendationDialog(items) {
   const item = items[0];
   document.querySelector("#recommendation-severity").textContent = items.length === 1
     ? `${item.severity} recommendation`
     : `${items.length} recommendations`;
-  document.querySelector("#recommendation-title").textContent = items.length === 1 ? item.title : "Recommendations for this line";
+  const heading = document.querySelector("#recommendation-title");
+  heading.replaceChildren();
+  if (items.length === 1) appendRecommendationTitle(heading, item);
+  else heading.textContent = "Recommendations for this line";
   const content = document.querySelector("#recommendation-content");
   content.replaceChildren();
   items.forEach((recommendation) => {
     if (items.length > 1) {
       const title = document.createElement("h3");
-      title.textContent = recommendation.title;
+      appendRecommendationTitle(title, recommendation);
       content.append(title);
     }
     content.append(recommendationBody(recommendation.message, recommendation.evidence_lines, 0, recommendation));
@@ -1162,7 +1184,7 @@ function showGroup(group, recommendations) {
     dot.className = "severity-dot";
     const titleText = document.createElement("span");
     titleText.className = "recommendation-title";
-    titleText.textContent = item.title;
+    appendRecommendationTitle(titleText, item);
     const chevron = document.createElement("span");
     chevron.className = "chevron";
     chevron.textContent = "›";
@@ -1765,6 +1787,42 @@ function applySupportDestination(data, groups, recommendations) {
   }
 }
 
+function renderPlexSecurityStatus(recommendations, logDateRange = null) {
+  const target = document.getElementById("plex-security-status");
+  if (!target) return;
+  target.replaceChildren();
+  const assessments = recommendations.map((item) => item.security_assessment).filter(Boolean);
+  target.hidden = assessments.length === 0;
+  const affected = assessments.some((item) => item.status === "affected");
+  target.className = affected ? "plex-security-status plex-security-critical" : "plex-security-status";
+  target.setAttribute("role", affected ? "alert" : "status");
+  for (const item of assessments) {
+    const row = document.createElement("p");
+    const server = item.server_name ? `Plex server named: "${item.server_name}"` : "Plex server name unavailable";
+    const versions = item.observations.map((value) => value.detected_version || "unavailable").join(", ") || "unavailable";
+    row.textContent = item.status === "affected"
+      ? `${server}. Plex security update required. Version(s) observed in this log: ${versions}. Update to ${item.minimum_patched_version} or newer. Critical is Kometa's recommendation severity, not an official CVSS rating. `
+      : `${server}. ${item.advisory_id} assessment ${item.status}. Version(s) observed in this log: ${versions}. This assessment covers this advisory only. `;
+    const link = document.createElement("a");
+    link.href = item.advisory_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Official Plex advisory";
+    row.append(link);
+    target.append(row);
+  }
+  if (assessments.length) {
+    const note = document.createElement("p");
+    const firstDate = logDateRange?.first?.slice(0, 10);
+    const lastDate = logDateRange?.last?.slice(0, 10);
+    const dateContext = firstDate && lastDate
+      ? firstDate === lastDate ? `Log recorded on ${firstDate}.` : `Log spans ${firstDate} to ${lastDate}.`
+      : "Log date unavailable.";
+    note.textContent = `${dateContext} The server may have been updated since this log was recorded.`;
+    target.append(note);
+  }
+}
+
 function renderResults(data, runSchemaValidation = true) {
   if (data.id && data.id !== currentScanId) currentLogLines = null;
   if (data.id) {
@@ -1774,6 +1832,7 @@ function renderResults(data, runSchemaValidation = true) {
   deleteToken = new URLSearchParams(location.hash.slice(1)).get("delete");
   updateRetentionCountdown(data);
   const { metadata, recommendations, overview = {}, categories = defaultGroups } = data;
+  renderPlexSecurityStatus(recommendations, metadata.log_date_range);
   const isImageMaid = metadata.tool_name === "imagemaid";
   for (const id of ["view-config", "toggle-viewer-content", "download-config-option", "download-both-option"]) {
     const control = document.getElementById(id);
