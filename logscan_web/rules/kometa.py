@@ -28,10 +28,6 @@ class PlexSecurityRule:
     detector: ClassVar[str] = "PMS_VULNERABLE"
     vulnerable_low: ClassVar[tuple[int, int, int, int]] = LEGACY_LOW
     vulnerable_high: ClassVar[tuple[int, int, int, int]] = LEGACY_HIGH
-    version_pattern: ClassVar[re.Pattern[str]] = re.compile(
-        r"Connected to server\s+.+?\s+(?:\(?\s*(?:version|Version:)\s+)(\d+\.\d+\.\d+\.\d+(?:-[A-Za-z0-9]+)?)",
-        re.IGNORECASE,
-    )
 
     @property
     def id(self) -> str:
@@ -40,8 +36,10 @@ class PlexSecurityRule:
     @staticmethod
     def _version_tuple(version: str) -> tuple[int, int, int, int]:
         """Normalize a four-part PMS version, dropping any build suffix."""
-        major, minor, patch, build = version.split("-", 1)[0].split(".")
-        return int(major), int(minor), int(patch), int(build)
+        parsed = parse_pms_version(version)
+        if parsed is None:
+            raise ValueError(f"Invalid Plex Media Server version: {version}")
+        return parsed
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
         return self.evaluate_bytes(context.content)
@@ -49,6 +47,8 @@ class PlexSecurityRule:
     def evaluate_bytes(self, content) -> list[Finding]:
         findings = []
         for assessment in assess_log(_connection_lines(content), EVIDENCE_LIMIT):
+            if assessment["status"] == "patched":
+                continue
             affected = assessment["status"] == "affected"
             message = assessment_message(assessment)
             findings.append(
@@ -147,7 +147,6 @@ def _custom_rule(rule_id: str):
 
 
 RULES = (
-    _rule("api_key_missing", "apikey is blank"),
     TextRule(
         next(rule for rule in RULES.values() if rule.id == "plex_version"),
         all_on_same_line=("1.32.7", "Connected to server"),

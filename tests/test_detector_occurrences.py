@@ -198,7 +198,7 @@ class DetectorOccurrenceTests(unittest.TestCase):
     def test_startup_backfill_preserves_retained_record_identity_and_metadata(self):
         from logscan_web.app import ANALYSIS_VERSION, SCHEMA_VALIDATION_VERSION, create_app
 
-        self.assertEqual(ANALYSIS_VERSION, 10)
+        self.assertEqual(ANALYSIS_VERSION, 14)
         native_integrity = (
             "[integrity.py:674] [INFO] |     Source Integrity: MODIFIED |\n" "[integrity.py:674] [INFO] |     Modified: |\n" "[integrity.py:674] [INFO] |       modules/logs.py |\n"
         )
