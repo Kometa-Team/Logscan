@@ -421,6 +421,7 @@ h2 { margin: 0; font-size: clamp(1.5rem, 3.5vw, 2.5rem); letter-spacing: -.04em;
 .recommendation summary { list-style: none; padding: 18px 20px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-weight: 600; }
 .recommendation summary::-webkit-details-marker { display: none; }
 .recommendation-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.recommendation-service-icon { width: 24px; height: 24px; object-fit: contain; vertical-align: middle; margin-right: 8px; }
 .recommendation-occurrences { color: var(--muted); font-size: .75rem; font-weight: 500; white-space: nowrap; }
 .occurrence-evidence-summary { margin: 0 0 12px; }
 .severity-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; box-shadow: 0 0 12px currentColor; }

@@ -122,12 +122,18 @@ function styleAvailability(person) {
     const statuses = document.createElement("ul");
     styleStatuses.forEach((style) => {
       const item = document.createElement("li");
-      item.textContent = `${style.label}: ${style.status.replaceAll("_", " ")}`;
+      item.textContent = `${style.label}: ${style.status.replaceAll("_", " ")}${style.status === "unknown" && style.reason ? ` — ${style.reason}` : ""}`;
       statuses.append(item);
     });
     availability.append(summary, statuses);
   } else availability.hidden = true;
   return availability;
+}
+
+function addTmdbImage(images, person) {
+  const imageLabel = person.tmdb_image_source === "log" ? "TMDb image from log" : person.tmdb_image_source === "saved" ? "Previously verified TMDb image" : "Current TMDb Image";
+  const noImageMessage = person.tmdb_image_status === "unknown" || person.tmdb_image_status === "known_available" ? "TMDb preview unavailable" : "No current TMDb image";
+  addImage(images, person.tmdb_image, imageLabel, noImageMessage, person.name);
 }
 
 function addPerson(person) {
@@ -230,7 +236,7 @@ function addPerson(person) {
 
   const images = document.createElement("div");
   images.className = "image-row";
-  addImage(images, person.tmdb_image, "Current TMDb Image", "No current TMDb image", person.name);
+  addTmdbImage(images, person);
   if (person.kometa_image) {
     addImage(images, { preview_url: person.kometa_image, download_url: person.kometa_image }, "Kometa Repo Image", "", person.name);
   }

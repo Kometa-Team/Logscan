@@ -38,3 +38,17 @@ test("pending verification does not claim artwork is confirmed missing", () => {
   const badges = context.sourceBadges(["missing"], [], [], [], null, "pending_verification");
   assert.equal(badges.children[0].textContent, "Pending verification");
 });
+
+test("log image previews have a source label and lookup failures do not claim absence", () => {
+  const images = [];
+  const rendering = vm.createContext({ addImage: (...args) => images.push(args) });
+  vm.runInContext(source.slice(source.indexOf("function addTmdbImage("), source.indexOf("function addPerson(")), rendering);
+  const image = { preview_url: "https://image.tmdb.org/t/p/w342/profile.jpg" };
+  rendering.addTmdbImage({}, { name: "Bruce Langley", tmdb_image: image, tmdb_image_source: "log", tmdb_image_status: "available" });
+  assert.equal(images[0][1], image);
+  assert.equal(images[0][2], "TMDb image from log");
+  rendering.addTmdbImage({}, { tmdb_image_status: "unknown" });
+  assert.equal(images[1][3], "TMDb preview unavailable");
+  rendering.addTmdbImage({}, { tmdb_image_status: "missing" });
+  assert.equal(images[2][3], "No current TMDb image");
+});
