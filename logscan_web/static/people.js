@@ -68,13 +68,13 @@ function addImage(images, image, label, missingMessage, name) {
   images.append(image ? imageCard({ ...image, label, alt: `${name} ${label}` }) : noImage(missingMessage));
 }
 
-function sourceBadges(sources, requesters = [], metadataTags = [], provenanceTags = [], tmdbImagesUrl = null) {
+function sourceBadges(sources, requesters = [], metadataTags = [], provenanceTags = [], tmdbImagesUrl = null, imageStatus = null) {
   const badges = document.createElement("div");
   badges.className = "source-badges";
   sources.forEach((source) => {
     const badge = document.createElement("span");
     badge.className = `source-badge ${source}`;
-    badge.textContent = source === "missing" ? "Missing Kometa" : source[0].toUpperCase() + source.slice(1);
+    badge.textContent = source === "missing" ? imageStatus === "pending_verification" ? "Pending verification" : "Missing Kometa" : source[0].toUpperCase() + source.slice(1);
     badges.append(badge);
   });
   metadataTags.forEach((tag) => {
@@ -109,6 +109,31 @@ async function runAction(person, action, card) {
   if (!response.ok) return alert(`That person could not be ${action === "check" ? "marked complete" : "excluded"}.`);
   card.remove();
   if (!gallery.children.length) gallery.textContent = "No people match these filters.";
+}
+
+function styleAvailability(person) {
+  const availability = document.createElement("details");
+  availability.className = "people-variant-section people-style-availability";
+  const styleStatuses = Object.values(person.style_availability || {});
+  if (styleStatuses.length) {
+    const summary = document.createElement("summary");
+    const missingCount = styleStatuses.filter((style) => style.status === "missing").length;
+    summary.textContent = missingCount ? `Style availability: ${missingCount} missing` : person.people_image_status === "complete" ? "All styles available" : "Style verification pending";
+    const statuses = document.createElement("ul");
+    styleStatuses.forEach((style) => {
+      const item = document.createElement("li");
+      item.textContent = `${style.label}: ${style.status.replaceAll("_", " ")}${style.status === "unknown" && style.reason ? ` — ${style.reason}` : ""}`;
+      statuses.append(item);
+    });
+    availability.append(summary, statuses);
+  } else availability.hidden = true;
+  return availability;
+}
+
+function addTmdbImage(images, person) {
+  const imageLabel = person.tmdb_image_source === "log" ? "TMDb image from log" : person.tmdb_image_source === "saved" ? "Previously verified TMDb image" : "Current TMDb Image";
+  const noImageMessage = person.tmdb_image_status === "unknown" || person.tmdb_image_status === "known_available" ? "TMDb preview unavailable" : "No current TMDb image";
+  addImage(images, person.tmdb_image, imageLabel, noImageMessage, person.name);
 }
 
 function addPerson(person) {
@@ -166,7 +191,7 @@ function addPerson(person) {
 
   const identity = document.createElement("div");
   identity.className = "person-identity";
-  identity.append(heading, sourceBadges(person.sources, person.requested_by, person.metadata_tags, person.provenance_tags, person.tmdb_images_url));
+  identity.append(heading, sourceBadges(person.sources, person.requested_by, person.metadata_tags, person.provenance_tags, person.tmdb_images_url, person.people_image_status));
   const detail = document.createElement("p");
   detail.textContent = person.tmdb_id ? `TMDb ID: ${person.tmdb_id}` : "TMDb ID unresolved";
   if (person.log_url) {
@@ -211,7 +236,7 @@ function addPerson(person) {
 
   const images = document.createElement("div");
   images.className = "image-row";
-  addImage(images, person.tmdb_image, "Current TMDb Image", "No current TMDb image", person.name);
+  addTmdbImage(images, person);
   if (person.kometa_image) {
     addImage(images, { preview_url: person.kometa_image, download_url: person.kometa_image }, "Kometa Repo Image", "", person.name);
   }
@@ -235,7 +260,7 @@ function addPerson(person) {
     const label = document.createElement("strong"); label.textContent = "Flag Reason";
     flagReason.append(label, document.createTextNode(person.flag_reason));
   } else flagReason.hidden = true;
-  card.append(controls, identity, detail, knownFor, guidance, flagReason, images, variantSection);
+  card.append(controls, identity, detail, knownFor, guidance, flagReason, images, styleAvailability(person), variantSection);
   gallery.append(card);
 }
 

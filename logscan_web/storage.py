@@ -13,6 +13,7 @@ import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 class ScanStore:
@@ -729,17 +730,63 @@ class PeopleStore:
     def get(self, key: str) -> dict | None:
         return next((person for person in self.list() if person["key"] == key), None)
 
+    def reconcile_image_availability(self, inventories: dict[str, dict[str, str]]) -> list[dict]:
+        """Update a repository snapshot in one write without changing log history."""
+        from .people_images import assess_people_images
+
+        with self.lock:
+            people = self._read()
+            changed = False
+            for person in people:
+                assessed = assess_people_images(person, inventories)
+                for field in ("style_availability", "people_image_status"):
+                    if person.get(field) != assessed[field]:
+                        person[field] = assessed[field]
+                        changed = True
+            if changed:
+                self._write(people)
+            return people
+
     def upsert(self, person: dict) -> dict:
         return self.upsert_with_status(person)[0]
 
     def upsert_with_status(self, person: dict) -> tuple[dict, bool]:
+        from .people_images import person_name_key
+
         with self.lock:
             people = self._read()
             existing = next((item for item in people if item["key"] == person["key"]), None)
+            if existing is None:
+                incoming_names = {person_name_key(person.get(field)) for field in ("name", "original_name") if person.get(field)}
+                name_matches = [
+                    item
+                    for item in people
+                    if (not item.get("tmdb_id") or not person.get("tmdb_id"))
+                    and not (person.get("identity_ambiguous") and item.get("tmdb_id"))
+                    and incoming_names & {person_name_key(item.get(field)) for field in ("name", "original_name") if item.get(field)}
+                ]
+                existing = name_matches[0] if len(name_matches) == 1 else None
             if existing:
                 incoming_requesters = person.get("requested_by", [])
                 incoming_provenance_tags = person.get("provenance_tags", [])
-                existing.update({key: value for key, value in person.items() if value is not None and key not in {"requested_by", "provenance_tags"}})
+                merged_fields = ("source_styles", "detection_reasons", "log_provenance")
+                merged = {field: list(existing.get(field, [])) for field in merged_fields}
+                for field in merged_fields:
+                    for value in person.get(field, []):
+                        if field == "log_provenance" and value.get("log_url"):
+                            path = urlsplit(value["log_url"]).path
+                            previous = next((item for item in merged[field] if urlsplit(item.get("log_url") or "").path == path), None)
+                            if previous is not None:
+                                previous.update({key: item for key, item in value.items() if item is not None})
+                                continue
+                        if value not in merged[field]:
+                            merged[field].append(value)
+                # An unresolved repeat must not downgrade an already resolved identity.
+                updates = {key: value for key, value in person.items() if value is not None and key not in {"requested_by", "provenance_tags", *merged_fields}}
+                if existing.get("tmdb_id") and not person.get("tmdb_id"):
+                    updates.pop("key", None)
+                existing.update(updates)
+                existing.update({field: values for field, values in merged.items() if values})
                 requesters = list(existing.get("requested_by", []))
                 for requester in incoming_requesters:
                     requester_id = requester.get("id")

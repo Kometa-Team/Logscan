@@ -4,7 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import ClassVar
 
-from .base import TextRule, findings_from_lines, matching_line_spans, text_pattern
+from .base import EVIDENCE_LIMIT, TextRule, findings_from_lines, matching_line_spans, text_pattern
+from ..plex_security import LEGACY_HIGH, LEGACY_LOW, assess_log, assessment_message, parse_pms_version, server_observation
 from ..models import Finding, ScanContext
 from ..recommendations import RULES, RULES as RECOMMENDATION_RULES
 
@@ -21,16 +22,12 @@ def _same_line_rule(rule_id: str, *needles: str) -> TextRule:
 
 @dataclass(frozen=True)
 class PlexSecurityRule:
-    """Detect PMS versions in the live cog's vulnerable version range."""
+    """Assess logged PMS versions using the shared offline advisory core."""
 
     definition: object
     detector: ClassVar[str] = "PMS_VULNERABLE"
-    vulnerable_low: ClassVar[tuple[int, int, int, int]] = (1, 41, 7, 0)
-    vulnerable_high: ClassVar[tuple[int, int, int, int]] = (1, 42, 0, 99999)
-    version_pattern: ClassVar[re.Pattern[str]] = re.compile(
-        r"Connected to server\s+.+?\s+(?:\(?\s*(?:version|Version:)\s+)(\d+\.\d+\.\d+\.\d+(?:-[A-Za-z0-9]+)?)",
-        re.IGNORECASE,
-    )
+    vulnerable_low: ClassVar[tuple[int, int, int, int]] = LEGACY_LOW
+    vulnerable_high: ClassVar[tuple[int, int, int, int]] = LEGACY_HIGH
 
     @property
     def id(self) -> str:
@@ -39,28 +36,49 @@ class PlexSecurityRule:
     @staticmethod
     def _version_tuple(version: str) -> tuple[int, int, int, int]:
         """Normalize a four-part PMS version, dropping any build suffix."""
-        major, minor, patch, build = version.split("-", 1)[0].split(".")
-        return int(major), int(minor), int(patch), int(build)
+        parsed = parse_pms_version(version)
+        if parsed is None:
+            raise ValueError(f"Invalid Plex Media Server version: {version}")
+        return parsed
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
         return self.evaluate_bytes(context.content)
 
     def evaluate_bytes(self, content) -> list[Finding]:
-        return findings_from_lines(
-            self.definition, (number for number, version in _server_versions(content) if self.vulnerable_low <= self._version_tuple(version) <= self.vulnerable_high)
-        )
+        findings = []
+        for assessment in assess_log(_connection_lines(content), EVIDENCE_LIMIT):
+            if assessment["status"] == "patched":
+                continue
+            affected = assessment["status"] == "affected"
+            message = assessment_message(assessment)
+            findings.append(
+                Finding(
+                    self.id if affected else f"{self.id}_{assessment['status']}",
+                    "critical" if affected else "advice",
+                    message.split("\n", 1)[0],
+                    "Plex version observed in the uploaded log; current server status is unknown.",
+                    assessment["remediation"],
+                    tuple(assessment["evidence_lines"]),
+                    details=message,
+                    occurrence_count=assessment["occurrence_count"],
+                    evidence_truncated=assessment["evidence_truncated"],
+                    security_assessment=assessment,
+                )
+            )
+        return findings
+
+
+def _connection_lines(content):
+    for number, start, end in matching_line_spans(text_pattern(("Connected to server",), content), content):
+        line = content[start:end]
+        yield number, line if isinstance(line, str) else line.decode("utf-8", errors="replace")
 
 
 def _server_versions(content):
-    pattern = re.compile(
-        PlexSecurityRule.version_pattern.pattern if isinstance(content, str) else PlexSecurityRule.version_pattern.pattern.encode("ascii"),
-        re.I,
-    )
-    for number, start, end in matching_line_spans(text_pattern(("Connected to server",), content), content):
-        match = pattern.search(content, start, end)
-        if match:
-            version = match.group(1)
-            yield number, version if isinstance(version, str) else version.decode("ascii")
+    for number, line in _connection_lines(content):
+        observation = server_observation(line)
+        if observation and parse_pms_version(observation[1]) is not None:
+            yield number, observation[1]
 
 
 @dataclass(frozen=True)
@@ -129,7 +147,6 @@ def _custom_rule(rule_id: str):
 
 
 RULES = (
-    _rule("api_key_missing", "apikey is blank"),
     TextRule(
         next(rule for rule in RULES.values() if rule.id == "plex_version"),
         all_on_same_line=("1.32.7", "Connected to server"),

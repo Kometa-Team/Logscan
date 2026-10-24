@@ -1,3 +1,5 @@
+import json
+import re
 import tempfile
 import unittest
 from io import BytesIO
@@ -5,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from logscan_web.scanner import extract_kometa_integrity, scan_archive_path, scan_log
+from logscan_web.models import Finding
+from logscan_web.storage import ScanStore
 
 
 def native_log(*messages):
@@ -40,13 +44,34 @@ class NativeSourceIntegrityTests(unittest.TestCase):
         self.assertNotIn("Platform", finding["message"])
         self.assertIn("not a run-blocking error", finding["description"])
 
-    def test_verified_native_report_is_a_clean_indicator_and_advisory_finding(self):
+    def test_verified_native_report_is_a_clean_indicator_without_an_advice_finding(self):
         result = self.scan(native_log("    Source Integrity: Verified"))
         self.assertEqual(result.metadata["kometa_integrity"]["state"], "clean")
-        (finding,) = self.finding(result)
-        self.assertEqual(finding["id"], "source_integrity_verified")
-        self.assertEqual(finding["severity"], "advice")
-        self.assertIn("Verified", finding["message"])
+        self.assertEqual(self.finding(result), [])
+        with patch("logscan_web.scanner.STREAM_SCAN_THRESHOLD", 1):
+            streamed = self.scan(native_log("    Source Integrity: Verified"))
+        self.assertEqual(self.finding(streamed), [])
+        self.assertEqual(streamed.metadata["kometa_integrity"], result.metadata["kometa_integrity"])
+
+    def test_retained_scan_hides_legacy_verified_advice_and_corrects_counts(self):
+        from logscan_web.app import create_app
+
+        content = ("[kometa.py:1] [INFO] | Version: 2.5.3 |\n" + native_log("Source Integrity: Verified")).encode()
+        result = scan_log("meta.log", content)
+        result.recommendations.append(Finding("source_integrity_verified", "advice", "Kometa source integrity: verified", "No changes.").as_dict())
+        result.metadata["counts"]["advice"] += 1
+        with tempfile.TemporaryDirectory() as directory:
+            store = ScanStore(directory)
+            scan_id, _token = store.create("meta.log", content, result)
+            with patch.dict("os.environ", SCAN_STORE=directory), patch("logscan_web.app.threading.Thread"):
+                app = create_app()
+            response = app.test_client().get(f"/scan/{scan_id}")
+            self.assertEqual(response.status_code, 200)
+            script = re.search(r'<script id="initial-scan" type="application/json">(.*?)</script>', response.get_data(as_text=True), re.DOTALL)
+            public = json.loads(script.group(1))
+            self.assertNotIn("source_integrity_verified", [item["id"] for item in public["recommendations"]])
+            self.assertEqual(public["metadata"]["counts"]["advice"], sum(item["severity"] == "advice" for item in public["recommendations"]))
+            self.assertEqual(public["metadata"]["kometa_integrity"]["state"], "clean")
 
     def test_unavailable_timeout_and_disabled_never_indicate_changed_files(self):
         for status, expected in (
@@ -59,6 +84,9 @@ class NativeSourceIntegrityTests(unittest.TestCase):
                 report = result.metadata["kometa_integrity"]
                 self.assertEqual(report["state"], expected)
                 self.assertEqual(report["counts"], {"modified": 0, "missing": 0, "added": 0})
+                if expected == "disabled":
+                    self.assertEqual(self.finding(result), [])
+                    continue
                 (finding,) = self.finding(result)
                 self.assertEqual(finding["severity"], "advice")
                 self.assertNotEqual(finding["id"], "source_integrity_modified")

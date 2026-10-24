@@ -92,6 +92,8 @@ class Response:
 
 def fake_urlopen(request, timeout=0):
     url = request.full_url
+    if "api.github.com/repos/Kometa-Team/People-Images" in url:
+        return Response({"sha": "verified-tree", "truncated": False, "tree": [{"type": "blob", "path": "C/Images/Completed Person.jpg"}]})
     if "raw.githubusercontent.com" in url:
         readme = "* [Completed Person](https://example.test/completed.jpg)\n" if "People-Images/refs" in url else ""
         return Response(readme, "text/plain")
@@ -119,7 +121,7 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         add_missing_people_recommendations(
             result,
             [{"name": "Hikaru Kondô", "tmdb_image_found": True}],
-            {},
+            {"Kometa Repo Image": {}},
             people_url,
         )
         self.assertIn(people_url, result.recommendations[0]["solution"])
@@ -129,7 +131,14 @@ class MissingPeopleExtractionTests(unittest.TestCase):
         self.assertEqual(
             extract_missing_people(content),
             [
-                {"name": "Hikaru Kondô", "tmdb_image_found": False},
+                {
+                    "name": "Hikaru Kondô",
+                    "tmdb_image_found": False,
+                    "source_styles": ["primary"],
+                    "detection_reasons": ["no_poster_found"],
+                    "evidence_lines": [1],
+                    "occurrence_count": 1,
+                },
             ],
         )
 
@@ -1880,11 +1889,13 @@ class RuntimeMetadataTests(unittest.TestCase):
         )
 
         result = scan_log("meta.log", content.encode())
-        finding = next(item for item in result.recommendations if item["id"] == "config_subattribute_default")
+        finding = next(item for item in result.recommendations if item["id"].startswith("config_subattribute_default_settings_verify_ssl_"))
 
         self.assertEqual(finding["severity"], "warning")
         self.assertEqual(finding["evidence_lines"], [2])
-        self.assertIn("default value shown", finding["description"])
+        self.assertIn("`settings.verify_ssl`", finding["description"])
+        self.assertIn("logged default `True`", finding["description"])
+        self.assertEqual(finding["service"], "kometa")
         self.assertIn("No change is required", finding["solution"])
 
     def test_runtime_platform_is_reduced_to_a_safe_family(self):
@@ -2367,6 +2378,8 @@ class PeopleUnionTests(unittest.TestCase):
     def test_refresh_records_top_250_ready_people_as_automation_requests(self):
         def automated_urlopen(request, timeout=0):
             url = request.full_url
+            if "api.github.com/repos/Kometa-Team/People-Images" in url:
+                return fake_urlopen(request, timeout)
             if "raw.githubusercontent.com" in url:
                 readme = "* [Completed Person](https://example.test/completed.jpg)\n" if "People-Images/refs" in url else ""
                 return Response(readme, "text/plain")
@@ -2440,7 +2453,7 @@ class PeopleUnionTests(unittest.TestCase):
     def test_repository_image_reconciliation_only_removes_missing_source(self):
         completed = next(person for person in self.request_people() if person["name"] == "Completed Person")
         self.assertEqual(completed["sources"], ["trending"])
-        self.assertEqual(completed["kometa_image"], "https://example.test/completed.jpg")
+        self.assertEqual(completed["kometa_image"], "https://raw.githubusercontent.com/Kometa-Team/People-Images/master/C/Images/Completed%20Person.jpg")
 
     def test_repository_image_reconciliation_ignores_accents_but_not_partial_names(self):
         Path(STORE.name, "people.json").write_text(
@@ -2454,8 +2467,8 @@ class PeopleUnionTests(unittest.TestCase):
         )
 
         def accented_urlopen(request, timeout=0):
-            if "People-Images/refs" in request.full_url:
-                return Response("* [Hikaru Kondô](https://example.test/hikaru.jpg)\n", "text/plain")
+            if "api.github.com/repos/Kometa-Team/People-Images" in request.full_url:
+                return Response({"sha": "verified-tree", "truncated": False, "tree": [{"type": "blob", "path": "H/Images/Hikaru Kondô.jpg"}]})
             return fake_urlopen(request, timeout)
 
         with patch("logscan_web.app.urlopen", side_effect=accented_urlopen):

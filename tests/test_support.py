@@ -566,6 +566,124 @@ class SupportConsoleTests(unittest.TestCase):
         self.assertIn('<span class="severity-chip schema" title="Schema: 3">3</span>', body)
         self.assertIn('<span class="severity-chip error" title="Error: 0">0</span>', body)
 
+    def create_security_upload(self, filename, status="affected", owner="42"):
+        finding = {
+            "id": "plex_security" if status == "affected" else f"plex_security_{status}",
+            "severity": "critical" if status == "affected" else "advice",
+            "security_assessment": {
+                "status": status,
+                "advisory_id": "PLEX-PMS-2026-09",
+                "server_name": "Classic Connection",
+                "observations": [{"detected_version": "1.32.5.7349-8f4248874"}],
+            },
+            "occurrence_count": 10005,
+            "evidence_lines": [1],
+            "evidence_truncated": True,
+        }
+        result = SimpleNamespace(
+            filename=filename,
+            recommendations=[finding],
+            metadata={"log_date_range": {"first": "2023-09-25", "last": "2023-09-25"}},
+            overview={"uploaded_by_id": owner},
+            categories=[],
+        )
+        return self.store.create(filename, filename.encode(), result)[0]
+
+    def test_security_triage_is_visible_in_personal_and_support_views(self):
+        scan_id = self.create_security_upload("security-example.log")
+        self.authorize_session()
+        for view in ("mine", "all"):
+            with self.subTest(view=view):
+                body = self.client.get(f"/support/logs?view={view}").get_data(as_text=True)
+                self.assertIn('aria-label="Quick triage"', body)
+                self.assertIn("Security updates <strong>1 log</strong>", body)
+                self.assertIn("Critical issues <strong>2 logs</strong>", body)
+                self.assertIn('class="support-attention-link has-alerts"', body)
+                self.assertIn('class="support-row-security"', body)
+                self.assertIn('class="support-row-critical"', body)
+                self.assertIn(f'href="/scan/{scan_id}#section=critical"', body)
+                self.assertIn("Security update required", body)
+                self.assertIn("Log date: 2023-09-25", body)
+                self.assertIn("The server may have been updated since", body)
+
+    def test_security_filter_only_includes_affected_security_findings(self):
+        self.create_security_upload("affected.log")
+        self.create_security_upload("patched.log", "patched")
+        self.create_security_upload("unknown.log", "unknown")
+        self.authorize_session()
+        body = self.client.get("/support/logs?security=affected").get_data(as_text=True)
+        self.assertIn('data-title="affected.log"', body)
+        self.assertNotIn('data-title="patched.log"', body)
+        self.assertNotIn('data-title="unknown.log"', body)
+        self.assertNotIn('data-title="discord-example.log"', body)
+        self.assertIn("1 matching log", body)
+        self.assertIn('<option value="affected" selected>', body)
+        self.assertIn("data-active-filters", body)
+        # Ordinary critical issues remain available through the broader shortcut.
+        critical = self.client.get("/support/logs?severity=critical").get_data(as_text=True)
+        self.assertIn('data-title="discord-example.log"', critical)
+        self.assertIn('data-title="affected.log"', critical)
+
+    def test_security_finding_counts_do_not_depend_on_occurrences_or_capped_evidence(self):
+        scan_id = self.create_security_upload("security-example.log")
+        record = self.store.get(scan_id)
+        row = _support_row(record, 3600, datetime.now(UTC))
+        self.assertEqual(row["security_finding_count"], 1)
+        self.assertEqual(row["counts"]["critical"], 1)
+        record["recommendations"].append({"id": "another-advisory", "severity": "critical", "security_assessment": {"status": "affected"}})
+        self.assertEqual(_support_row(record, 3600, datetime.now(UTC))["security_finding_count"], 2)
+
+    def test_security_triage_supports_legacy_records_and_missing_log_dates(self):
+        record = self.store.get(self.scan_id)
+        record["recommendations"] = [{"id": "plex_security", "severity": "critical"}]
+        row = _support_row(record, 3600, datetime.now(UTC))
+        self.assertEqual(row["security_finding_count"], 1)
+        self.assertEqual(row["log_date_range"], {})
+        record["recommendations"][0]["security_assessment"] = {"status": "unknown"}
+        self.assertEqual(_support_row(record, 3600, datetime.now(UTC))["security_finding_count"], 0)
+
+    def test_security_search_accepts_server_advisory_and_detected_version(self):
+        self.create_security_upload("security-example.log")
+        self.authorize_session()
+        for query in ("Classic Connection", "PLEX-PMS-2026-09", "1.32.5.7349"):
+            with self.subTest(query=query):
+                body = self.client.get("/support/logs", query_string={"q": query, "security": "affected"}).get_data(as_text=True)
+                self.assertIn('data-title="security-example.log"', body)
+                self.assertNotIn('data-title="discord-example.log"', body)
+
+    def test_security_filter_and_totals_survive_pagination_and_sorting(self):
+        for index in range(11):
+            self.create_security_upload(f"security-{index}.log")
+        self.authorize_session()
+        body = self.client.get("/support/logs?security=affected&page_size=10&sort=title").get_data(as_text=True)
+        self.assertIn("Security updates <strong>11 logs</strong>", body)
+        self.assertIn("Page 1 of 2", body)
+        self.assertIn("security=affected", body)
+        self.assertIn("page=2", body)
+        page_two = self.client.get("/support/logs?security=affected&page_size=10&sort=title&page=2").get_data(as_text=True)
+        self.assertIn("Page 2 of 2", page_two)
+        self.assertIn("11 matching logs", page_two)
+        self.assertNotIn('data-title="discord-example.log"', page_two)
+
+    def test_security_triage_counts_and_filters_respect_upload_ownership(self):
+        self.create_security_upload("private-security.log", owner="other-owner")
+        with self.client.session_transaction() as account:
+            account["support_authorized_at"] = 9999999999
+            account["discord_user"] = {"id": "42", "username": "Member"}
+            account["support_access"] = False
+        for url in ("/support/logs", "/support/logs?view=all&security=affected"):
+            body = self.client.get(url).get_data(as_text=True)
+            self.assertIn("Security updates <strong>0 logs</strong>", body)
+            self.assertNotIn('class="support-attention-link has-alerts"', body)
+            self.assertNotIn('data-title="private-security.log"', body)
+        self.authorize_session()
+        with self.client.session_transaction() as account:
+            account["support_access"] = True
+            account["support_role_verified_at"] = time.time()
+        body = self.client.get("/support/logs?view=all&security=affected").get_data(as_text=True)
+        self.assertIn('data-title="private-security.log"', body)
+        self.assertIn("Security updates <strong>1 log</strong>", body)
+
     def test_inventory_counts_derived_schema_directive_advice(self):
         self.store.update_metadata(self.scan_id, schema_directive_missing=True)
         self.authorize_session()
