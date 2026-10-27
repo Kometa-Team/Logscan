@@ -94,17 +94,26 @@ button { cursor: pointer; }
 .site-nav-signout { width: 100%; padding: 10px 11px; border: 0; border-radius: 5px; background: transparent; color: #fda4af; text-align: left; font-size: .82rem; }
 .site-nav-signout:hover { background: rgba(244,63,94,.1); color: white; }
 .people-shell { padding-bottom: 80px; }
-.people-gallery { display: grid; gap: 20px; }
+.people-gallery { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .people-poster-search { margin-bottom: 24px; }
+.people-poster-search + .people-toolbar { margin-top: 0; }
 .poster-search-controls { display: flex; gap: 12px; margin-top: 8px; }
 .poster-search-controls input { flex: 1; min-width: 0; width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-strong); color: var(--text); }
 .poster-search-choices { display: grid; gap: 8px; margin-bottom: 12px; }
-.poster-search-choices button { white-space: normal; text-align: left; }
-.poster-style-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; }
+.poster-search-choice { display: flex; align-items: center; gap: 16px; width: 100%; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); text-align: left; }
+.poster-search-choice:hover, .poster-search-choice:focus-visible { border-color: var(--accent-bright); }
+.poster-search-portrait { display: grid; place-items: center; width: 64px; aspect-ratio: 2 / 3; flex: 0 0 64px; overflow: hidden; border-radius: 7px; background: var(--surface-soft); }
+.poster-search-portrait img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.poster-search-portrait span { padding: 4px; color: var(--muted); font-size: .65rem; text-align: center; }
+.poster-search-identity { display: grid; min-width: 0; gap: 7px; overflow-wrap: anywhere; }
+.poster-search-identity strong { font-size: 1.08rem; }
+.poster-search-identity > span { color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.poster-style-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 150px)); gap: 12px; }
 .poster-style-gallery .image-tile { min-width: 0; width: 100%; }
 .poster-style-gallery img { width: 100%; }
 .person-card, .person-detail { padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
-.person-card { position: relative; content-visibility: auto; contain-intrinsic-size: auto 900px; }
+.person-card { position: relative; min-width: 0; max-width: 100%; overflow-wrap: anywhere; content-visibility: auto; contain-intrinsic-size: auto 900px; }
+.person-card > .image-row { grid-template-columns: minmax(0, 150px); grid-auto-flow: row; margin: 18px 0; }
 .person-card.missing-kometa-person { border-color: rgba(251,191,36,.38); background: color-mix(in srgb, var(--surface) 94%, var(--warning) 6%); box-shadow: inset 3px 0 0 rgba(251,191,36,.62), 0 0 24px rgba(251,191,36,.07); }
 .person-card.missing-kometa-person:hover { border-color: rgba(251,191,36,.55); box-shadow: inset 3px 0 0 rgba(251,191,36,.78), 0 0 30px rgba(251,191,36,.11); }
 .flagged-person { border-color: rgba(251, 146, 60, .7); box-shadow: 0 0 28px rgba(251, 146, 60, .2); }
@@ -215,7 +224,8 @@ h1 { margin: 0; max-width: 740px; font-size: clamp(2.5rem, 6vw, 4.35rem); line-h
 .source-dot.missing { background: #fbbf24; }
 .source-dot.trending, .source-badge.trending { background: rgba(34,211,238,.14); color: #a5f3fc; }
 .source-dot.trending { background: #22d3ee; }
-.person-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-right: 130px; }
+.person-identity { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 12px; }
+.has-person-controls .person-identity { padding-right: 130px; }
 .source-badges { display: inline-flex; flex-wrap: wrap; gap: 7px; }
 .source-badge { padding: 5px 8px; border: 1px solid currentColor; border-radius: 6px; font-size: .68rem; font-weight: 700; text-decoration: none; text-transform: uppercase; }
 a.source-badge:hover { filter: brightness(1.2); }
@@ -228,6 +238,8 @@ a.source-badge:hover { filter: brightness(1.2); }
 .person-guidance a { color: #c7d2fe; }
 .people-variant-section { margin-top: -4px; }
 .people-variant-section summary { width: fit-content; cursor: pointer; color: var(--accent-bright); font-size: .76rem; font-weight: 600; }
+.people-variant-section + .people-variant-section { margin-top: 12px; }
+.people-image-search { display: inline-block; margin-top: 12px; color: var(--accent-bright); font-size: .85rem; }
 .people-variant-section[open] summary { margin-bottom: 12px; }
 .people-variant-section .image-row { margin-top: 0; }
 .people-tag-row { display: flex; align-items: flex-start; gap: 8px; margin: -8px 0 20px; }
@@ -604,7 +616,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   .dynamic-tag-filter { justify-content: space-between; min-height: 40px; padding: 6px 10px; text-align: left; line-height: 1.25; }
   .tag-filter-examples summary { width: 38px; height: 40px; }
   .person-card { padding: 18px; contain-intrinsic-size: auto 620px; }
-  .person-identity { padding-right: 0; }
+  .has-person-controls .person-identity { padding-right: 0; padding-top: 34px; }
   .person-card h2 { font-size: 1.08rem; }
   .image-row, .image-gallery { display: grid; grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(220px, 78vw); justify-content: start; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: inline mandatory; scrollbar-width: thin; }
   .image-row .image-tile, .image-gallery .image-tile { scroll-snap-align: start; }
@@ -625,7 +637,7 @@ footer { width: min(1040px, calc(100% - 40px)); margin: 100px auto 0; padding: 2
   @media (max-width: 520px) {
   .brand > span { display: inline; font-size: .82rem; }
   .brand { flex: 0 0 auto; gap: 7px; }
-  .header-my-uploads { padding-inline: 6px; font-size: .75rem; }
+  .header-my-uploads { min-width: 0; padding-inline: 6px; font-size: .75rem; white-space: normal; text-align: right; }
   .site-nav { margin-left: 6px; }
   .overview-grid { grid-template-columns: 1fr; }
   .site-header, .shell, footer { width: min(100% - 24px, 1040px); }

@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261026-1') }}">
-  <script src="{{ url_for('static', filename='people_images.js', v='20261026-1') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20261026-1') }}" defer></script>
-  <script src="{{ url_for('static', filename='people_search.js', v='20261026-1') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261026-2') }}">
+  <script src="{{ url_for('static', filename='people_images.js', v='20261026-1') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20261026-2') }}" defer></script>
+  <script src="{{ url_for('static', filename='people_search.js', v='20261026-2') }}" defer></script>
 </head>
 <body>
   {% set active_page = 'people' %}{% include '_site_header.html' %}
@@ -32,7 +32,7 @@
       </form>
       <p id="poster-search-status" role="status"></p>
       <div id="poster-search-choices" class="poster-search-choices"></div>
-      <div id="poster-search-result"></div>
+      <div id="poster-search-result" class="people-gallery" aria-live="polite"></div>
     </section>
     <div class="people-toolbar">
       <div class="people-toolbar-actions">

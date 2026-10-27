@@ -95,6 +95,7 @@ function descendants(element, predicate) {
 function searchPerson(status = "incomplete", alreadyAdded = false) {
   return {
     tmdb_id: 777, name: "张子枫 <script>", sources: [], tmdb_person_url: "https://www.themoviedb.org/person/777",
+    known_for_department: "Acting", known_for: [{ title: "A known film", url: "https://www.themoviedb.org/movie/123" }],
     tmdb_image: { preview_url: "https://image.tmdb.org/t/p/w342/profile.jpg", download_url: "/api/tmdb/image-download?image_path=/profile.jpg" },
     tmdb_image_status: "available", people_image_status: status, can_add: status === "incomplete", already_added: alreadyAdded,
     style_availability: Object.fromEntries(["primary", "bw", "diiivoy", "diiivoycolor", "rainier", "signature", "transparent"].map((key, index) => [key, {
@@ -134,15 +135,48 @@ test("search reuses the People card with only the TMDb image expanded and seven 
 });
 
 test("name search offers separate Unicode identities and fetches the selected exact TMDb ID", async () => {
-  const harness = searchHarness([{ choices: [{ tmdb_id: 777, name: "Renée", known_for: ["Film"] }, { tmdb_id: 778, name: "Renée" }] }, { people: [searchPerson()] }]);
+  const harness = searchHarness([{ choices: [{ tmdb_id: 777, name: "Renée", profile_image_url: "https://image.tmdb.org/t/p/w185/renee.jpg", known_for_department: "Acting", known_for: ["Film"] }, { tmdb_id: 778, name: "Renée" }] }, { people: [searchPerson()] }]);
   await harness.search("Renée");
   const choices = harness.ids["poster-search-choices"].children;
   assert.equal(choices.length, 2);
-  assert.match(choices[0].textContent, /Renée · TMDb 777/);
-  assert.match(choices[1].textContent, /TMDb 778/);
+  assert.equal(choices[0].attributes["aria-label"], "Select Renée, TMDb 777");
+  assert.equal(descendants(choices[0], (node) => node.tag === "img")[0].src, "https://image.tmdb.org/t/p/w185/renee.jpg");
+  assert.equal(descendants(choices[0], (node) => node.textContent === "Known For: Acting (Film)").length, 1);
+  assert.equal(descendants(choices[1], (node) => node.textContent === "TMDb ID: 778").length, 1);
+  assert.equal(descendants(choices[1], (node) => node.textContent === "No profile image")[0].hidden, false);
   choices[1].events.click();
   await new Promise(setImmediate);
   assert.equal(harness.calls[1][0], "/api/people/search?q=778");
+});
+
+test("failed search thumbnails retain identity and show a missing-photo placeholder", async () => {
+  const harness = searchHarness([{ choices: [{ tmdb_id: 777, name: "Mel Gibson", profile_image_url: "https://image.tmdb.org/t/p/w185/mel.jpg" }] }]);
+  await harness.search("Mel Gibson");
+  const choice = harness.ids["poster-search-choices"].children[0];
+  const image = descendants(choice, (node) => node.tag === "img")[0];
+  const placeholder = descendants(choice, (node) => node.textContent === "No profile image")[0];
+  assert.equal(placeholder.hidden, true);
+  image.events.error();
+  assert.equal(image.hidden, true);
+  assert.equal(placeholder.hidden, false);
+  assert.equal(choice.attributes["aria-label"], "Select Mel Gibson, TMDb 777");
+});
+
+test("selected search and main-list cards share identical metadata, image layout and collapsed sections", async () => {
+  const person = searchPerson("complete");
+  const harness = searchHarness([{ people: [person] }]);
+  await harness.search("777");
+  const searchCard = harness.ids["poster-search-result"].children[0];
+  const listCard = harness.sandbox.addPerson(person, harness.sandbox.document.createElement("div"));
+  const serialize = (card) => JSON.stringify(card, (key, value) => ["events", "classList"].includes(key) ? undefined : value);
+  assert.equal(serialize(searchCard), serialize(listCard));
+  for (const card of [searchCard, listCard]) {
+    assert.equal(card.children.find((child) => child.className === "image-row").children.length, 1);
+    assert.equal(descendants(card, (node) => node.textContent === "Show all seven Kometa poster styles").length, 1);
+    assert.equal(descendants(card, (node) => node.textContent === "A known film").length, 1);
+    assert.equal(descendants(card, (node) => node.className === "people-image-search").length, 1);
+    assert(descendants(card, (node) => node.tag === "details").every((node) => !node.open));
+  }
 });
 
 test("complete and unavailable inventories have no request button and keep seven gallery states", async () => {

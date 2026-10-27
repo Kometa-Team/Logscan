@@ -178,6 +178,7 @@ function addPerson(person, targetGallery = gallery, searchResult = false) {
   exclude.addEventListener("click", () => runAction(person, "exclude", card));
   controls.append(check, flag, exclude);
   controls.hidden = searchResult || !actionsEnabled;
+  if (!controls.hidden) card.classList.add("has-person-controls");
 
   const heading = document.createElement("h2");
   if (person.tmdb_person_url) {
@@ -237,25 +238,15 @@ function addPerson(person, targetGallery = gallery, searchResult = false) {
   const images = document.createElement("div");
   images.className = "image-row";
   addTmdbImage(images, person);
-  if (person.kometa_image && !searchResult) {
-    addImage(images, { preview_url: person.kometa_image, download_url: person.kometa_image }, "Kometa Repo Image", "", person.name);
-  }
-  if (!searchResult) images.append(googleImageSearchTile(person.name));
-
-  const variants = person.kometa_variant_images || [];
   const variantSection = document.createElement("details");
   variantSection.className = "people-variant-section";
-  if (searchResult) {
+  if (Object.keys(person.style_availability || {}).length) {
     const summary = document.createElement("summary");
     summary.textContent = "Show all seven Kometa poster styles";
-    variantSection.append(summary, window.PeopleImages.styleGallery(person));
-  } else if (variants.length) {
-    const summary = document.createElement("summary");
-    summary.textContent = `Show ${variants.length} more repository ${variants.length === 1 ? "style" : "styles"}`;
-    const variantImages = document.createElement("div");
-    variantImages.className = "image-row variant-image-row";
-    variants.forEach((variant) => addImage(variantImages, { preview_url: variant.url, download_url: variant.url }, variant.label, "", person.name));
-    variantSection.append(summary, variantImages);
+    const imageSearch = googleImageSearchTile(person.name);
+    imageSearch.className = "people-image-search";
+    imageSearch.replaceChildren(document.createTextNode("Google Image Search"));
+    variantSection.append(summary, window.PeopleImages.styleGallery(person), imageSearch);
   } else variantSection.hidden = true;
 
   const flagReason = document.createElement("aside");

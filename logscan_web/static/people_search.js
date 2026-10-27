@@ -39,9 +39,9 @@
         }
       });
       card.append(add);
-    } else {
+    } else if (person.people_image_status !== "complete") {
       const message = document.createElement("p");
-      message.textContent = person.people_image_status === "complete" ? "All seven styles are available." : "Style verification is unavailable. Please try again later.";
+      message.textContent = "Style verification is unavailable. Please try again later.";
       card.append(message);
     }
   }
@@ -56,14 +56,41 @@
       if (version !== searchVersion) return;
       if (data.people?.length) {
         showPerson(data.people[0]);
-        status.textContent = "Seven Kometa People Poster styles";
+        status.textContent = "";
       } else {
         status.textContent = data.choices.length ? "Select the correct TMDb person." : "No people found on TMDb.";
         data.choices.forEach((person) => {
           const button = document.createElement("button");
           button.type = "button";
-          button.className = "secondary-button";
-          button.textContent = `${person.name} · TMDb ${person.tmdb_id} · ${person.known_for_department || "Department unknown"}${person.known_for?.length ? ` · ${person.known_for.filter(Boolean).join(", ")}` : ""}`;
+          button.className = "poster-search-choice";
+          button.setAttribute("aria-label", `Select ${person.name}, TMDb ${person.tmdb_id}`);
+          const preview = document.createElement("span");
+          preview.className = "poster-search-portrait";
+          const missing = document.createElement("span");
+          missing.textContent = "No profile image";
+          missing.hidden = Boolean(person.profile_image_url);
+          if (person.profile_image_url) {
+            const image = document.createElement("img");
+            image.src = person.profile_image_url;
+            image.alt = person.name;
+            image.loading = "lazy";
+            image.decoding = "async";
+            image.width = 64;
+            image.height = 96;
+            image.addEventListener("error", () => { image.hidden = true; missing.hidden = false; });
+            preview.append(image);
+          }
+          preview.append(missing);
+          const identity = document.createElement("span");
+          identity.className = "poster-search-identity";
+          const name = document.createElement("strong");
+          name.textContent = person.name;
+          const id = document.createElement("span");
+          id.textContent = `TMDb ID: ${person.tmdb_id}`;
+          const knownFor = document.createElement("span");
+          knownFor.textContent = `Known For: ${person.known_for_department || "Not specified"}${person.known_for?.length ? ` (${person.known_for.filter(Boolean).join(", ")})` : ""}`;
+          identity.append(name, id, knownFor);
+          button.append(preview, identity);
           button.addEventListener("click", () => search(String(person.tmdb_id)));
           choices.append(button);
         });
