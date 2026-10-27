@@ -205,3 +205,43 @@ test("duplicate requests stay disabled and failed requests can be retried with a
   assert.equal(button.disabled, false);
   assert.equal(failing.ids["poster-search-status"].textContent, "TMDb unavailable");
 });
+
+test("people without TMDb artwork get portrait search and submission links instead of a request button", async () => {
+  for (const posterStatus of ["incomplete", "pending_verification"]) {
+    const person = { ...searchPerson(posterStatus), tmdb_id: 2026, tmdb_image: null, tmdb_image_status: "missing", can_add: false, metadata_tags: ["Missing TMDb"], tmdb_images_url: "https://www.themoviedb.org/person/2026/images/profiles" };
+    const harness = searchHarness([{ people: [person] }]);
+    await harness.search("2026");
+    const card = harness.ids["poster-search-result"].children[0];
+    assert.equal(descendants(card, (node) => node.textContent === "Request poster").length, 0);
+    const guidance = descendants(card, (node) => node.className === "person-guidance")[0];
+    assert(!guidance.hidden);
+    assert.equal(guidance.children[0].textContent, "TMDb image required");
+    const links = descendants(guidance, (node) => node.tag === "a");
+    assert.equal(links[0].children[0], "Google Image Search");
+    assert.equal(new URL(links[0].href).searchParams.get("q"), person.name);
+    assert.equal(links[1].href, person.tmdb_images_url);
+    assert(guidance.children[1].children.includes(", then submit it to "));
+    assert(guidance.children[1].children.some((child) => typeof child === "string" && child.includes("Once a suitable image is available on TMDb")));
+    assert.equal(harness.calls.length, 1);
+  }
+});
+
+test("inconclusive TMDb artwork checks offer a retry explanation rather than a new request", async () => {
+  const reason = "TMDb image verification is unavailable. Please try again later.";
+  const person = { ...searchPerson(), tmdb_image: null, tmdb_image_status: "unknown", can_add: false, metadata_tags: ["TMDb verification pending"], request_unavailable_reason: reason };
+  const harness = searchHarness([{ people: [person] }]);
+  await harness.search("777");
+  const card = harness.ids["poster-search-result"].children[0];
+  assert.equal(descendants(card, (node) => node.textContent === "Request poster").length, 0);
+  assert.equal(descendants(card, (node) => node.textContent === reason).length, 1);
+  assert.equal(descendants(card, (node) => node.className === "person-guidance")[0].hidden, true);
+});
+
+test("existing requests stay visibly requested when TMDb artwork is missing", async () => {
+  const person = { ...searchPerson("incomplete", true), tmdb_image: null, tmdb_image_status: "missing", can_add: false, metadata_tags: ["Missing TMDb"], tmdb_images_url: "https://www.themoviedb.org/person/777/images/profiles" };
+  const harness = searchHarness([{ people: [person] }]);
+  await harness.search("777");
+  const card = harness.ids["poster-search-result"].children[0];
+  assert.equal(descendants(card, (node) => node.textContent === "Already requested")[0].disabled, true);
+  assert.equal(descendants(card, (node) => node.textContent === "Request poster").length, 0);
+});
