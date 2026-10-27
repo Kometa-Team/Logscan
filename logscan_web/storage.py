@@ -721,10 +721,25 @@ class PeopleStore:
 
     def __init__(self, root: str | os.PathLike[str]):
         self.path = Path(root) / "people.json"
-        self.lock = threading.Lock()
+        self.transactions = ScanStore(root)
+
+    def allow_lookup(self, actor: str, action: str, limit: int, window: int) -> bool:
+        """Bound public TMDb traffic across workers without storing visitor addresses."""
+        now = datetime.now(UTC).timestamp()
+        identity = hashlib.sha256(actor.encode()).hexdigest()
+        with self.transactions._transaction() as connection:
+            connection.execute("CREATE TABLE IF NOT EXISTS people_rate_limits (identity TEXT, action TEXT, requested_at REAL)")
+            connection.execute("DELETE FROM people_rate_limits WHERE requested_at < ?", (now - 3600,))
+            count = connection.execute(
+                "SELECT COUNT(*) FROM people_rate_limits WHERE identity = ? AND action = ? AND requested_at > ?", (identity, action, now - window)
+            ).fetchone()[0]
+            if count >= limit:
+                return False
+            connection.execute("INSERT INTO people_rate_limits VALUES (?, ?, ?)", (identity, action, now))
+            return True
 
     def list(self) -> list[dict]:
-        with self.lock:
+        with self.transactions._transaction():
             return self._read()
 
     def get(self, key: str) -> dict | None:
@@ -734,7 +749,7 @@ class PeopleStore:
         """Update a repository snapshot in one write without changing log history."""
         from .people_images import assess_people_images
 
-        with self.lock:
+        with self.transactions._transaction():
             people = self._read()
             changed = False
             for person in people:
@@ -753,10 +768,10 @@ class PeopleStore:
     def upsert_with_status(self, person: dict) -> tuple[dict, bool]:
         from .people_images import person_name_key
 
-        with self.lock:
+        with self.transactions._transaction():
             people = self._read()
-            existing = next((item for item in people if item["key"] == person["key"]), None)
-            if existing is None:
+            existing = next((item for item in people if item["key"] == person["key"] or (person.get("tmdb_id") and item.get("tmdb_id") == person["tmdb_id"])), None)
+            if existing is None and not person.get("manual_requests"):
                 incoming_names = {person_name_key(person.get(field)) for field in ("name", "original_name") if person.get(field)}
                 name_matches = [
                     item
@@ -769,10 +784,15 @@ class PeopleStore:
             if existing:
                 incoming_requesters = person.get("requested_by", [])
                 incoming_provenance_tags = person.get("provenance_tags", [])
-                merged_fields = ("source_styles", "detection_reasons", "log_provenance")
+                merged_fields = ("source_styles", "detection_reasons", "log_provenance", "manual_requests")
                 merged = {field: list(existing.get(field, [])) for field in merged_fields}
                 for field in merged_fields:
                     for value in person.get(field, []):
+                        if field == "manual_requests":
+                            previous = next((item for item in merged[field] if item.get("id") == value.get("id")), None)
+                            if previous is not None:
+                                previous["name"] = value.get("name")
+                                continue
                         if field == "log_provenance" and value.get("log_url"):
                             path = urlsplit(value["log_url"]).path
                             previous = next((item for item in merged[field] if urlsplit(item.get("log_url") or "").path == path), None)
@@ -822,7 +842,7 @@ class PeopleStore:
             return result.copy(), created
 
     def delete(self, key: str) -> bool:
-        with self.lock:
+        with self.transactions._transaction():
             people = self._read()
             remaining = [person for person in people if person["key"] != key]
             if len(remaining) == len(people):
@@ -833,8 +853,10 @@ class PeopleStore:
     def _read(self) -> list[dict]:
         try:
             result = json.loads(self.path.read_text(encoding="utf-8"))
-            return result if isinstance(result, list) else []
-        except (FileNotFoundError, json.JSONDecodeError):
+            if not isinstance(result, list):
+                raise ValueError("Invalid People store")
+            return result
+        except FileNotFoundError:
             return []
 
     def _write(self, people: list[dict]) -> None:

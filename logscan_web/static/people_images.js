@@ -1,4 +1,24 @@
 window.PeopleImages = {
+  styleGallery(person) {
+    const grid = document.createElement("div");
+    grid.className = "poster-style-gallery";
+    Object.values(person.style_availability || {}).forEach((style) => {
+      let tile;
+      if (style.status === "present" && style.image_url) {
+        tile = this.imageCard({ preview_url: style.image_url, download_url: style.image_url, label: style.label, alt: `${person.name} — ${style.label}` });
+      } else {
+        tile = document.createElement("div");
+        tile.className = "image-tile";
+        const label = document.createElement("div");
+        label.className = "image-label";
+        label.textContent = style.label;
+        tile.append(this.noImage(style.status === "missing" ? "Missing" : style.status === "not_applicable" ? "Not applicable" : "Verification unavailable"), label);
+        if (style.reason) tile.title = style.reason;
+      }
+      grid.append(tile);
+    });
+    return grid;
+  },
   noImage(message = "No TMDb images found") {
     const element = document.createElement("div");
     element.className = "no-image";
