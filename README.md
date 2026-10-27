@@ -192,6 +192,37 @@ missing obligation completes only when every applicable style is verified presen
 independent trending sources remain available. Filters and exports use the same union.
 Set `TMDB_API_KEY` so the service can resolve people and load profile images.
 
+Search by a person's name or exact numeric TMDb ID, including people outside
+the current queue. Name searches offer up to 20 TMDb identities before selection.
+Search results reuse the People card: the TMDb image is visible, and the seven
+Kometa styles are collapsed with previews, original-image links, and explicit
+missing or unavailable states. Select **Request poster** when at least one style
+is verified missing. **Already requested** prevents repeat submissions by the
+same visitor identity. Different Discord accounts can request the same person
+without duplicating their People record.
+
+Requests join the existing `people.json` records and preserve discovery history.
+Anonymous requests show **Manually Added**; authenticated requests also show
+**Manually Added by** the Discord display name. Discord IDs come from the signed
+OAuth session. Request timestamps and durable requester IDs remain after all
+styles become available. Requests never trigger rendering or publication.
+
+For processing, select **TMDb Ready** alone and use the existing download button.
+The same `tmdbid|name` export includes qualifying trending, uploaded-log, and manual
+requests once each. Readiness requires verified TMDb artwork and at least one
+verified missing Kometa style. Unknown inventories do not establish readiness or
+completion. Once refreshed inventories verify all seven styles, the person leaves
+this processing export automatically; historical request information is retained.
+
+No migration or additional service is required. New request fields are optional
+in existing records. Writes reuse the scan store's SQLite transaction lock and
+atomic JSON replacement. A throttle table is created automatically in the existing
+`dedup.sqlite3`: searches allow 30 per minute; requests allow 10 per ten minutes
+per anonymous address or 30 per authenticated Discord identity. Only hashed
+throttle identities are stored, and expired entries are removed. The request route
+requires the page's session CSRF token. Keep the existing `LOGSCAN_SECRET_KEY`
+stable and shared across web workers so sessions and request tokens remain valid.
+
 For website uploads, set `DISCORD_PEOPLE_WEBHOOK_URL` to a webhook created in
 the destination Discord channel. A non-embedding notice is posted only when a
 actionable person is first added to the queue, preventing repeat notifications for the

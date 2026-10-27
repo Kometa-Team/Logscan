@@ -163,6 +163,11 @@ def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]]
         else:
             status = "present" if any(name in inventory for name in names) else "missing"
         availability[style.key] = {"label": style.label, "repository": style.repository, "status": status}
+        if status == "present":
+            url = next(inventory[name] for name in sorted(names) if name in inventory)
+            parsed = person_from_image_url(url)
+            if parsed and parsed[0] == style:
+                availability[style.key]["image_url"] = url
         if status == "unknown":
             availability[style.key]["reason"] = getattr(inventories, "errors", {}).get(style.label, "Repository inventory has not been verified.")
         if isinstance(inventory, PeopleImageInventory):

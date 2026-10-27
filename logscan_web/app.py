@@ -4,6 +4,7 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import threading
 import time
 import tempfile
@@ -11,6 +12,7 @@ import unicodedata
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from functools import wraps
 from io import BytesIO
 from http.client import HTTPException
 from pathlib import Path
@@ -18,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from flask import Flask, abort, jsonify, render_template, request, send_file, url_for
+from flask import Flask, abort, jsonify, render_template, request, send_file, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import Finding
@@ -484,7 +486,12 @@ def create_app() -> Flask:
                 import json
 
                 return json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, ValueError):
+        except HTTPError as exc:
+            if exc.code == 404:
+                return {}
+            app.logger.warning("TMDb lookup failed for %s", path)
+            return None
+        except (URLError, TimeoutError, ValueError):
             app.logger.warning("TMDb lookup failed for %s", path)
             return None
 
@@ -981,7 +988,7 @@ def create_app() -> Flask:
             record = person.get("missing_record", {})
             sources = sorted(person["sources"])
             metadata_tags = []
-            tmdb_ready = bool(item.get("tmdb_image")) or bool(record.get("tmdb_image_found"))
+            tmdb_ready = (bool(item.get("tmdb_image")) or bool(record.get("tmdb_image_found"))) and item["people_image_status"] == "incomplete"
             if "missing" in sources:
                 metadata_tags.append("TMDb Ready" if tmdb_ready else "Missing TMDb" if item["tmdb_image_status"] == "missing" else "TMDb verification pending")
             requesters = record.get("requested_by", [])
@@ -991,7 +998,8 @@ def create_app() -> Flask:
                 person_key=f"tmdb-{person['id']}" if person.get("id") else record.get("key"),
                 sources=sources,
                 metadata_tags=metadata_tags,
-                provenance_tags=record.get("provenance_tags", ["Log Upload"] if record else []),
+                provenance_tags=list(record.get("provenance_tags", ["Log Upload"] if record else []))
+                + [f"Manually Added by {entry['name']}" for entry in record.get("manual_requests", []) if entry.get("id") and entry.get("name")],
                 log_url=record.get("log_url"),
                 source_url=record.get("source_url"),
                 original_name=record.get("original_name", record.get("name", item["name"])),
@@ -1335,7 +1343,8 @@ def create_app() -> Flask:
 
     @app.get("/people")
     def people_page():
-        return render_template("people.html")
+        session.setdefault("people_csrf", secrets.token_urlsafe(32))
+        return render_template("people.html", people_csrf=session["people_csrf"])
 
     @app.get("/analytics")
     def analytics_page():
@@ -1815,6 +1824,153 @@ def create_app() -> Flask:
     @app.get("/api/analytics")
     def usage_analytics():
         return jsonify(analytics.snapshot())
+
+    def people_service_errors(view):
+        @wraps(view)
+        def guarded(*args, **kwargs):
+            try:
+                return view(*args, **kwargs)
+            except (OSError, ValueError, sqlite3.Error):
+                app.logger.warning("People search/request service is unavailable.")
+                return jsonify(error="People service is unavailable. Please try again later."), 503
+
+        return guarded
+
+    def public_people_limit(action: str):
+        user = discord_session_user()
+        actor = f"discord:{user['id']}" if user else f"visitor:{request.remote_addr}"
+        limit, window = (30, 60) if action == "search" else (30 if user else 10, 600)
+        if not people_store.allow_lookup(actor, action, limit, window):
+            return jsonify(error="Too many requests. Please try again shortly."), 429, {"Retry-After": str(window)}
+        return None
+
+    def valid_person_id(value) -> bool:
+        return type(value) is int and 0 < value <= 2_147_483_647
+
+    def verified_person(person_id: int) -> tuple[dict | None, int]:
+        details = tmdb_get(f"/person/{person_id}")
+        if details is None:
+            return None, 503
+        if (
+            not isinstance(details, dict)
+            or not valid_person_id(details.get("id"))
+            or details["id"] != person_id
+            or not valid_person_name(details.get("name"))
+            or details.get("adult")
+        ):
+            return None, 404
+        details["known_for"] = [credit for credit in (details.get("known_for") or [])[:3] if isinstance(credit, dict)]
+        # Verify fallback profiles just as uploaded-log discoveries do.
+        if not tmdb_image_path("https://image.tmdb.org/t/p/original" + str(details.get("profile_path") or "")):
+            details["profile_path"] = None
+            images = tmdb_get(f"/person/{person_id}/images")
+            if isinstance(images, dict):
+                details["profile_path"] = next(
+                    (
+                        image["file_path"]
+                        for image in (images.get("profiles") or [])
+                        if isinstance(image, dict) and tmdb_image_path("https://image.tmdb.org/t/p/original" + str(image.get("file_path") or ""))
+                    ),
+                    None,
+                )
+        return details, 200
+
+    def valid_person_name(value) -> bool:
+        return isinstance(value, str) and bool(value.strip()) and len(value) <= 200 and not any(unicodedata.category(char) in {"Cc", "Cs"} or char == "|" for char in value)
+
+    def poster_search_payload(details: dict) -> dict:
+        person = popular_people_payload([details], {})[0]
+        record = next((item for item in people_store.list() if item.get("tmdb_id") == details["id"]), {})
+        actor_id = (discord_session_user() or {}).get("id")
+        person["already_added"] = any(entry.get("id") == actor_id for entry in record.get("manual_requests", []))
+        person["can_add"] = person["people_image_status"] == "incomplete"
+        person["sources"] = ["missing"] if person["can_add"] else []
+        person["metadata_tags"] = ["TMDb Ready"] if person["can_add"] and person.get("tmdb_image") else []
+        return person
+
+    @app.get("/api/people/search")
+    @people_service_errors
+    def search_people_posters():
+        query = request.args.get("q", "").strip()
+        if not valid_person_name(query):
+            return jsonify(error="Enter a name or TMDb person ID of up to 200 characters."), 400
+        numeric = query.isdecimal()
+        if numeric and (not query.isascii() or not valid_person_id(int(query))):
+            return jsonify(error="Enter a valid numeric TMDb person ID."), 400
+        limited = public_people_limit("search")
+        if limited:
+            return limited
+        if numeric:
+            details, status = verified_person(int(query))
+            if details is None:
+                return jsonify(error="TMDb is unavailable. Please try again later." if status == 503 else "Person not found on TMDb."), status
+            return jsonify(people=[poster_search_payload(details)])
+        matches = tmdb_get("/search/person", {"query": query, "page": 1, "include_adult": "false"})
+        if not isinstance(matches, dict) or not isinstance(matches.get("results"), list):
+            return jsonify(error="TMDb search is unavailable. Please try again later."), 503
+        # Offer identities before fetching galleries; never resolve ambiguity by name.
+        choices = []
+        seen = set()
+        for item in matches["results"][:20]:
+            if not isinstance(item, dict) or not valid_person_id(item.get("id")) or not valid_person_name(item.get("name")) or item.get("adult") or item["id"] in seen:
+                continue
+            seen.add(item["id"])
+            choices.append(
+                {
+                    "tmdb_id": item["id"],
+                    "name": item["name"],
+                    "known_for_department": item.get("known_for_department"),
+                    "known_for": [credit.get("title") or credit.get("name") for credit in (item.get("known_for") or [])[:3] if isinstance(credit, dict)],
+                }
+            )
+        return jsonify(choices=choices)
+
+    @app.post("/api/people/request")
+    @people_service_errors
+    def request_people_poster():
+        token = session.get("people_csrf", "")
+        if not token or not hmac.compare_digest(request.headers.get("X-CSRF-Token", "").encode(), token.encode()):
+            return jsonify(error="Refresh the People page before adding a person."), 403
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {"tmdb_id"} or not valid_person_id(payload.get("tmdb_id")):
+            return jsonify(error="Provide a valid TMDb person ID."), 400
+        limited = public_people_limit("request")
+        if limited:
+            return limited
+        details, status = verified_person(payload["tmdb_id"])
+        if details is None:
+            return jsonify(error="Unable to verify this person with TMDb. Please try again later."), status
+        person = poster_search_payload(details)
+        if not person["can_add"]:
+            return (
+                jsonify(error="All styles are available." if person["people_image_status"] == "complete" else "Repository verification is unavailable. Please try again later."),
+                409,
+            )
+        user = discord_session_user()
+        timestamp = datetime.now(UTC).isoformat()
+        manual_request = {"id": user["id"] if user else None, "name": user["username"] if user else None, "requested_at": timestamp}
+        try:
+            record, created = people_store.upsert_with_status(
+                {
+                    "key": f"tmdb-{details['id']}",
+                    "tmdb_id": details["id"],
+                    "name": details["name"],
+                    "tmdb_profile_path": details.get("profile_path"),
+                    "tmdb_image_found": True if details.get("profile_path") else None,
+                    "manual_requests": [manual_request],
+                    "provenance_tags": ["Manually Added"],
+                    "requested_by": [{"id": user["id"], "name": user["username"]}] if user else [],
+                    "style_availability": person["style_availability"],
+                    "people_image_status": person["people_image_status"],
+                }
+            )
+        except (OSError, ValueError):
+            app.logger.warning("Unable to persist manual People request.")
+            return jsonify(error="Unable to save this request. Please try again later."), 503
+        already_added = not any(entry.get("id") == manual_request["id"] and entry["requested_at"] == timestamp for entry in record["manual_requests"])
+        if created:
+            analytics.record_people_submitted(1)
+        return jsonify(tmdb_id=details["id"], already_added=already_added, message="Already requested" if already_added else "Poster requested"), 200 if already_added else 201
 
     @app.get("/api/people")
     def people():
