@@ -1847,8 +1847,8 @@ def create_app() -> Flask:
     def valid_person_id(value) -> bool:
         return type(value) is int and 0 < value <= 2_147_483_647
 
-    def verified_person(person_id: int) -> tuple[dict | None, int]:
-        details = tmdb_get(f"/person/{person_id}")
+    def verified_person(person_id: int, *, include_credits: bool = False) -> tuple[dict | None, int]:
+        details = tmdb_get(f"/person/{person_id}", {"append_to_response": "combined_credits"} if include_credits else None)
         if details is None:
             return None, 503
         if (
@@ -1860,6 +1860,22 @@ def create_app() -> Flask:
         ):
             return None, 404
         details["known_for"] = [credit for credit in (details.get("known_for") or [])[:3] if isinstance(credit, dict)]
+        if include_credits and not details["known_for"]:
+            credits = details.get("combined_credits") or {}
+            roles = (credits.get("cast") or []) + (credits.get("crew") or []) if isinstance(credits, dict) else []
+            seen = set()
+            for credit in sorted(
+                (item for item in roles if isinstance(item, dict)),
+                key=lambda item: item.get("popularity") if isinstance(item.get("popularity"), (int, float)) else 0,
+                reverse=True,
+            ):
+                identity = (credit.get("media_type"), credit.get("id"))
+                if identity[0] not in {"movie", "tv"} or not valid_person_id(identity[1]) or identity in seen or not (credit.get("title") or credit.get("name")):
+                    continue
+                seen.add(identity)
+                details["known_for"].append(credit)
+                if len(details["known_for"]) == 3:
+                    break
         # Verify fallback profiles just as uploaded-log discoveries do.
         if not tmdb_image_path("https://image.tmdb.org/t/p/original" + str(details.get("profile_path") or "")):
             details["profile_path"] = None
@@ -1901,7 +1917,7 @@ def create_app() -> Flask:
         if limited:
             return limited
         if numeric:
-            details, status = verified_person(int(query))
+            details, status = verified_person(int(query), include_credits=True)
             if details is None:
                 return jsonify(error="TMDb is unavailable. Please try again later." if status == 503 else "Person not found on TMDb."), status
             return jsonify(people=[poster_search_payload(details)])
@@ -1915,10 +1931,12 @@ def create_app() -> Flask:
             if not isinstance(item, dict) or not valid_person_id(item.get("id")) or not valid_person_name(item.get("name")) or item.get("adult") or item["id"] in seen:
                 continue
             seen.add(item["id"])
+            profile_path = tmdb_image_path("https://image.tmdb.org/t/p/original" + str(item.get("profile_path") or ""))
             choices.append(
                 {
                     "tmdb_id": item["id"],
                     "name": item["name"],
+                    "profile_image_url": f"https://image.tmdb.org/t/p/w185{profile_path}" if profile_path else None,
                     "known_for_department": item.get("known_for_department"),
                     "known_for": [credit.get("title") or credit.get("name") for credit in (item.get("known_for") or [])[:3] if isinstance(credit, dict)],
                 }

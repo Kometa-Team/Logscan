@@ -68,7 +68,9 @@ def service(tmp_path, monkeypatch):
         if "/person/777/images?" in url:
             return Response({"profiles": state.get("profiles", [])})
         if "/person/777?" in url or "/person/778?" in url:
-            return Response({"id": int(urlsplit(url).path.rsplit("/", 1)[1]), "name": state["name"], "profile_path": state["profile"]})
+            return Response(
+                {"id": int(urlsplit(url).path.rsplit("/", 1)[1]), "name": state["name"], "profile_path": state["profile"], "combined_credits": state.get("credits", {})}
+            )
         raise HTTPError(url, 404, "Not found", {}, None)
 
     monkeypatch.setattr(module, "urlopen", urlopen)
@@ -135,6 +137,33 @@ def test_name_choices_preserve_unicode_and_distinct_tmdb_identities(service, nam
     assert submit(client, headers).status_code == 201
     assert client.post("/api/people/request", json={"tmdb_id": 778}, headers=headers).status_code == 201
     assert {item["tmdb_id"] for item in PeopleStore(root).list()} == {777, 778}
+
+
+@pytest.mark.parametrize(
+    "profile,expected", [("/mel.jpg", "https://image.tmdb.org/t/p/w185/mel.jpg"), (None, None), ("https://evil.test/photo.jpg", None), ("/../photo.jpg", None)]
+)
+def test_name_choices_include_only_verified_tmdb_profile_paths(service, profile, expected):
+    state, create, _, _ = service
+    state["matches"] = [{"id": 777, "name": "Mel Gibson", "profile_path": profile}]
+    client, _ = visitor(create())
+    choices = client.get("/api/people/search?q=Mel+Gibson").get_json()["choices"]
+    assert choices[0]["profile_image_url"] == expected
+    assert len([url for url in state["calls"] if "api.themoviedb.org" in url]) == 1
+
+
+def test_selected_identity_keeps_bounded_known_for_credits(service):
+    state, create, _, _ = service
+    movie = {"media_type": "movie", "id": 100, "title": "Braveheart", "popularity": 20}
+    state["credits"] = {
+        "cast": [movie, {"media_type": "movie", "id": 200, "title": "Signs", "popularity": 10}, {"media_type": "tv", "id": 300, "name": "Show", "popularity": 5}],
+        "crew": [movie, {"media_type": "movie", "id": 400, "title": "Other", "popularity": 1}],
+    }
+    client, _ = visitor(create())
+    person = client.get("/api/people/search?q=777").get_json()["people"][0]
+    assert [credit["title"] for credit in person["known_for"]] == ["Braveheart", "Signs", "Show"]
+    assert person["known_for"][0]["url"] == "https://www.themoviedb.org/movie/100"
+    detail_url = next(url for url in state["calls"] if "/person/777?" in url)
+    assert parse_qs(urlsplit(detail_url).query)["append_to_response"] == ["combined_credits"]
 
 
 @pytest.mark.parametrize("missing", [set(), {"bw"}, {style.key for style in PEOPLE_IMAGE_STYLES}])
