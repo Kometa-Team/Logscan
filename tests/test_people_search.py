@@ -5,6 +5,7 @@ import json
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import UTC, datetime
+from threading import Barrier
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
@@ -67,7 +68,7 @@ def service(tmp_path, monkeypatch):
             return Response({"results": state["matches"]})
         if "/person/777/images?" in url:
             return Response({"profiles": state.get("profiles", [])})
-        if "/person/777?" in url or "/person/778?" in url:
+        if "/person/777?" in url or "/person/778?" in url or "/person/2011?" in url:
             return Response(
                 {"id": int(urlsplit(url).path.rsplit("/", 1)[1]), "name": state["name"], "profile_path": state["profile"], "combined_credits": state.get("credits", {})}
             )
@@ -217,19 +218,78 @@ def test_anonymous_duplicate_and_existing_discovery_history(service):
     assert client.get("/api/people/search?q=777").get_json()["people"][0]["already_added"]
 
 
-def test_discord_attribution_multiple_requesters_and_renamed_identity(service):
+def test_discord_request_stays_requested_for_other_accounts_and_changed_names(service):
     _, create, root, _ = service
     app = create()
     for identity, name in [("111", "First user"), ("222", "Second user"), ("111", "Renamed user")]:
         client, headers = visitor(app, {"id": identity, "username": name})
+        assert client.get("/api/people/search?q=777").get_json()["people"][0]["already_added"] == (name != "First user")
         response = submit(client, headers)
-        assert response.status_code == (200 if name == "Renamed user" else 201)
+        assert response.status_code == (201 if name == "First user" else 200)
     record = PeopleStore(root).list()[0]
-    assert len(record["manual_requests"]) == 2 and len(record["requested_by"]) == 2
-    assert record["manual_requests"][0]["name"] == "Renamed user"
+    assert len(record["manual_requests"]) == 1 and record["requested_by"] == [{"id": "111", "name": "First user"}]
+    assert record["manual_requests"][0]["name"] == "First user"
     ready = client.get("/api/people?tags=TMDb+Ready").get_json()["people"][0]
-    assert "Manually Added by Renamed user" in ready["provenance_tags"]
+    assert "Manually Added by First user" in ready["provenance_tags"]
     assert client.get("/api/people/export?tags=TMDb+Ready").get_data(as_text=True).splitlines() == ["777|Lupita Nyong'o"]
+
+
+def test_anonymous_2011_request_then_discord_login_keeps_original_request(service):
+    _, create, root, _ = service
+    app = create()
+    client, headers = visitor(app)
+    assert not client.get("/api/people/search?q=2011").get_json()["people"][0]["already_added"]
+    response = client.post("/api/people/request", json={"tmdb_id": 2011}, headers=headers)
+    assert response.status_code == 201
+    original = (root / "people.json").read_bytes()
+    with client.session_transaction() as session:
+        session.update(discord_user={"id": "111", "username": "Signed in user"}, support_authorized_at=time.time())
+    assert client.get("/api/people/search?q=2011").get_json()["people"][0]["already_added"]
+    response = client.post("/api/people/request", json={"tmdb_id": 2011}, headers=headers)
+    assert response.status_code == 200 and response.get_json()["message"] == "Already requested"
+    assert (root / "people.json").read_bytes() == original
+    record = PeopleStore(root).list()[0]
+    assert record["manual_requests"][0]["id"] is None and not record.get("requested_by")
+    ready = client.get("/api/people?tags=TMDb+Ready").get_json()["people"][0]
+    assert "Manually Added" in ready["provenance_tags"]
+    assert not any(tag.startswith("Manually Added by ") for tag in ready["provenance_tags"])
+    assert client.get("/api/people/export?tags=TMDb+Ready").get_data(as_text=True).splitlines() == ["2011|Lupita Nyong'o"]
+
+
+def test_existing_requester_history_is_not_rewritten_by_another_manual_request(service):
+    _, create, root, _ = service
+    store = PeopleStore(root)
+    for user_id in ["111", "222"]:
+        store.upsert(
+            {
+                "key": "tmdb-777",
+                "tmdb_id": 777,
+                "name": "Lupita Nyong'o",
+                "manual_requests": [{"id": user_id, "name": user_id, "requested_at": "original"}],
+                "requested_by": [{"id": user_id, "name": user_id}],
+                "provenance_tags": ["Log Upload", "Manually Added"],
+                "log_url": "/scan/original",
+            }
+        )
+    original = (root / "people.json").read_bytes()
+    client, headers = visitor(create(), {"id": "333", "username": "Other user"})
+    assert client.get("/api/people/search?q=777").get_json()["people"][0]["already_added"]
+    assert submit(client, headers).status_code == 200
+    assert (root / "people.json").read_bytes() == original
+    assert len(store.list()[0]["manual_requests"]) == 2
+
+
+def test_discord_request_stays_requested_after_logout_and_when_services_are_offline(service):
+    state, create, root, _ = service
+    app = create()
+    client, headers = visitor(app, {"id": "111", "username": "Original requester"})
+    assert submit(client, headers).status_code == 201
+    original = (root / "people.json").read_bytes()
+    anonymous, anonymous_headers = visitor(create())
+    assert anonymous.get("/api/people/search?q=777").get_json()["people"][0]["already_added"]
+    state["tmdb_offline"] = True
+    assert submit(anonymous, anonymous_headers).get_json()["already_added"]
+    assert (root / "people.json").read_bytes() == original
 
 
 @pytest.mark.parametrize(
@@ -340,7 +400,7 @@ def test_atomic_persistence_failure_preserves_existing_requests(service):
     assert submit(client, headers).status_code == 201
     original = (root / "people.json").read_bytes()
     with patch("logscan_web.storage.PeopleStore._write", side_effect=OSError("private failure detail")):
-        response = submit(client, headers)
+        response = client.post("/api/people/request", json={"tmdb_id": 778}, headers=headers)
     assert response.status_code == 503
     assert "private failure" not in response.get_data(as_text=True)
     assert (root / "people.json").read_bytes() == original
@@ -355,23 +415,25 @@ def test_corrupt_store_is_not_silently_overwritten(tmp_path):
 
 
 def _worker_request(arguments):
-    root, number = arguments
+    root, number, manual_request_once = arguments
     return PeopleStore(root).upsert_with_status(
         {
             "key": "tmdb-777",
             "tmdb_id": 777,
             "name": "Person",
             "manual_requests": [{"id": str(number % 3), "name": f"User {number % 3}", "requested_at": str(number)}],
-        }
+        },
+        manual_request_once=manual_request_once,
     )[1]
 
 
-def test_multiple_worker_processes_preserve_requesters_and_deduplicate(tmp_path):
+@pytest.mark.parametrize("manual_request_once", [False, True])
+def test_multiple_worker_processes_preserve_requesters_and_deduplicate(tmp_path, manual_request_once):
     with ProcessPoolExecutor(max_workers=3) as executor:
-        created = list(executor.map(_worker_request, [(str(tmp_path), number) for number in range(12)]))
+        created = list(executor.map(_worker_request, [(str(tmp_path), number, manual_request_once) for number in range(12)]))
     assert sum(created) == 1
     records = PeopleStore(tmp_path).list()
-    assert len(records) == 1 and len(records[0]["manual_requests"]) == 3
+    assert len(records) == 1 and len(records[0]["manual_requests"]) == (1 if manual_request_once else 3)
 
 
 def test_rate_limit_persistence_errors_have_a_safe_response(service):
@@ -395,16 +457,26 @@ def test_search_and_request_use_exact_returned_identity(service):
     assert PeopleStore(root).list() == []
 
 
-def test_concurrent_http_requests_preserve_one_person_and_one_anonymous_request(service):
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_concurrent_http_requests_preserve_the_first_person_request(service, authenticated):
     _, create, root, _ = service
     app = create()
+    barrier = Barrier(6)
+    original_upsert = PeopleStore.upsert_with_status
 
-    def request(_):
-        client, headers = visitor(app)
+    def concurrent_upsert(store, person, **kwargs):
+        # Every caller has seen the old, requestable state before anyone writes.
+        barrier.wait(timeout=20)
+        return original_upsert(store, person, **kwargs)
+
+    def request(number):
+        user = {"id": str(number), "username": f"User {number}"} if authenticated else None
+        client, headers = visitor(app, user)
         return submit(client, headers).status_code
 
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    with patch.object(PeopleStore, "upsert_with_status", new=concurrent_upsert), ThreadPoolExecutor(max_workers=6) as executor:
         codes = list(executor.map(request, range(6)))
     assert codes.count(201) == 1 and codes.count(200) == 5
     records = PeopleStore(root).list()
     assert len(records) == 1 and len(records[0]["manual_requests"]) == 1
+    assert len(records[0].get("requested_by", [])) == (1 if authenticated else 0)
