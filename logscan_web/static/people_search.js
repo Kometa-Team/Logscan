@@ -17,7 +17,7 @@
   function showPerson(person) {
     result.replaceChildren();
     const card = addPerson(person, result, true);
-    if (person.can_add) {
+    if (person.can_add || (person.already_added && person.people_image_status !== "complete")) {
       const add = document.createElement("button");
       add.type = "button";
       add.className = "secondary-button";
@@ -39,9 +39,10 @@
         }
       });
       card.append(add);
-    } else if (person.people_image_status !== "complete") {
+    }
+    if (!person.can_add && person.people_image_status !== "complete" && !person.metadata_tags?.includes("Missing TMDb")) {
       const message = document.createElement("p");
-      message.textContent = "Style verification is unavailable. Please try again later.";
+      message.textContent = person.request_unavailable_reason || "Style verification is unavailable. Please try again later.";
       card.append(message);
     }
   }

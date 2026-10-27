@@ -222,13 +222,17 @@ function addPerson(person, targetGallery = gallery, searchResult = false) {
     label.textContent = "TMDb image required";
     const message = document.createElement("span");
     if (person.tmdb_images_url) {
-      message.append("Use the Google Image Search tile below to find an acceptable person poster, then upload it to ");
+      message.append("Find a suitable portrait using ");
+      const imageSearch = googleImageSearchTile(person.name);
+      imageSearch.className = "";
+      imageSearch.replaceChildren(document.createTextNode("Google Image Search"));
+      message.append(imageSearch, ", then submit it to ");
       const link = document.createElement("a");
       link.href = person.tmdb_images_url;
       link.target = "_blank";
       link.rel = "noopener";
       link.textContent = "TMDb profile images";
-      message.append(link, ".");
+      message.append(link, ". Once a suitable image is available on TMDb, search again to request the poster.");
     } else {
       message.textContent = "This person could not be resolved on TMDb. Resolve the TMDb person before processing their poster.";
     }

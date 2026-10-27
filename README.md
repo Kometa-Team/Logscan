@@ -197,10 +197,13 @@ the current queue. Name searches offer up to 20 TMDb identities before selection
 Search results reuse the People card: the TMDb image is visible, and the seven
 Kometa styles are collapsed with previews, original-image links, and explicit
 missing or unavailable states. Select **Request poster** when at least one style
-is verified missing. **Already requested** applies to everyone once a manual
-request exists for that TMDb ID. Signing in or changing Discord accounts does
-not create another request or change the original attribution. Existing requester
-and discovery history is retained.
+is verified missing and usable TMDb profile artwork is verified. If TMDb has no
+suitable image, the card links to Google Image Search and the person's TMDb
+profile-image page so a visitor can find and submit a portrait before requesting
+a poster. Failed verification also prevents a new request. **Already requested**
+applies to everyone once a manual request exists for that TMDb ID. Signing in or
+changing Discord accounts does not create another request or change the original
+attribution. Existing requester and discovery history is retained.
 
 Requests join the existing `people.json` records and preserve discovery history.
 Anonymous requests show **Manually Added**; authenticated requests also show

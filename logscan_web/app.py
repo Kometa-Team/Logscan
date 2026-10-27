@@ -1880,6 +1880,7 @@ def create_app() -> Flask:
         if not tmdb_image_path("https://image.tmdb.org/t/p/original" + str(details.get("profile_path") or "")):
             details["profile_path"] = None
             images = tmdb_get(f"/person/{person_id}/images")
+            details["_tmdb_profile_checked"] = isinstance(images, dict) and isinstance(images.get("profiles"), list)
             if isinstance(images, dict):
                 details["profile_path"] = next(
                     (
@@ -1898,9 +1899,23 @@ def create_app() -> Flask:
         person = popular_people_payload([details], {})[0]
         record = next((item for item in people_store.list() if item.get("tmdb_id") == details["id"]), {})
         person["already_added"] = bool(record.get("manual_requests"))
-        person["can_add"] = person["people_image_status"] == "incomplete"
-        person["sources"] = ["missing"] if person["can_add"] else []
-        person["metadata_tags"] = ["TMDb Ready"] if person["can_add"] and person.get("tmdb_image") else []
+        missing_styles = person["people_image_status"] == "incomplete"
+        person["can_add"] = missing_styles and bool(person.get("tmdb_image"))
+        person["sources"] = ["missing"] if missing_styles else []
+        person["metadata_tags"] = ["TMDb Ready"] if person["can_add"] else []
+        reason = None
+        if person["people_image_status"] == "complete":
+            reason = "All styles are available."
+        elif not person.get("tmdb_image"):
+            if person["tmdb_image_status"] == "missing":
+                person["metadata_tags"] = ["Missing TMDb"]
+                reason = "A verified TMDb profile image is required before requesting a poster."
+            else:
+                person["metadata_tags"] = ["TMDb verification pending"]
+                reason = "TMDb image verification is unavailable. Please try again later."
+        elif not missing_styles:
+            reason = "Repository verification is unavailable. Please try again later."
+        person["request_unavailable_reason"] = reason
         return person
 
     @app.get("/api/people/search")
@@ -1962,10 +1977,7 @@ def create_app() -> Flask:
             return jsonify(error="Unable to verify this person with TMDb. Please try again later."), status
         person = poster_search_payload(details)
         if not person["can_add"]:
-            return (
-                jsonify(error="All styles are available." if person["people_image_status"] == "complete" else "Repository verification is unavailable. Please try again later."),
-                409,
-            )
+            return jsonify(error=person["request_unavailable_reason"]), 409
         user = discord_session_user()
         timestamp = datetime.now(UTC).isoformat()
         manual_request = {"id": user["id"] if user else None, "name": user["username"] if user else None, "requested_at": timestamp}

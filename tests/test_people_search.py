@@ -45,6 +45,7 @@ def service(tmp_path, monkeypatch):
         "calls": [],
         "profile": "/profile.jpg",
         "tmdb_offline": False,
+        "profiles_offline": False,
         "matches": [{"id": 777, "name": "Lupita Nyong'o"}, {"id": 778, "name": "Lupita Nyong'o"}],
     }
     (tmp_path / "popular_people_cache.json").write_text(
@@ -66,9 +67,11 @@ def service(tmp_path, monkeypatch):
             raise URLError("offline")
         if "/search/person?" in url:
             return Response({"results": state["matches"]})
-        if "/person/777/images?" in url:
+        if "/person/777/images?" in url or "/person/2026/images?" in url:
+            if state["profiles_offline"]:
+                raise URLError("offline")
             return Response({"profiles": state.get("profiles", [])})
-        if "/person/777?" in url or "/person/778?" in url or "/person/2011?" in url:
+        if "/person/777?" in url or "/person/778?" in url or "/person/2011?" in url or "/person/2026?" in url:
             return Response(
                 {"id": int(urlsplit(url).path.rsplit("/", 1)[1]), "name": state["name"], "profile_path": state["profile"], "combined_credits": state.get("credits", {})}
             )
@@ -342,14 +345,84 @@ def test_tmdb_unavailable_and_unknown_id(service):
 
 
 @pytest.mark.parametrize("profile,profiles,ready", [(None, [], False), (None, [{"file_path": "/fallback.jpg"}], True), ("https://evil.test/photo.jpg", [], False)])
-def test_requests_without_verified_artwork_are_retained_but_not_ready(service, profile, profiles, ready):
+def test_new_requests_require_verified_tmdb_artwork(service, profile, profiles, ready):
     state, create, root, _ = service
     state.update(profile=profile, profiles=profiles)
     client, headers = visitor(create())
-    assert submit(client, headers).status_code == 201
-    assert len(PeopleStore(root).list()) == 1
+    person = client.get("/api/people/search?q=777").get_json()["people"][0]
+    assert person["can_add"] == ready
+    response = submit(client, headers)
+    assert response.status_code == (201 if ready else 409)
+    assert len(PeopleStore(root).list()) == (1 if ready else 0)
+    if not ready:
+        assert person["metadata_tags"] == ["Missing TMDb"]
+        assert response.get_json()["error"] == person["request_unavailable_reason"]
     assert bool(client.get("/api/people?tags=TMDb+Ready").get_json()["people"]) == ready
     assert bool(client.get("/api/people/export?tags=TMDb+Ready").data) == ready
+
+
+def test_2026_requires_tmdb_image_before_requesting_and_exporting(service):
+    state, create, root, _ = service
+    state.update(profile=None, profiles=[])
+    client, headers = visitor(create())
+    person = client.get("/api/people/search?q=2026").get_json()["people"][0]
+    assert person["tmdb_id"] == 2026 and not person["can_add"]
+    assert person["metadata_tags"] == ["Missing TMDb"]
+    assert person["tmdb_images_url"] == "https://www.themoviedb.org/person/2026/images/profiles"
+    assert client.post("/api/people/request", json={"tmdb_id": 2026}, headers=headers).status_code == 409
+    assert PeopleStore(root).list() == []
+    # A portrait submitted to TMDb can be verified on the next search.
+    state["profiles"] = [{"file_path": "/submitted.jpg"}]
+    person = client.get("/api/people/search?q=2026").get_json()["people"][0]
+    assert person["can_add"] and person["tmdb_image"]["preview_url"].endswith("/submitted.jpg")
+    assert client.post("/api/people/request", json={"tmdb_id": 2026}, headers=headers).status_code == 201
+    assert client.get("/api/people/export?tags=TMDb+Ready").get_data(as_text=True).splitlines() == ["2026|Lupita Nyong'o"]
+
+
+def test_failed_profile_verification_does_not_offer_or_accept_new_requests(service):
+    state, create, root, _ = service
+    state.update(profile=None, profiles_offline=True)
+    client, headers = visitor(create())
+    person = client.get("/api/people/search?q=777").get_json()["people"][0]
+    assert not person["can_add"] and person["tmdb_image_status"] == "unknown"
+    assert person["metadata_tags"] == ["TMDb verification pending"]
+    assert "verification is unavailable" in person["request_unavailable_reason"]
+    assert submit(client, headers).status_code == 409
+    assert PeopleStore(root).list() == []
+
+
+def test_legacy_requests_without_artwork_stay_requested_and_join_ready_when_artwork_appears(service):
+    state, create, root, _ = service
+    state.update(profile=None, profiles=[])
+    store = PeopleStore(root)
+    store.upsert(
+        {
+            "key": "tmdb-777",
+            "tmdb_id": 777,
+            "name": "Lupita Nyong'o",
+            "manual_requests": [{"id": None, "name": None, "requested_at": "original"}],
+            "provenance_tags": ["Manually Added"],
+        }
+    )
+    original = (root / "people.json").read_bytes()
+    client, headers = visitor(create())
+    person = client.get("/api/people/search?q=777").get_json()["people"][0]
+    assert person["already_added"] and not person["can_add"]
+    assert submit(client, headers).get_json()["message"] == "Already requested"
+    assert (root / "people.json").read_bytes() == original
+    assert client.get("/api/people/export?tags=TMDb+Ready").data == b""
+    state["profile"] = "/new-artwork.jpg"
+    assert client.get("/api/people/export?tags=TMDb+Ready").get_data(as_text=True).splitlines() == ["777|Lupita Nyong'o"]
+    assert store.list()[0]["manual_requests"][0]["requested_at"] == "original"
+
+
+def test_profile_removed_between_search_and_submission_does_not_create_request(service):
+    state, create, root, _ = service
+    client, headers = visitor(create())
+    assert client.get("/api/people/search?q=777").get_json()["people"][0]["can_add"]
+    state.update(profile=None, profiles=[])
+    assert submit(client, headers).status_code == 409
+    assert PeopleStore(root).list() == []
 
 
 def test_unknown_inventory_after_request_does_not_remain_ready(service):
