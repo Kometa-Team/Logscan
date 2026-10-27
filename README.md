@@ -197,9 +197,10 @@ the current queue. Name searches offer up to 20 TMDb identities before selection
 Search results reuse the People card: the TMDb image is visible, and the seven
 Kometa styles are collapsed with previews, original-image links, and explicit
 missing or unavailable states. Select **Request poster** when at least one style
-is verified missing. **Already requested** prevents repeat submissions by the
-same visitor identity. Different Discord accounts can request the same person
-without duplicating their People record.
+is verified missing. **Already requested** applies to everyone once a manual
+request exists for that TMDb ID. Signing in or changing Discord accounts does
+not create another request or change the original attribution. Existing requester
+and discovery history is retained.
 
 Requests join the existing `people.json` records and preserve discovery history.
 Anonymous requests show **Manually Added**; authenticated requests also show

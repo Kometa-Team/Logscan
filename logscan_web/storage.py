@@ -765,12 +765,16 @@ class PeopleStore:
     def upsert(self, person: dict) -> dict:
         return self.upsert_with_status(person)[0]
 
-    def upsert_with_status(self, person: dict) -> tuple[dict, bool]:
+    def upsert_with_status(self, person: dict, *, manual_request_once: bool = False) -> tuple[dict, bool]:
         from .people_images import person_name_key
 
         with self.transactions._transaction():
             people = self._read()
             existing = next((item for item in people if item["key"] == person["key"] or (person.get("tmdb_id") and item.get("tmdb_id") == person["tmdb_id"])), None)
+            # Public requests are person-level, including simultaneous requests
+            # from different sessions. Keep the original attribution untouched.
+            if manual_request_once and existing and existing.get("manual_requests"):
+                return existing.copy(), False
             if existing is None and not person.get("manual_requests"):
                 incoming_names = {person_name_key(person.get(field)) for field in ("name", "original_name") if person.get(field)}
                 name_matches = [

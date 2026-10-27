@@ -1897,8 +1897,7 @@ def create_app() -> Flask:
     def poster_search_payload(details: dict) -> dict:
         person = popular_people_payload([details], {})[0]
         record = next((item for item in people_store.list() if item.get("tmdb_id") == details["id"]), {})
-        actor_id = (discord_session_user() or {}).get("id")
-        person["already_added"] = any(entry.get("id") == actor_id for entry in record.get("manual_requests", []))
+        person["already_added"] = bool(record.get("manual_requests"))
         person["can_add"] = person["people_image_status"] == "incomplete"
         person["sources"] = ["missing"] if person["can_add"] else []
         person["metadata_tags"] = ["TMDb Ready"] if person["can_add"] and person.get("tmdb_image") else []
@@ -1955,6 +1954,9 @@ def create_app() -> Flask:
         limited = public_people_limit("request")
         if limited:
             return limited
+        existing = next((item for item in people_store.list() if item.get("tmdb_id") == payload["tmdb_id"]), {})
+        if existing.get("manual_requests"):
+            return jsonify(tmdb_id=payload["tmdb_id"], already_added=True, message="Already requested")
         details, status = verified_person(payload["tmdb_id"])
         if details is None:
             return jsonify(error="Unable to verify this person with TMDb. Please try again later."), status
@@ -1980,7 +1982,8 @@ def create_app() -> Flask:
                     "requested_by": [{"id": user["id"], "name": user["username"]}] if user else [],
                     "style_availability": person["style_availability"],
                     "people_image_status": person["people_image_status"],
-                }
+                },
+                manual_request_once=True,
             )
         except (OSError, ValueError):
             app.logger.warning("Unable to persist manual People request.")
