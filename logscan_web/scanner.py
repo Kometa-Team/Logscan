@@ -28,6 +28,7 @@ MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_DEPTH = 3
 STREAM_SCAN_THRESHOLD = 64 * 1024 * 1024
 ALLOWED_SUFFIXES = {".txt", ".log", ".yml", ".yaml"}
+LEGACY_ROTATION_SUFFIXES = {f".{number}" for number in range(1, 10)}
 ARCHIVE_SUFFIXES = {
     ".zip",
     ".7z",
@@ -44,6 +45,14 @@ ARCHIVE_SUFFIXES = {
 
 class ScanError(ValueError):
     pass
+
+
+def is_supported_filename(filename: str, *, include_archives: bool = True) -> bool:
+    """Match Discord's .1 through .9 suffixes alongside supported text and archives."""
+    suffixes = ALLOWED_SUFFIXES | LEGACY_ROTATION_SUFFIXES
+    if include_archives:
+        suffixes |= ARCHIVE_SUFFIXES
+    return filename.lower().endswith(tuple(suffixes))
 
 
 def detect_log_tool(content) -> str:
@@ -130,7 +139,7 @@ def _validate_archive_names(names: list[str]) -> list[str]:
     for name in names:
         path = PurePosixPath(name.replace("\\", "/"))
         if not name.endswith(("/", "\\")):
-            if not path.is_absolute() and ".." not in path.parts and path.suffix.lower() in ALLOWED_SUFFIXES | ARCHIVE_SUFFIXES:
+            if not path.is_absolute() and ".." not in path.parts and is_supported_filename(name):
                 files.append(name)
     if not files:
         raise ScanError("The archive does not contain any files to scan.")
@@ -325,6 +334,8 @@ def _extract_7z(filename: str, content_bytes: bytes, archive_depth: int) -> tupl
 
 def prepare_scan_input(filename: str, content_bytes: bytes, archive_depth: int = 0) -> tuple[str, bytes]:
     """Validate an upload and return the text that should be stored and scanned."""
+    if not is_supported_filename(filename):
+        raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")
     suffix = Path(filename).suffix.lower()
     if suffix in ARCHIVE_SUFFIXES or filename.lower().endswith((".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz", ".tar.zst")):
         if archive_depth >= MAX_ARCHIVE_DEPTH:
@@ -346,8 +357,6 @@ def prepare_scan_input(filename: str, content_bytes: bytes, archive_depth: int =
         return _extract_xz(filename, content_bytes, archive_depth + 1)
     if suffix == ".zst":
         return _extract_zstandard(filename, content_bytes, archive_depth + 1)
-    if suffix not in ALLOWED_SUFFIXES and not suffix.lstrip(".").isdigit():
-        raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")
     return filename, content_bytes
 
 
@@ -1433,7 +1442,7 @@ def scan_archive_path(filename: str, path: Path) -> list[tuple[str, bytes | Path
             results = []
             with tarfile.open(path, mode="r:*") as archive:
                 for entry in archive.getmembers():
-                    if not entry.isfile() or Path(entry.name).suffix.casefold() not in ALLOWED_SUFFIXES:
+                    if not entry.isfile() or not is_supported_filename(entry.name, include_archives=False):
                         continue
                     source = archive.extractfile(entry)
                     if source is not None:
@@ -1467,7 +1476,7 @@ def scan_archive_path(filename: str, path: Path) -> list[tuple[str, bytes | Path
         finally:
             if compressed is not None:
                 compressed.close()
-    if suffix in ALLOWED_SUFFIXES and path.stat().st_size >= STREAM_SCAN_THRESHOLD:
+    if is_supported_filename(filename, include_archives=False) and path.stat().st_size >= STREAM_SCAN_THRESHOLD:
         return [(filename, path, _scan_large_path(filename, path))]
     return scan_archive_logs(filename, path.read_bytes())
 
@@ -1490,7 +1499,7 @@ def scan_archive_logs(filename: str, content_bytes: bytes) -> list[tuple[str, by
                     results = []
                     for entry in entries:
                         with archive.open(entry) as member:
-                            if entry.file_size >= STREAM_SCAN_THRESHOLD and Path(entry.filename).suffix.lower() in ALLOWED_SUFFIXES:
+                            if entry.file_size >= STREAM_SCAN_THRESHOLD and is_supported_filename(entry.filename, include_archives=False):
                                 temporary = tempfile.NamedTemporaryFile(prefix="logscan-", suffix=".log", delete=False)
                                 temporary_path = Path(temporary.name)
                                 try:
@@ -1554,7 +1563,7 @@ def _find_scannable_tar_path(path: Path) -> list[tuple[str, int]]:
         with tarfile.open(path, mode="r:*") as archive:
             found = []
             for entry in archive.getmembers():
-                if not entry.isfile() or Path(entry.name).suffix.lower() not in ALLOWED_SUFFIXES:
+                if not entry.isfile() or not is_supported_filename(entry.name, include_archives=False):
                     continue
                 member = archive.extractfile(entry)
                 if member is not None:
@@ -1622,6 +1631,8 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
         raise ScanError("The selected file is empty.")
     if size > MAX_FILE_BYTES:
         raise ScanError("The selected file is larger than the 1 GB limit.")
+    if not is_supported_filename(filename):
+        raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")
     lowered_filename = filename.lower()
     suffix = Path(filename).suffix.lower()
     tar_suffixes = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
@@ -1637,8 +1648,6 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
             return [(prepared_name, len(prepared_content))]
         raise ScanError("The archive does not contain a complete Kometa log file.")
     if suffix != ".zip":
-        if suffix not in ALLOWED_SUFFIXES:
-            raise ScanError("Choose a Kometa log, text, YAML, ZIP, 7-Zip, TAR, GZIP, BZIP2, XZ, or Zstandard file.")
         with path.open("rb") as source:
             if _stream_contains_kometa_marker(source):
                 return [(filename, size)]
@@ -1647,7 +1656,7 @@ def find_scannable_upload_path(filename: str, path: Path) -> list[tuple[str, int
         with zipfile.ZipFile(path) as archive:
             found = []
             for entry in archive.infolist():
-                if entry.is_dir() or Path(entry.filename).suffix.lower() not in ALLOWED_SUFFIXES:
+                if entry.is_dir() or not is_supported_filename(entry.filename, include_archives=False):
                     continue
                 with archive.open(entry) as member:
                     if _stream_contains_kometa_marker(member):
@@ -1668,7 +1677,7 @@ def find_scannable_archive_logs(filename: str, content_bytes: bytes) -> list[tup
         with zipfile.ZipFile(BytesIO(content_bytes)) as archive:
             found = []
             for entry in archive.infolist():
-                if entry.is_dir() or Path(entry.filename).suffix.lower() not in ALLOWED_SUFFIXES:
+                if entry.is_dir() or not is_supported_filename(entry.filename, include_archives=False):
                     continue
                 if entry.file_size >= STREAM_SCAN_THRESHOLD:
                     marker_found = False
