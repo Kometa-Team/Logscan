@@ -258,9 +258,14 @@ confirms that a style is missing. Results store the Git revision or index hash a
 verification time. Complete file checks are cached for one hour. Unverified
 omissions remain unknown and never clear outstanding candidates. Failed checks,
 partial listings, and index fallbacks retry on the next refresh after five minutes
-without refetching fresh styles. No per-person image requests are needed.
-An optional `GITHUB_TOKEN` increases API limits; the raw index fallback does not
-require it. Unknown statuses explain the failed checks.
+without refetching fresh styles. When an inventory cannot verify a person's
+images, Logscan checks their standard raw image URLs with small HEAD requests.
+Existing images become available even when GitHub's API is rate limited and the
+README is outdated. Failed URL checks stay unknown; they never prove an image is
+missing. Successful URL checks are cached for one hour and failures for five minutes.
+An optional `GITHUB_TOKEN` increases API limits and is passed through by the Saltbox
+Compose file; raw image checks and the index fallback do not require it. Unknown
+statuses explain the failed checks.
 
 People advice retains both earlier outcomes: posters already available (check
 the failed update) and missing posters needing creation (review the People

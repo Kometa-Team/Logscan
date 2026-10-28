@@ -32,6 +32,7 @@ from .people_images import (
     parse_people_readme,
     person_name_key as _person_name_key,
     tmdb_image_path,
+    verify_people_image_urls,
 )
 from .config_optimizer import optimize_config
 from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
@@ -435,6 +436,8 @@ def create_app() -> Flask:
     app.register_blueprint(create_support_blueprint(store, RETENTION_SECONDS))
     kometa_images_cache = {"expires_at": 0.0, "images": {}, "entries": {}}
     kometa_images_lock = threading.Lock()
+    kometa_image_probes = {}
+    kometa_image_probes_lock = threading.Lock()
     popular_people_cache = {"expires_at": 0.0, "snapshot_id": "", "people": []}
     popular_people_lock = threading.Lock()
     popular_people_refreshing = False
@@ -495,7 +498,7 @@ def create_app() -> Flask:
             app.logger.warning("TMDb lookup failed for %s", path)
             return None
 
-    def kometa_image_urls() -> dict[str, dict[str, str]]:
+    def _kometa_image_urls() -> dict[str, dict[str, str]]:
         """Map each image source to its case-insensitive person-name URLs."""
         with kometa_images_lock:
             if kometa_images_cache["expires_at"] > time.monotonic():
@@ -578,7 +581,7 @@ def create_app() -> Flask:
                     try:
                         inventory = fetch_partitioned_inventory(style, headers)
                         if inventory is not None:
-                            return style.label, inventory, None
+                            return style.label, inventory, None if inventory.complete else failure
                     except (OSError, ValueError, HTTPException):
                         pass
                     failure += " The directory file inventories could not be verified."
@@ -591,7 +594,7 @@ def create_app() -> Flask:
                         else:
                             inventory = parse_people_readme(style, response.read().decode("utf-8"))
                             if inventory is not None:
-                                return style.label, inventory, None
+                                return style.label, inventory, failure
                             index_failure = "The repository image index was incomplete."
                 except HTTPError as exc:
                     index_failure = f"The repository image index failed (HTTP {exc.code})."
@@ -616,6 +619,13 @@ def create_app() -> Flask:
             )
             kometa_images_cache.update(expires_at=min(entry["expires_at"] for entry in entries.values()), images=images)
             return images
+
+    def kometa_image_urls(candidates=()) -> dict[str, dict[str, str]]:
+        inventories = _kometa_image_urls()
+        if not candidates:
+            return inventories
+        with kometa_image_probes_lock:
+            return verify_people_image_urls(candidates, inventories, open_url=urlopen, cache=kometa_image_probes)
 
     def imdb_starmeter_people() -> list[dict]:
         """Resolve IMDb's current StarMeter chart entries to TMDb people."""
@@ -739,7 +749,7 @@ def create_app() -> Flask:
         return popular
 
     def record_automated_popular_requests(people: list[dict]) -> int:
-        images = kometa_image_urls()
+        images = kometa_image_urls(people)
         if not images:
             app.logger.warning("Automated Top 250 requests skipped; people-image sources are unavailable.")
             return 0
@@ -827,7 +837,7 @@ def create_app() -> Flask:
 
     def popular_people_payload(people: list[dict], flags: dict[int, dict[str, str]]) -> list[dict]:
         """Build display data only for the currently requested page of people."""
-        kometa_images = kometa_image_urls()
+        kometa_images = kometa_image_urls(people)
         payload = []
         for person in people:
             person_id = person.get("id")
@@ -983,14 +993,16 @@ def create_app() -> Flask:
 
     def people_union(sources: set[str]) -> list[dict]:
         """Return missing-log and trending people, keyed by TMDb ID."""
-        inventories = kometa_image_urls()
+        records = people_store.list()
+        trending = popular_people() if sources & {"missing", "trending"} and app.config["TMDB_API_KEY"] else []
+        inventories = kometa_image_urls([*records, *trending])
         combined: dict[str, dict] = {}
         excluded_ids = popular_people_exclusions.list()
         checked_ids = popular_people_checks.active_ids(POPULAR_PEOPLE_CHECK_SECONDS)
-        manually_completed_ids = {record.get("tmdb_id") for record in people_store.list() if record.get("manually_completed")}
+        manually_completed_ids = {record.get("tmdb_id") for record in records if record.get("manually_completed")}
 
         if sources & {"missing", "trending"} and app.config["TMDB_API_KEY"]:
-            for person in popular_people():
+            for person in trending:
                 if not _has_current_tmdb_image(person):
                     continue
                 missing_image = person["id"] not in manually_completed_ids and assess_people_images(person, inventories)["people_image_status"] == "incomplete"
@@ -1300,7 +1312,7 @@ def create_app() -> Flask:
                     result.overview[key] = previous_overview[key]
 
             if result.missing_people:
-                inventories = kometa_image_urls()
+                inventories = kometa_image_urls(result.missing_people)
                 add_missing_people_recommendations(result, result.missing_people, inventories, "/people?tags=Missing+Kometa")
                 save_missing_people(
                     _people_needing_repository_images(result.missing_people, inventories),
@@ -1743,7 +1755,7 @@ def create_app() -> Flask:
             missing_candidates = result.missing_people
             repository_people = None
             if missing_candidates:
-                repository_people = kometa_image_urls()
+                repository_people = kometa_image_urls(missing_candidates)
                 people_tags = ["Missing Kometa"]
                 if uploaded_by:
                     people_tags.append(f"Requested by {uploaded_by}")
