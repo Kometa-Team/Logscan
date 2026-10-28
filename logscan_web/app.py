@@ -924,7 +924,9 @@ def create_app() -> Flask:
         if "trending" in person.get("sources", []):
             discovery.append("Trending")
         discovery.extend(person.get("provenance_tags", []))
-        availability = ["Missing Kometa"] if "missing" in person.get("sources", []) else []
+        availability = []
+        if "missing" in person.get("sources", []):
+            availability = ["Kometa verification pending" if person.get("people_image_status") == "pending_verification" else "Missing Kometa"]
         return {
             "availability": availability,
             "discovery": discovery,
@@ -934,8 +936,6 @@ def create_app() -> Flask:
 
     def searchable_people_tags(person: dict) -> list[str]:
         tags = list(person.get("sources", []))
-        if "missing" in tags:
-            tags.append("Missing Kometa")
         groups = categorized_people_tags(person)
         for values in groups.values():
             tags.extend(values)
@@ -1050,7 +1050,12 @@ def create_app() -> Flask:
             metadata_tags = []
             tmdb_ready = (bool(item.get("tmdb_image")) or bool(record.get("tmdb_image_found"))) and item["people_image_status"] == "incomplete"
             if "missing" in sources:
-                metadata_tags.append("TMDb Ready" if tmdb_ready else "Missing TMDb" if item["tmdb_image_status"] == "missing" else "TMDb verification pending")
+                if tmdb_ready:
+                    metadata_tags.append("TMDb Ready")
+                elif item["tmdb_image_status"] == "missing":
+                    metadata_tags.append("Missing TMDb")
+                elif item["tmdb_image_status"] == "unknown":
+                    metadata_tags.append("TMDb verification pending")
             requesters = record.get("requested_by", [])
             if record and not requesters:
                 requesters = [{"name": "Unknown", "id": None}]
@@ -2104,7 +2109,9 @@ def create_app() -> Flask:
         export = "\n".join(
             f"{person['tmdb_id']}|{person.get('original_name', person['name'])}"
             for person in candidates
-            if person.get("tmdb_id") and not {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
+            if person.get("tmdb_id")
+            and person.get("people_image_status") != "pending_verification"
+            and not {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
         )
         return send_file(
             BytesIO(export.encode("utf-8")),

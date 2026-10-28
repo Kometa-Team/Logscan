@@ -36,7 +36,8 @@ test("distinguishes verified completeness from pending verification", () => {
 
 test("pending verification does not claim artwork is confirmed missing", () => {
   const badges = context.sourceBadges(["missing"], [], [], [], null, "pending_verification");
-  assert.equal(badges.children[0].textContent, "Pending verification");
+  assert.equal(badges.children[0].textContent, "Kometa verification pending");
+  assert.match(badges.children[0].title, /Kometa repository.*retries automatically/);
 });
 
 test("log image previews have a source label and lookup failures do not claim absence", () => {

@@ -431,6 +431,15 @@ def test_unknown_inventory_after_request_does_not_remain_ready(service):
     assert submit(client, headers).status_code == 201
     state.update(missing=set(), unavailable={style.key for style in PEOPLE_IMAGE_STYLES})
     client, _ = visitor(create())
+    person = next(person for person in client.get("/api/people").get_json()["people"] if person["tmdb_id"] == 777)
+    assert person["tmdb_image_status"] == "available"
+    assert person["metadata_tags"] == []
+    pending = client.get("/api/people?tags=Kometa+verification+pending").get_json()
+    assert [person["tmdb_id"] for person in pending["people"]] == [777]
+    assert {"category": "availability", "tag": "Kometa verification pending", "count": 1} in pending["available_tags"]
+    assert client.get("/api/people?tags=TMDb+verification+pending").get_json()["people"] == []
+    assert client.get("/api/people?tags=Missing+Kometa").get_json()["people"] == []
+    assert client.get("/api/people/export").data == b""
     assert client.get("/api/people/export?tags=TMDb+Ready").data == b""
     assert PeopleStore(root).list()[0]["people_image_status"] == "pending_verification"
 
