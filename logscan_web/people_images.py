@@ -50,9 +50,10 @@ PEOPLE_IMAGE_STYLES = (
 class PeopleImageInventory(dict):
     """Name index with the Git revision and time successfully verified."""
 
-    def __init__(self, images: dict[str, str], revision: str):
+    def __init__(self, images: dict[str, str], revision: str, *, complete: bool = True):
         super().__init__(images)
         self.revision = revision
+        self.complete = complete
         self.checked_at = datetime.now(UTC).isoformat()
 
 
@@ -129,7 +130,7 @@ def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] 
     """Validate a repository's generated image index when GitHub's tree API fails.
 
     Every declared image must be listed and point into the expected repository.
-    Truncated or malformed documents cannot confirm absence.
+    Even a valid index can lag behind poster syncs, so it cannot confirm absence.
     """
     header = re.search(r"^# Kometa People Images[^\n]*\(([\d,]+) Images\)\s*$", readme, re.M)
     if not header:
@@ -147,7 +148,7 @@ def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] 
         if parsed is None or parsed[0] != style:
             return None
         images[person_name_key(parsed[1])] = url
-    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest())
+    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest(), complete=False)
 
 
 def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]] | None) -> dict:
@@ -162,6 +163,8 @@ def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]]
             status = "unknown"
         else:
             status = "present" if any(name in inventory for name in names) else "missing"
+            if status == "missing" and isinstance(inventory, PeopleImageInventory) and not inventory.complete:
+                status = "unknown"
         availability[style.key] = {"label": style.label, "repository": style.repository, "status": status}
         if status == "present":
             url = next(inventory[name] for name in sorted(names) if name in inventory)
@@ -169,7 +172,11 @@ def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]]
             if parsed and parsed[0] == style:
                 availability[style.key]["image_url"] = url
         if status == "unknown":
-            availability[style.key]["reason"] = getattr(inventories, "errors", {}).get(style.label, "Repository inventory has not been verified.")
+            availability[style.key]["reason"] = (
+                "The repository inventory may be incomplete or outdated; absence has not been verified against the current files."
+                if isinstance(inventory, PeopleImageInventory) and not inventory.complete
+                else getattr(inventories, "errors", {}).get(style.label, "Repository inventory has not been verified.")
+            )
         if isinstance(inventory, PeopleImageInventory):
             availability[style.key].update(checked_at=inventory.checked_at, revision=inventory.revision)
     states = {item["status"] for item in availability.values()}

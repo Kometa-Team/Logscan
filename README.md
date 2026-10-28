@@ -246,13 +246,19 @@ style uses PNG assets and the other styles use JPG assets. Legacy root image
 URLs remain recognized. No person-specific applicability exclusions are
 currently declared. Compact card details show each style's availability.
 
-The service loads complete GitHub file trees in batches of four. If the API
-fails, it uses each repository's generated image index after checking the
-declared image count and every image URL. Successful checks are cached for one
-hour and store the Git revision or index hash and verification time. Failed,
-truncated, malformed, or expired inventories remain unknown; they never clear
-outstanding candidates. Failed styles retry on the next refresh after five
-minutes without refetching fresh styles. No per-person image requests are needed.
+The service loads complete GitHub file trees in batches of four. If a recursive
+tree fails with a server error or is incomplete, it reads smaller directory trees
+from the same repository revision. If a directory fails, verified images from
+other directories remain available, but omitted people stay unknown. Retries reuse
+verified directory contents when the fresh root listing confirms the same Git hash.
+If the root listing fails, it uses each repository's generated image index after
+checking the declared image count and every image URL.
+Poster syncs can skip README updates, so an index omission stays unknown and never
+confirms that a style is missing. Results store the Git revision or index hash and
+verification time. Complete file checks are cached for one hour. Unverified
+omissions remain unknown and never clear outstanding candidates. Failed checks,
+partial listings, and index fallbacks retry on the next refresh after five minutes
+without refetching fresh styles. No per-person image requests are needed.
 An optional `GITHUB_TOKEN` increases API limits; the raw index fallback does not
 require it. Unknown statuses explain the failed checks.
 
