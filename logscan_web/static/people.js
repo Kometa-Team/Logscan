@@ -74,7 +74,10 @@ function sourceBadges(sources = [], requesters = [], metadataTags = [], provenan
   sources.forEach((source) => {
     const badge = document.createElement("span");
     badge.className = `source-badge ${source}`;
-    badge.textContent = source === "missing" ? imageStatus === "pending_verification" ? "Pending verification" : "Missing Kometa" : source[0].toUpperCase() + source.slice(1);
+    badge.textContent = source === "missing" ? imageStatus === "pending_verification" ? "Kometa verification pending" : "Missing Kometa" : source[0].toUpperCase() + source.slice(1);
+    if (source === "missing" && imageStatus === "pending_verification") {
+      badge.title = "A Kometa repository check could not finish. Logscan retries automatically after five minutes.";
+    }
     badges.append(badge);
   });
   metadataTags.forEach((tag) => {
