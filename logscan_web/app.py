@@ -36,13 +36,13 @@ from .people_images import (
 from .config_optimizer import optimize_config
 from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
 from .scanner import (
-    ALLOWED_SUFFIXES,
     ARCHIVE_SUFFIXES,
     MAX_FILE_BYTES,
     ScanError,
     extract_quickstart_metadata,
     find_scannable_archive_logs,
     find_scannable_upload_path,
+    is_supported_filename,
     prepare_scan_input,
     scan_archive_logs,
     scan_archive_path,
@@ -1634,7 +1634,7 @@ def create_app() -> Flask:
                     if entry.is_dir() or entry.filename in scanned_names:
                         continue
                     suffix = Path(entry.filename).suffix.lower()
-                    if suffix not in ALLOWED_SUFFIXES | ARCHIVE_SUFFIXES and not suffix.lstrip(".").isdigit():
+                    if not is_supported_filename(entry.filename):
                         reason = "Bad file extension"
                     else:
                         with archive.open(entry) as member:
