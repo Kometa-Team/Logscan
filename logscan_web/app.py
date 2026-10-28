@@ -501,8 +501,58 @@ def create_app() -> Flask:
             if kometa_images_cache["expires_at"] > time.monotonic():
                 return kometa_images_cache["images"]
 
+            def fetch_partitioned_inventory(style, headers):
+                # Large recursive trees can fail with HTTP 500. Read smaller,
+                # immutable subtrees from one root snapshot instead.
+                tree_url = style.inventory_url.split("?", 1)[0]
+
+                def read_tree(url):
+                    with urlopen(Request(url, headers=headers), timeout=10) as response:
+                        if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
+                            raise ValueError("Expired file inventory")
+                        return json.loads(response.read().decode("utf-8"))
+
+                root = read_tree(tree_url)
+                if parse_people_inventory(style, root) is None:
+                    return None
+                directories = [entry for entry in root["tree"] if entry["type"] == "tree"]
+                if any(not re.fullmatch(r"[0-9a-f]{40}", str(entry.get("sha", ""))) for entry in directories):
+                    return None
+                cached_directories = kometa_images_cache.setdefault("directories", {}).setdefault(style.label, {})
+                current_paths = {entry["path"] for entry in directories}
+                for path in list(cached_directories):
+                    if path not in current_paths:
+                        del cached_directories[path]
+
+                def read_directory(entry):
+                    subtree = cached_directories.get(entry["path"])
+                    # A fresh root listing confirms unchanged immutable contents.
+                    if subtree is None or subtree["sha"] != entry["sha"]:
+                        try:
+                            subtree = read_tree(f"{tree_url.rsplit('/', 1)[0]}/{entry['sha']}?recursive=1")
+                        except (OSError, ValueError, HTTPException):
+                            return None
+                        if parse_people_inventory(style, subtree) is None or subtree["sha"] != entry["sha"]:
+                            return None
+                        cached_directories[entry["path"]] = subtree
+                    return [{**child, "path": f"{entry['path']}/{child['path']}"} for child in subtree["tree"]]
+
+                entries = list(root["tree"])
+                complete = True
+                with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-subtree") as executor:
+                    for children in executor.map(read_directory, directories):
+                        if children is None:
+                            complete = False
+                        else:
+                            entries.extend(children)
+                inventory = parse_people_inventory(style, {**root, "tree": entries})
+                if inventory is not None:
+                    inventory.complete = complete
+                return inventory
+
             def fetch_inventory(style):
                 failure = "GitHub returned an incomplete file inventory."
+                partitioned = False
                 headers = {"Accept": "application/vnd.github+json", "User-Agent": "Kometa-Logscan/1.0"}
                 if app.config["GITHUB_TOKEN"]:
                     headers["Authorization"] = f"Bearer {app.config['GITHUB_TOKEN']}"
@@ -514,7 +564,9 @@ def create_app() -> Flask:
                             inventory = parse_people_inventory(style, json.loads(response.read().decode("utf-8")))
                             if inventory is not None:
                                 return style.label, inventory, None
+                            partitioned = True
                 except HTTPError as exc:
+                    partitioned = exc.code >= 500
                     failure = (
                         "GitHub rate limit reached."
                         if exc.code == 429 or (exc.headers or {}).get("X-RateLimit-Remaining") == "0"
@@ -522,8 +574,16 @@ def create_app() -> Flask:
                     )
                 except (OSError, ValueError, HTTPException):
                     failure = "GitHub file inventory could not be reached."
-                # These repositories maintain complete generated image indexes.
-                # Fetching raw content also works when recursive tree requests fail.
+                if partitioned:
+                    try:
+                        inventory = fetch_partitioned_inventory(style, headers)
+                        if inventory is not None:
+                            return style.label, inventory, None
+                    except (OSError, ValueError, HTTPException):
+                        pass
+                    failure += " The directory file inventories could not be verified."
+                # Generated indexes can lag behind syncs that skip README updates.
+                # They supply image URLs, but cannot establish that a person is absent.
                 try:
                     with urlopen(Request(style.readme_url, headers={"Accept": "text/plain", "User-Agent": "Kometa-Logscan/1.0"}), timeout=10) as response:
                         if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
@@ -548,7 +608,7 @@ def create_app() -> Flask:
                     entries[label] = {
                         "inventory": inventory,
                         "error": error,
-                        "expires_at": time.monotonic() + (KOMETA_IMAGE_CACHE_SECONDS if inventory is not None else KOMETA_IMAGE_RETRY_SECONDS),
+                        "expires_at": time.monotonic() + (KOMETA_IMAGE_CACHE_SECONDS if inventory is not None and inventory.complete else KOMETA_IMAGE_RETRY_SECONDS),
                     }
             images = PeopleImageInventories(
                 {label: entry["inventory"] for label, entry in entries.items() if entry["inventory"] is not None},
