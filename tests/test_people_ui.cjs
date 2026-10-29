@@ -195,6 +195,19 @@ test("complete and unavailable inventories have no request button and keep seven
   }
 });
 
+test("README omissions show not listed while unavailable checks remain distinct", async () => {
+  const person = searchPerson();
+  person.style_availability.bw = { label: "BW", status: "missing", verification_source: "readme_index", reason: "Not listed in the repository's generated README index." };
+  person.style_availability.transparent = { label: "Transparent", status: "unknown", reason: "Index unavailable." };
+  const harness = searchHarness([{ people: [person] }]);
+  await harness.search("777");
+  const grid = descendants(harness.ids["poster-search-result"], (node) => node.className === "poster-style-gallery")[0];
+  assert.equal(descendants(grid, (node) => node.textContent === "Not listed").length, 1);
+  assert.equal(grid.children[1].title, person.style_availability.bw.reason);
+  assert.equal(descendants(grid, (node) => node.textContent === "Verification unavailable").length, 1);
+  assert.equal(descendants(grid, (node) => node.textContent === "Missing").length, 2);
+});
+
 test("duplicate requests stay disabled and failed requests can be retried with a visible error", async () => {
   const duplicate = searchHarness([{ people: [searchPerson("incomplete", true)] }]);
   await duplicate.search("777");

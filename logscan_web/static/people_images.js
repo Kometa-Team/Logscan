@@ -12,7 +12,7 @@ window.PeopleImages = {
         const label = document.createElement("div");
         label.className = "image-label";
         label.textContent = style.label;
-        tile.append(this.noImage(style.status === "missing" ? "Missing" : style.status === "not_applicable" ? "Not applicable" : "Verification unavailable"), label);
+        tile.append(this.noImage(style.status === "missing" ? (style.verification_source === "readme_index" ? "Not listed" : "Missing") : style.status === "not_applicable" ? "Not applicable" : "Verification unavailable"), label);
         if (style.reason) tile.title = style.reason;
       }
       grid.append(tile);
