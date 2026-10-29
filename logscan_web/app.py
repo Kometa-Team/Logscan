@@ -29,7 +29,6 @@ from .people_images import (
     PeopleImageInventories,
     assess_people_images,
     parse_people_inventory,
-    parse_people_readme,
     person_name_key as _person_name_key,
     tmdb_image_path,
     verify_people_image_urls,
@@ -37,6 +36,7 @@ from .people_images import (
 from .config_optimizer import optimize_config
 from .github_inventory import GitHubInventoryCache
 from .people_loading import PeopleLoader
+from .people_readme import PeopleReadmeCache
 from .recommendations import SCHEMA_CACHE_SECONDS, _load_config_schema, has_yaml_language_server_directive, schema_branch_for_log, schema_fingerprint, validate_redacted_config
 from .scanner import (
     ARCHIVE_SUFFIXES,
@@ -436,8 +436,9 @@ def create_app() -> Flask:
     popular_people_store = PopularPeopleCacheStore(app.config["SCAN_STORE"])
     tmdb_find_cache = TMDbFindCacheStore(app.config["SCAN_STORE"])
     app.register_blueprint(create_support_blueprint(store, RETENTION_SECONDS))
-    kometa_images_cache = {"expires_at": 0.0, "images": {}, "entries": {}}
+    kometa_images_cache = {"images": {}, "entries": {}}
     github_inventory_cache = GitHubInventoryCache(Path(app.config["SCAN_STORE"]) / ".github-inventory-cache" / hashlib.sha256(app.config["GITHUB_TOKEN"].encode()).hexdigest()[:16])
+    people_readme_cache = PeopleReadmeCache(Path(app.config["SCAN_STORE"]) / ".people-readme-cache", max_age=KOMETA_IMAGE_CACHE_SECONDS)
     kometa_images_lock = threading.Lock()
     kometa_image_probes = {}
     kometa_image_probes_lock = threading.Lock()
@@ -504,10 +505,25 @@ def create_app() -> Flask:
             app.logger.warning("TMDb lookup failed for %s", path)
             return None
 
-    def _kometa_image_urls(progress=None) -> dict[str, dict[str, str]]:
+    def _kometa_image_urls(progress=None, *, candidates=()) -> dict[str, dict[str, str]]:
         """Map each image source to its case-insensitive person-name URLs."""
         with kometa_images_lock:
-            if kometa_images_cache["expires_at"] > time.monotonic():
+            entries = kometa_images_cache["entries"]
+
+            def has_unresolved_candidates(inventory):
+                if inventory is None:
+                    return bool(candidates)
+                if inventory.complete:
+                    return False
+                return any(not any(_person_name_key(candidate.get(field)) in inventory for field in ("name", "original_name") if candidate.get(field)) for candidate in candidates)
+
+            def needs_refresh(style):
+                entry = entries.get(style.label, {})
+                now = time.monotonic()
+                return entry.get("expires_at", 0) <= now or (entry.get("verification_expires_at", 0) <= now and has_unresolved_candidates(entry.get("inventory")))
+
+            stale = [style for style in PEOPLE_IMAGE_STYLES if needs_refresh(style)]
+            if not stale:
                 return kometa_images_cache["images"]
 
             def fetch_partitioned_inventory(style, headers):
@@ -559,7 +575,7 @@ def create_app() -> Flask:
                     inventory.complete = complete
                 return inventory
 
-            def fetch_inventory(style):
+            def fetch_file_inventory(style, index, index_failure):
                 failure = "GitHub returned an incomplete file inventory."
                 partitioned = False
                 headers = {"Accept": "application/vnd.github+json", "User-Agent": "Kometa-Logscan/1.0"}
@@ -583,7 +599,7 @@ def create_app() -> Flask:
                     )
                 except (OSError, ValueError, HTTPException):
                     failure = "GitHub file inventory could not be reached."
-                if partitioned:
+                if partitioned and index is None:
                     try:
                         inventory = fetch_partitioned_inventory(style, headers)
                         if inventory is not None:
@@ -591,27 +607,29 @@ def create_app() -> Flask:
                     except (OSError, ValueError, HTTPException):
                         pass
                     failure += " The directory file inventories could not be verified."
-                # Generated indexes can lag behind syncs that skip README updates.
-                # They supply image URLs, but cannot establish that a person is absent.
-                try:
-                    with urlopen(Request(style.readme_url, headers={"Accept": "text/plain", "User-Agent": "Kometa-Logscan/1.0"}), timeout=10) as response:
-                        if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
-                            index_failure = "The repository image index was expired."
-                        else:
-                            inventory = parse_people_readme(style, response.read().decode("utf-8"))
-                            if inventory is not None:
-                                return style.label, inventory, failure
-                            index_failure = "The repository image index was incomplete."
-                except HTTPError as exc:
-                    index_failure = f"The repository image index failed (HTTP {exc.code})."
-                except (OSError, ValueError, HTTPException):
-                    index_failure = "The repository image index could not be reached."
+                if index is not None:
+                    return style.label, index, failure
                 failure += " " + index_failure
                 app.logger.warning("Unable to verify %s: %s", style.label, failure)
                 return style.label, None, failure
 
-            entries = kometa_images_cache["entries"]
-            stale = [style for style in PEOPLE_IMAGE_STYLES if entries.get(style.label, {}).get("expires_at", 0) <= time.monotonic()]
+            def fetch_inventory(style):
+                index = None
+                index_failure = "The repository image index could not be reached."
+                try:
+                    index = people_readme_cache.load(style, open_url=urlopen)
+                except HTTPError as exc:
+                    index_failure = f"The repository image index failed (HTTP {exc.code})."
+                except ValueError as exc:
+                    index_failure = str(exc)
+                except (OSError, HTTPException):
+                    pass
+                # A valid index resolves all listed images with one raw download.
+                # Only gaps for actual candidates require a file-inventory check.
+                if index is not None and not has_unresolved_candidates(index):
+                    return style.label, index, None, False
+                return (*fetch_file_inventory(style, index, index_failure), True)
+
             completed_styles = 0
             progress_lock = threading.Lock()
 
@@ -627,21 +645,23 @@ def create_app() -> Flask:
             if progress:
                 progress("repositories", "Checking Kometa poster repositories.", 0, len(stale))
             with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-inventory") as executor:
-                for label, inventory, error in executor.map(fetch_with_progress, stale):
+                for label, inventory, error, verified in executor.map(fetch_with_progress, stale):
                     entries[label] = {
                         "inventory": inventory,
                         "error": error,
-                        "expires_at": time.monotonic() + (KOMETA_IMAGE_CACHE_SECONDS if inventory is not None and inventory.complete else KOMETA_IMAGE_RETRY_SECONDS),
+                        "expires_at": time.monotonic()
+                        + (KOMETA_IMAGE_CACHE_SECONDS if inventory is not None and (inventory.complete or inventory.revision.startswith("index:")) else KOMETA_IMAGE_RETRY_SECONDS),
+                        "verification_expires_at": time.monotonic() + KOMETA_IMAGE_RETRY_SECONDS if verified else 0,
                     }
             images = PeopleImageInventories(
                 {label: entry["inventory"] for label, entry in entries.items() if entry["inventory"] is not None},
                 errors={label: entry["error"] for label, entry in entries.items() if entry["error"]},
             )
-            kometa_images_cache.update(expires_at=min(entry["expires_at"] for entry in entries.values()), images=images)
+            kometa_images_cache["images"] = images
             return images
 
     def kometa_image_urls(candidates=(), *, progress=None, probe_seconds=None) -> dict[str, dict[str, str]]:
-        inventories = _kometa_image_urls(progress)
+        inventories = _kometa_image_urls(progress, candidates=candidates)
         if not candidates:
             return inventories
         with kometa_image_probes_lock:
@@ -777,7 +797,7 @@ def create_app() -> Flask:
     def record_automated_popular_requests(people: list[dict], progress=None) -> int:
         # Only verified inventory gaps can create requests. Unknown fallback
         # images need not delay publishing a fresh trending snapshot.
-        images = kometa_image_urls(progress=progress)
+        images = _kometa_image_urls(progress, candidates=_filtered_popular_people(people))
         if not images:
             app.logger.warning("Automated Top 250 requests skipped; people-image sources are unavailable.")
             return 0
@@ -866,7 +886,7 @@ def create_app() -> Flask:
 
     def popular_people_payload(people: list[dict], flags: dict[int, dict[str, str]], *, inventories=None) -> list[dict]:
         """Build display data only for the currently requested page of people."""
-        kometa_images = kometa_image_urls(people) if inventories is None else inventories
+        kometa_images = kometa_image_urls() if inventories is None else inventories
         payload = []
         for person in people:
             person_id = person.get("id")
@@ -1034,7 +1054,7 @@ def create_app() -> Flask:
             inventories = kometa_images_cache["images"]
         else:
             trending = popular_people(progress) if sources & {"missing", "trending"} and app.config["TMDB_API_KEY"] else []
-            inventories = kometa_image_urls([*records, *trending], progress=progress, probe_seconds=8 if progress else None)
+            inventories = kometa_image_urls(records, progress=progress, probe_seconds=8 if progress else None)
         combined: dict[str, dict] = {}
         excluded_ids = popular_people_exclusions.list()
         checked_ids = popular_people_checks.active_ids(POPULAR_PEOPLE_CHECK_SECONDS)
