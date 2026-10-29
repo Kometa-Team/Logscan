@@ -32,7 +32,7 @@ def test_readme_cache_reuses_public_indexes_across_restart(tmp_path, clock):
     assert first == restarted
     assert first.checked_at == restarted.checked_at
     assert first["bruce langley"].endswith(".png")
-    assert not restarted.complete
+    assert restarted.complete
     assert fetch.call_args.args[0].get_header("Authorization") is None
     fetch.assert_called_once()
 

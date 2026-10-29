@@ -575,7 +575,7 @@ def create_app() -> Flask:
                     inventory.complete = complete
                 return inventory
 
-            def fetch_file_inventory(style, index, index_failure):
+            def fetch_file_inventory(style, index_failure):
                 failure = "GitHub returned an incomplete file inventory."
                 partitioned = False
                 headers = {"Accept": "application/vnd.github+json", "User-Agent": "Kometa-Logscan/1.0"}
@@ -599,7 +599,7 @@ def create_app() -> Flask:
                     )
                 except (OSError, ValueError, HTTPException):
                     failure = "GitHub file inventory could not be reached."
-                if partitioned and index is None:
+                if partitioned:
                     try:
                         inventory = fetch_partitioned_inventory(style, headers)
                         if inventory is not None:
@@ -607,8 +607,6 @@ def create_app() -> Flask:
                     except (OSError, ValueError, HTTPException):
                         pass
                     failure += " The directory file inventories could not be verified."
-                if index is not None:
-                    return style.label, index, failure
                 failure += " " + index_failure
                 app.logger.warning("Unable to verify %s: %s", style.label, failure)
                 return style.label, None, failure
@@ -624,11 +622,11 @@ def create_app() -> Flask:
                     index_failure = str(exc)
                 except (OSError, HTTPException):
                     pass
-                # A valid index resolves all listed images with one raw download.
-                # Only gaps for actual candidates require a file-inventory check.
-                if index is not None and not has_unresolved_candidates(index):
+                # One full README resolves every candidate, including names not
+                # listed. Only an unavailable/invalid index needs a fallback.
+                if index is not None:
                     return style.label, index, None, False
-                return (*fetch_file_inventory(style, index, index_failure), True)
+                return (*fetch_file_inventory(style, index_failure), True)
 
             completed_styles = 0
             progress_lock = threading.Lock()
@@ -644,13 +642,12 @@ def create_app() -> Flask:
 
             if progress:
                 progress("repositories", "Checking Kometa poster repositories.", 0, len(stale))
-            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-inventory") as executor:
+            with ThreadPoolExecutor(max_workers=len(PEOPLE_IMAGE_STYLES), thread_name_prefix="people-inventory") as executor:
                 for label, inventory, error, verified in executor.map(fetch_with_progress, stale):
                     entries[label] = {
                         "inventory": inventory,
                         "error": error,
-                        "expires_at": time.monotonic()
-                        + (KOMETA_IMAGE_CACHE_SECONDS if inventory is not None and (inventory.complete or inventory.revision.startswith("index:")) else KOMETA_IMAGE_RETRY_SECONDS),
+                        "expires_at": time.monotonic() + (KOMETA_IMAGE_CACHE_SECONDS if inventory is not None and inventory.complete else KOMETA_IMAGE_RETRY_SECONDS),
                         "verification_expires_at": time.monotonic() + KOMETA_IMAGE_RETRY_SECONDS if verified else 0,
                     }
             images = PeopleImageInventories(

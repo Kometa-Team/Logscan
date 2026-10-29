@@ -279,20 +279,22 @@ def test_fallback_inventory_rejects_incomplete_or_untrusted_indexes(malformation
 
 
 @pytest.mark.parametrize("status", [403, 429, 500])
-def test_github_api_failure_uses_validated_index_and_keeps_cache(service, status):
+def test_validated_index_resolves_missing_names_without_github_api(service, status):
     state, create, root = service
     state["http_errors"] = {style.key: status for style in PEOPLE_IMAGE_STYLES}
     state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
     app = create()
     result = upload(app)
-    assert any(finding["id"] == "missing_people_images_unverified" for finding in result["recommendations"])
+    assert any(finding["id"] == "missing_people_images_pending" for finding in result["recommendations"])
     record = PeopleStore(root).list()[0]
-    assert record["people_image_status"] == "pending_verification"
-    assert record["style_availability"]["bw"]["status"] == "unknown"
-    assert "outdated" in record["style_availability"]["bw"]["reason"]
+    assert record["people_image_status"] == "incomplete"
+    assert record["style_availability"]["bw"]["status"] == "missing"
+    assert record["style_availability"]["bw"]["verification_source"] == "readme_index"
+    assert "Not listed" in record["style_availability"]["bw"]["reason"]
     upload(app, poster_error("signature"))
-    assert sum("api.github.com" in url for url in state["calls"]) == 1
+    assert not any("api.github.com" in url for url in state["calls"])
     assert sum("raw.githubusercontent.com" in url for url in state["calls"]) == 7
+    assert not state["head_calls"]
 
 
 def test_seven_readmes_resolve_all_styles_and_survive_restart(service):
@@ -313,6 +315,59 @@ def test_seven_readmes_resolve_all_styles_and_survive_restart(service):
     assert len(list((root / ".people-readme-cache").glob("*.json"))) == 7
 
 
+def test_saved_gabee_is_not_listed_in_seven_indexes_without_extra_requests(service, monkeypatch):
+    state, create, root = service
+    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    state["missing"] = set()
+    store = PeopleStore(root)
+    store.upsert({"key": "tmdb-3240392", "tmdb_id": 3240392, "name": "Gabee", "requested_by": [{"name": "Automation"}]})
+    module = importlib.import_module("logscan_web.app")
+    original_fetch = module.urlopen
+
+    def fetch(request, **kwargs):
+        if "/person/3240392?" in request.full_url:
+            return Response({"id": 3240392, "name": "Gabee", "profile_path": "/gabee.jpg"})
+        return original_fetch(request, **kwargs)
+
+    monkeypatch.setattr(module, "urlopen", fetch)
+    for _ in range(2):
+        app = create()
+        client = app.test_client()
+        client.get("/api/people?background=1")
+        app.extensions["people_loader"].future.result(timeout=5)
+        payload = client.get("/api/people?background=1").json
+        person = next(item for item in payload["people"] if item["tmdb_id"] == 3240392)
+        assert not payload["loading"]["refreshing"]
+        assert person["people_image_status"] == "incomplete"
+        assert person["metadata_tags"] == ["TMDb Ready"]
+        assert all(style["status"] == "missing" and style["verification_source"] == "readme_index" for style in person["style_availability"].values())
+    assert sum("README.md" in url for url in state["calls"]) == 7
+    assert not any("api.github.com" in url for url in state["calls"])
+    assert not state["head_calls"]
+    assert store.list()[0]["requested_by"] == [{"name": "Automation"}]
+
+
+def test_seven_readme_downloads_start_concurrently(service, monkeypatch):
+    from threading import Barrier
+
+    state, create, _root = service
+    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    module = importlib.import_module("logscan_web.app")
+    original_fetch = module.urlopen
+    started = Barrier(7, timeout=5)
+
+    def fetch(request, **kwargs):
+        if request.full_url.endswith("/README.md"):
+            started.wait()
+        return original_fetch(request, **kwargs)
+
+    monkeypatch.setattr(module, "urlopen", fetch)
+    assert create().test_client().get("/api/people").status_code == 200
+    assert sum("README.md" in url for url in state["calls"]) == 7
+    assert not any("api.github.com" in url for url in state["calls"])
+    assert not state["head_calls"]
+
+
 def test_trending_gaps_do_not_trigger_file_trees_or_per_person_probes(service):
     state, create, root = service
     state["missing"] = {style.key for style in PEOPLE_IMAGE_STYLES}
@@ -329,7 +384,7 @@ def test_trending_gaps_do_not_trigger_file_trees_or_per_person_probes(service):
     client = create().test_client()
     payload = client.get("/api/people").json
     assert payload["people"]
-    assert all(person["people_image_status"] == "pending_verification" for person in payload["people"])
+    assert all(person["people_image_status"] == "incomplete" for person in payload["people"])
     client.get("/api/people?page=2")
     assert sum("README.md" in url for url in state["calls"]) == 7
     assert not any("api.github.com" in url for url in state["calls"])
@@ -337,28 +392,29 @@ def test_trending_gaps_do_not_trigger_file_trees_or_per_person_probes(service):
     assert not PeopleStore(root).list()
 
 
-def test_new_log_candidate_verifies_only_the_gap_in_a_cached_readme(service):
+def test_new_log_candidate_uses_cached_readme_for_missing_style(service):
     state, create, root = service
     state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
     app = create()
-    assert app.test_client().get("/api/people").json["people"][0]["people_image_status"] == "pending_verification"
+    assert app.test_client().get("/api/people").json["people"][0]["people_image_status"] == "incomplete"
     assert not any("api.github.com" in url for url in state["calls"])
     result = upload(app)
     assert any(item["id"] == "missing_people_images_pending" for item in result["recommendations"])
     assert PeopleStore(root).list()[0]["style_availability"]["bw"]["status"] == "missing"
-    assert [url for url in state["calls"] if "api.github.com" in url] == [PEOPLE_IMAGE_STYLES[1].inventory_url]
+    assert not any("api.github.com" in url for url in state["calls"])
     assert sum("README.md" in url for url in state["calls"]) == 7
     assert not state["head_calls"]
 
 
-def test_valid_readme_prevents_large_directory_fallback_when_gap_check_fails(service):
+def test_valid_readme_prevents_directory_fallback_for_missing_transparent_image(service):
     state, create, root = service
     state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
     state["missing"] = {"transparent"}
     state["split_styles"] = {"transparent"}
     upload(create())
-    assert PeopleStore(root).list()[0]["people_image_status"] == "pending_verification"
-    assert [url for url in state["calls"] if "api.github.com" in url] == [PEOPLE_IMAGE_STYLES[-1].inventory_url]
+    assert PeopleStore(root).list()[0]["people_image_status"] == "incomplete"
+    assert not any("api.github.com" in url for url in state["calls"])
+    assert not state["head_calls"]
 
 
 @pytest.mark.parametrize("missing", [False, True])
@@ -384,10 +440,10 @@ def test_large_transparent_inventory_uses_immutable_directory_trees(service, mis
 
 
 @pytest.mark.parametrize("status", [403, 429, 500])
-def test_raw_png_clears_pending_queue_when_api_fails_and_readme_omits_image(service, status):
+def test_raw_png_clears_pending_queue_when_api_and_readme_are_unavailable(service, status):
     state, create, root = service
     state["http_errors"] = {style.key: status for style in PEOPLE_IMAGE_STYLES}
-    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES if style.key != "transparent"}
     state["missing"] = {"transparent"}
     state["head_present"] = {"transparent"}
     store = PeopleStore(root)
@@ -411,7 +467,6 @@ def test_raw_png_clears_pending_queue_when_api_fails_and_readme_omits_image(serv
 def test_unsuccessful_raw_image_checks_keep_person_pending_and_cache_retry(service, failure):
     state, create, root = service
     state["http_errors"] = {"transparent": 403}
-    state["index_available"] = {"transparent"}
     state["missing"] = {"transparent"}
     if failure is not None:
         state["head_errors"] = {"transparent": failure}
@@ -429,12 +484,11 @@ def test_unsuccessful_raw_image_checks_keep_person_pending_and_cache_retry(servi
 
 
 @pytest.mark.parametrize("failure", ["unavailable", "revision", "truncated", "malformed", "stale"])
-def test_incomplete_directory_trees_and_outdated_index_cannot_confirm_absence(service, failure):
+def test_incomplete_directory_trees_cannot_confirm_absence_without_index(service, failure):
     state, create, root = service
     state["missing"] = {"transparent"}
     state["split_styles"] = {"transparent"}
     state["split_failure"] = failure
-    state["index_available"] = {"transparent"}
     app = create()
     upload(app)
     record = PeopleStore(root).list()[0]
@@ -479,31 +533,34 @@ def test_verified_directory_images_survive_failure_in_another_directory(service,
 
 
 @pytest.mark.parametrize("name", ["Tatsuo Sato", "Teetut Chungmanirat", "Tomohiro Ono"])
-def test_transparent_png_present_even_when_generated_index_omits_person(name):
+def test_index_absence_is_distinct_from_current_file_inventory(name):
     style = PEOPLE_IMAGE_STYLES[-1]
-    outdated = parse_people_readme(style, "# Kometa People Images (0 Images)\n")
-    result = assess_people_images({"name": name}, {style.label: outdated})
-    assert result["style_availability"]["transparent"]["status"] == "unknown"
+    index = parse_people_readme(style, "# Kometa People Images (0 Images)\n")
+    result = assess_people_images({"name": name}, {style.label: index})
+    assert result["style_availability"]["transparent"]["status"] == "missing"
+    assert result["style_availability"]["transparent"]["verification_source"] == "readme_index"
+    assert "Not listed" in result["style_availability"]["transparent"]["reason"]
     current = parse_people_inventory(style, {"sha": "current", "truncated": False, "tree": [{"type": "blob", "path": f"T/Images/{name}.png"}]})
     result = assess_people_images({"name": name}, {style.label: current})
     assert result["style_availability"]["transparent"]["status"] == "present"
     assert result["style_availability"]["transparent"]["image_url"].endswith(f"/T/Images/{quote(name)}.png")
 
 
-@pytest.mark.parametrize("index_fallback", [False, True])
-def test_failed_checks_explain_cause_and_retry_only_failed_styles(service, monkeypatch, index_fallback):
+@pytest.mark.parametrize("index_available", [False, True])
+def test_failed_checks_explain_cause_and_retry_only_failed_styles(service, monkeypatch, index_available):
     import time
 
     state, create, _root = service
     state["http_errors"] = {"bw": 500}
-    state["missing"] = {"bw"} if index_fallback else set()
-    state["index_available"] = {"bw"} if index_fallback else set()
+    state["missing"] = {"bw"} if index_available else set()
+    state["index_available"] = {"bw"} if index_available else set()
     app = create()
     result = upload(app)
-    finding = next(item for item in result["recommendations"] if item["id"] == "missing_people_images_unverified")
-    if index_fallback:
-        assert "incomplete or outdated" in finding["description"]
+    if index_available:
+        assert PeopleStore(_root).list()[0]["style_availability"]["bw"]["status"] == "missing"
+        assert any(item["id"] == "missing_people_images_pending" for item in result["recommendations"])
     else:
+        finding = next(item for item in result["recommendations"] if item["id"] == "missing_people_images_unverified")
         assert "HTTP 500" in finding["description"] and "index could not be reached" in finding["description"]
     initial_calls = len(state["calls"])
     state["http_errors"] = {}
@@ -511,7 +568,8 @@ def test_failed_checks_explain_cause_and_retry_only_failed_styles(service, monke
     monkeypatch.setattr("logscan_web.app.time.monotonic", lambda: now + 301)
     app.test_client().get("/api/people")
     github_requests = [url for url in state["calls"][initial_calls:] if "api.github.com" in url]
-    assert len(github_requests) == 1 and "People-Images-bw/" in github_requests[0]
+    assert len(github_requests) == (0 if index_available else 1)
+    assert all("People-Images-bw/" in url for url in github_requests)
 
 
 def test_unresolved_person_still_shows_trusted_image_from_log(service):

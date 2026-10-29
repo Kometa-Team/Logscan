@@ -53,7 +53,7 @@ PEOPLE_IMAGE_STYLES = (
 
 
 class PeopleImageInventory(dict):
-    """Name index with the Git revision and time successfully verified."""
+    """Name index with its source revision and time successfully checked."""
 
     def __init__(self, images: dict[str, str], revision: str, *, complete: bool = True):
         super().__init__(images)
@@ -135,7 +135,9 @@ def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] 
     """Validate a repository's generated image index for the primary lookup.
 
     Every declared image must be listed and point into the expected repository.
-    Even a valid index can lag behind poster syncs, so it cannot confirm absence.
+    A validated index resolves both listed and unlisted names locally. Its
+    freshness is enforced by PeopleReadmeCache; it describes the generated
+    README, which may lag behind a poster publication.
     """
     header = re.search(r"^# Kometa People Images[^\n]*\(([\d,]+) Images\)\s*$", readme, re.M)
     if not header:
@@ -153,7 +155,7 @@ def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] 
         if parsed is None or parsed[0] != style:
             return None
         images[person_name_key(parsed[1])] = url
-    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest(), complete=False)
+    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest())
 
 
 def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_url, cache: dict, progress=None, max_seconds: float | None = None) -> PeopleImageInventories:
@@ -263,6 +265,10 @@ def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]]
             )
         if isinstance(inventory, PeopleImageInventory):
             availability[style.key].update(checked_at=inventory.checked_at, revision=inventory.revision)
+            if inventory.revision.startswith("index:"):
+                availability[style.key]["verification_source"] = "readme_index"
+                if status == "missing":
+                    availability[style.key]["reason"] = "Not listed in the repository's generated README index."
             verified_at = next((getattr(inventory, "verified_images", {}).get(name) for name in names if name in getattr(inventory, "verified_images", {})), None)
             if verified_at:
                 availability[style.key].update(checked_at=verified_at, verification_source="image_url")

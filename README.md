@@ -260,23 +260,23 @@ style uses PNG assets and the other styles use JPG assets. Legacy root image
 URLs remain recognized. No person-specific applicability exclusions are
 currently declared. Compact card details show each style's availability.
 
-The service downloads the seven full repository READMEs in batches of four and
+The service downloads the seven full repository READMEs concurrently and
 checks the declared image count and every image URL. These public indexes are the
 primary source for all people lookups. They are cached for one hour in memory and
 on disk under `.people-readme-cache` in the scan store, including across restarts.
 Expired indexes use conditional requests so unchanged files need not be downloaded
-again. Displaying trending people makes no individual image probes or file-tree
-requests when the indexes are available.
+again. A valid index resolves both listed and unlisted names locally for saved,
+searched, submitted, and trending people. Missing entries show **Not listed** and
+can qualify for the processing queue; they do not trigger file-tree requests or
+guessed image URL probes. The result identifies the README as its source, since
+an index can lag behind a poster publication until its README workflow finishes.
 
-Poster syncs can skip README updates, so an index omission stays unknown until
-verified. For submitted people and automated Top 250 requests, Logscan checks a
-GitHub file inventory only for styles whose index cannot resolve the candidate.
-If the recursive tree fails and a valid README exists, Logscan keeps that index
-without expanding the lookup into directory trees. Directory-tree recovery is
-reserved for unavailable or invalid READMEs. Verified images from successful
-directories remain usable, but partial listings cannot confirm absence. Standard
-raw image URLs are probed only for unresolved submitted people, never the entire
-trending list. Results retain the index hash or Git revision and verification time.
+GitHub file inventories and directory-tree recovery are reserved for unavailable,
+expired, or invalid READMEs. Verified images from successful directories remain
+usable, but partial listings cannot confirm absence. Standard raw image URLs are
+probed only for unresolved submitted people when no usable index exists, never
+the entire trending list. Failed checks remain unavailable rather than claiming
+an image is missing. Results retain the index hash or Git revision and check time.
 Complete file checks are cached for one hour. Failed verification retries on the
 next relevant refresh after five minutes without downloading fresh READMEs again.
 
