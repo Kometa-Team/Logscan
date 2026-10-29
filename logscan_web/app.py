@@ -35,7 +35,7 @@ from .people_images import (
     verify_people_image_urls,
 )
 from .config_optimizer import optimize_config
-from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
+from .recommendations import SCHEMA_CACHE_SECONDS, _load_config_schema, has_yaml_language_server_directive, schema_branch_for_log, schema_fingerprint, validate_redacted_config
 from .scanner import (
     ARCHIVE_SUFFIXES,
     MAX_FILE_BYTES,
@@ -234,7 +234,7 @@ def _stored_log_lines(path: Path, index: dict, start: int, count: int) -> list[s
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
 ANALYSIS_VERSION = 14
-SCHEMA_VALIDATION_VERSION = 7
+SCHEMA_VALIDATION_VERSION = 8
 POPULAR_PEOPLE_PAGE_SIZE = 25
 TMDB_POPULAR_PAGE_SIZE = 20
 KOMETA_IMAGE_SOURCES = tuple((style.label, style.readme_url) for style in PEOPLE_IMAGE_STYLES)
@@ -449,14 +449,17 @@ def create_app() -> Flask:
     schema_cache = {}
     schema_cache_dir = Path(app.config["SCAN_STORE"]) / ".schema-cache"
     schema_cache_lock = threading.Lock()
+    schema_refresh_event = threading.Event()
 
-    def validate_config(log_content: str | Path) -> list[dict]:
+    def validate_config(log_content: str | Path, *, schema_metadata: dict | None = None) -> list[dict]:
         """Validate using the process cache without serializing validation work."""
         return validate_redacted_config(
             log_content,
             schema_cache=schema_cache,
             schema_cache_dir=schema_cache_dir,
             schema_cache_lock=schema_cache_lock,
+            schema_metadata=schema_metadata,
+            schema_changed=schema_refresh_event.set,
         )
 
     def update_scan_job(job_id: str | None, phase: str, *, error: str | None = None, redirect_url: str | None = None, result: dict | None = None) -> None:
@@ -1231,12 +1234,31 @@ def create_app() -> Flask:
         except (URLError, TimeoutError) as exc:
             app.logger.warning("Unable to send missing-person Discord webhook: %s", exc)
 
-    def backfill_schema_validation_counts():
-        records = [
-            record
-            for record in store.list()
-            if (record.get("metadata") or {}).get("tool_name", "kometa") == "kometa" and not _schema_validation_is_fresh(record.get("metadata") or {})
-        ]
+    def backfill_schema_validation_counts(branch_fingerprints: dict[str, str] | None = None):
+        if branch_fingerprints is None:
+            records = [
+                record
+                for record in store.list()
+                if (record.get("metadata") or {}).get("tool_name", "kometa") == "kometa" and not _schema_validation_is_fresh(record.get("metadata") or {})
+            ]
+        else:
+            records = []
+            for record in store.list():
+                metadata = record.get("metadata") or {}
+                if metadata.get("tool_name", "kometa") != "kometa":
+                    continue
+                branch = metadata.get("schema_validation_branch")
+                if branch not in {"master", "develop"}:
+                    path = store.log_path(record.get("id", ""))
+                    if path is None:
+                        continue
+                    branch = schema_branch_for_log(path)
+                if branch in branch_fingerprints and (
+                    metadata.get("schema_validation_digest") != branch_fingerprints[branch]
+                    or metadata.get("schema_validation_version") != SCHEMA_VALIDATION_VERSION
+                    or not isinstance(metadata.get("schema_validation_failures"), list)
+                ):
+                    records.append(record)
         if not records:
             return
         app.logger.info("Backfilling schema validation counts for %d retained scan(s).", len(records))
@@ -1246,14 +1268,19 @@ def create_app() -> Flask:
             path = store.log_path(scan_id)
             if path is None:
                 continue
+            schema_metadata = {}
+            if branch_fingerprints is not None:
+                digest = branch_fingerprints.get(schema_branch_for_log(path))
+                if digest is not None:
+                    schema_metadata["schema_validation_digest"] = digest
             try:
                 log_content = path
-                failures = validate_config(log_content)
+                failures = validate_config(log_content, schema_metadata=schema_metadata)
                 count = len(failures)
             except ValueError:
                 failures = []
                 count = 0
-            except RuntimeError as exc:
+            except (RuntimeError, OSError) as exc:
                 app.logger.warning("Schema count backfill unavailable for scan %s: %s", scan_id, exc)
                 continue
             store.update_metadata(
@@ -1264,10 +1291,49 @@ def create_app() -> Flask:
                 schema_directive_missing=not has_yaml_language_server_directive(log_content),
                 schema_validation_version=SCHEMA_VALIDATION_VERSION,
                 schema_validation_checked_at=datetime.now(UTC).isoformat(),
+                **schema_metadata,
             )
             completed += 1
             time.sleep(0.5)
         app.logger.info("Backfilled schema validation counts for %d of %d retained scan(s).", completed, len(records))
+
+    def refresh_retained_schema_validation():
+        """Poll retained release channels and revalidate only changed schemas."""
+        branches = set()
+        outdated_versions = set()
+        for record in store.list():
+            metadata = record.get("metadata") or {}
+            if metadata.get("tool_name", "kometa") != "kometa":
+                continue
+            branch = metadata.get("schema_validation_branch")
+            if branch not in {"master", "develop"}:
+                path = store.log_path(record.get("id", ""))
+                if path is None:
+                    continue
+                branch = schema_branch_for_log(path)
+            branches.add(branch)
+            if metadata.get("schema_validation_version") != SCHEMA_VALIDATION_VERSION:
+                outdated_versions.add(branch)
+        fingerprints = {}
+        for branch in sorted(branches):
+            try:
+                with schema_cache_lock:
+                    schema = _load_config_schema(branch, memory_cache=schema_cache, cache_dir=schema_cache_dir, force_refresh=branch in outdated_versions)
+                    fingerprints[branch] = schema_fingerprint(schema)
+            except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+                app.logger.exception("Unable to refresh the Kometa %s schema; retained results will be retried.", branch)
+        backfill_schema_validation_counts(fingerprints)
+
+    def schema_refresh_loop():
+        while True:
+            schema_refresh_event.clear()
+            try:
+                refresh_retained_schema_validation()
+            except Exception:
+                app.logger.exception("Unable to refresh retained schema validation.")
+            schema_refresh_event.wait(SCHEMA_CACHE_SECONDS)
+
+    app.extensions["refresh_retained_schema_validation"] = refresh_retained_schema_validation
 
     def backfill_scan_analysis():
         records = [record for record in store.list() if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION]
@@ -1301,6 +1367,7 @@ def create_app() -> Flask:
                 "schema_validation_failures",
                 "schema_validation_version",
                 "schema_validation_checked_at",
+                "schema_validation_digest",
             ):
                 if key in previous_metadata:
                     result.metadata[key] = previous_metadata[key]
@@ -1356,9 +1423,15 @@ def create_app() -> Flask:
         app.logger.info("Backfilled Quickstart metadata for %d of %d retained scan(s).", completed, len(records))
 
     def backfill_retained_scans():
-        backfill_scan_analysis()
-        backfill_schema_validation_counts()
-        backfill_quickstart_metadata()
+        try:
+            backfill_scan_analysis()
+            refresh_retained_schema_validation()
+            backfill_schema_validation_counts()
+            backfill_quickstart_metadata()
+        finally:
+            threading.Thread(target=schema_refresh_loop, name="kometa-schema-refresh", daemon=True).start()
+
+    app.extensions["backfill_retained_scans"] = backfill_retained_scans
 
     def cleanup_loop():
         while True:
@@ -1731,7 +1804,7 @@ def create_app() -> Flask:
             if result.metadata.get("tool_name", "kometa") == "kometa" and not app.config.get("TESTING"):
                 try:
                     log_content = content if isinstance(content, Path) else content.decode("utf-8", errors="replace")
-                    schema_failures = validate_config(log_content)
+                    schema_failures = validate_config(log_content, schema_metadata=result.metadata)
                     result.metadata["schema_validation_count"] = len(schema_failures)
                     result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
                     result.metadata["schema_validation_failures"] = schema_failures
@@ -2295,7 +2368,10 @@ def create_app() -> Flask:
         if metadata.get("tool_name") == "imagemaid":
             return jsonify(error="Kometa schema validation does not apply to ImageMaid logs."), 409
         cached_failures = metadata.get("schema_validation_failures")
-        if isinstance(cached_failures, list) and _schema_validation_is_fresh(metadata):
+        with schema_cache_lock:
+            current_schema = schema_cache.get(metadata.get("schema_validation_branch"))
+            schema_matches = current_schema is None or metadata.get("schema_validation_digest") == schema_fingerprint(current_schema)
+        if isinstance(cached_failures, list) and _schema_validation_is_fresh(metadata) and schema_matches:
             return jsonify(
                 branch=metadata.get("schema_validation_branch", "master"),
                 failures=cached_failures,
@@ -2306,7 +2382,8 @@ def create_app() -> Flask:
             abort(404)
         try:
             log_content = path
-            failures = validate_config(log_content)
+            schema_metadata = {}
+            failures = validate_config(log_content, schema_metadata=schema_metadata)
             branch = schema_branch_for_log(log_content)
             directive_missing = not has_yaml_language_server_directive(log_content)
             store.update_metadata(
@@ -2317,6 +2394,7 @@ def create_app() -> Flask:
                 schema_directive_missing=directive_missing,
                 schema_validation_version=SCHEMA_VALIDATION_VERSION,
                 schema_validation_checked_at=datetime.now(UTC).isoformat(),
+                **schema_metadata,
             )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

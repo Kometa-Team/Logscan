@@ -17,6 +17,20 @@ deleted logs may be uploaded again. Reused scans do not increase aggregate
 processed-log or cleanup totals. Anonymous aggregate totals survive retention
 cleanup; log content and identities do not.
 
+Kometa configuration schemas are checked hourly for the release channels used
+by retained logs. A schema content change automatically revalidates all retained
+Kometa logs on that channel and updates their saved schema findings and counts.
+Validation during an upload or a result-page visit also wakes this background
+check when it discovers a change. Unchanged schemas do not trigger another sweep;
+failed validations are retried. If GitHub is unavailable, the cached schema remains
+usable. Schema checks preserve source logs, share links, retention deadlines,
+upload receipts, and aggregate statistics.
+
+Schema validation version **8** forces retained Kometa logs to be revalidated on
+startup, including results created before the recent upstream schema changes.
+The upgrade checks GitHub even when the local schema cache is less than an hour
+old. Deploy and restart the web service to apply this backfill.
+
 Quickstart checks `/api/capabilities` before uploading ImageMaid logs. Update the
 web service before enabling the updated Quickstart and Discord integration.
 
