@@ -284,6 +284,20 @@ The pause survives restarts. Raw README and image checks can still find existing
 posters during the pause. Configure `GITHUB_TOKEN` in the server environment and
 recreate the container to use authenticated requests with a higher API allowance.
 
+The People page displays saved people immediately while one shared background
+refresh checks trending sources, repositories, profiles, and poster images.
+It reports the current stage, completed checks, elapsed time, and GitHub retry
+time instead of waiting behind a single loading message. Fallback image probes
+have an eight-second budget per refresh; checks that cannot finish stay unknown.
+Progress polling keeps existing cards in place, preserves saved results on
+errors, and provides a retry button after a timeout.
+
+The page warns when GitHub rejects a configured token and, when GitHub reports
+the expiration date, when it has expired or will expire within seven days.
+A rejected token without a known expiration is described as expired, revoked,
+or invalid. Support users see renewal instructions. Only authentication status
+and expiration metadata are cached or returned; the token itself stays private.
+
 Existing images become available even when GitHub's API is rate limited and the
 README is outdated. Failed URL checks stay unknown; they never prove an image is
 missing. Successful URL checks are cached for one hour and failures for five minutes.

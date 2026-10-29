@@ -95,6 +95,17 @@ button { cursor: pointer; }
 .site-nav-signout:hover { background: rgba(244,63,94,.1); color: white; }
 .people-shell { padding-bottom: 80px; }
 .people-gallery { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.people-loading { margin: 0 0 20px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.people-loading-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.people-loading-heading strong { flex: 1; }
+.people-loading p { margin: 10px 0 0; color: var(--muted); font-size: .9rem; line-height: 1.5; }
+.people-loading .people-github-warning { color: #fbbf24; }
+.people-loading button { margin-top: 12px; }
+#people-loading-elapsed { color: var(--muted); font-size: .85rem; }
+.people-loading-spinner { width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: people-loading-spin 1s linear infinite; }
+.people-loading[data-busy="false"] .people-loading-spinner { display: none; }
+@keyframes people-loading-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .people-loading-spinner { animation: none; } }
 .people-poster-search { margin-bottom: 24px; }
 .people-poster-search + .people-toolbar { margin-top: 0; }
 .poster-search-controls { display: flex; gap: 12px; margin-top: 8px; }

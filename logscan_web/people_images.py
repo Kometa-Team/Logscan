@@ -156,7 +156,7 @@ def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] 
     return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest(), complete=False)
 
 
-def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_url, cache: dict) -> PeopleImageInventories:
+def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_url, cache: dict, progress=None, max_seconds: float | None = None) -> PeopleImageInventories:
     """Recover present images omitted by unverified listings, without inferring absence.
 
     Raw image HEAD requests do not consume GitHub's inventory API quota. A 404
@@ -164,6 +164,7 @@ def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_
     The caller serializes access to the short-lived probe cache.
     """
     now = time.monotonic()
+    deadline = now + max_seconds if max_seconds is not None else None
     for url in list(cache):
         if cache[url]["expires_at"] <= now:
             del cache[url]
@@ -189,6 +190,8 @@ def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_
                         continue
                     result = cache.get(url)
                     if result is None:
+                        if deadline is not None and time.monotonic() >= deadline:
+                            return None
                         result = {"present": False, "try_next": False, "checked_at": datetime.now(UTC).isoformat()}
                         try:
                             with open_url(Request(url, method="HEAD", headers={"User-Agent": "Kometa-Logscan/1.0", "Accept": "image/*"}), timeout=5) as response:
@@ -210,8 +213,12 @@ def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_
 
     images = PeopleImageInventories(inventories, errors=dict(getattr(inventories, "errors", {})))
     copied = set()
+    if progress:
+        progress("images", "Checking Kometa poster images.", 0, len(tasks))
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-image-check") as executor:
-        for result in executor.map(check_candidate, tasks.values()):
+        for completed, result in enumerate(executor.map(check_candidate, tasks.values()), start=1):
+            if progress:
+                progress("images", "Checking Kometa poster images.", completed, len(tasks))
             if result is None:
                 continue
             style, name, url, checked_at = result

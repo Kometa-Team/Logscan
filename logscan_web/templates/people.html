@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261026-2') }}">
-  <script src="{{ url_for('static', filename='people_images.js', v='20261026-1') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20261028-1') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261029-people') }}">
+  <script src="{{ url_for('static', filename='people_images.js', v='20261026-1') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20261029-people') }}" defer></script>
   <script src="{{ url_for('static', filename='people_search.js', v='20261026-3') }}" defer></script>
 </head>
 <body>
@@ -52,7 +52,14 @@
         <div><strong>Filter examples</strong><span><b>TMDb Ready</b> finds posters ready to process.</span><span><b>Trending</b> + <b>Missing Kometa</b> finds popular people needing artwork.</span><span><b>Log Upload</b> + <b>Requested by ...</b> narrows work to one requester.</span><small>Tags in the same group match either value; tags from different groups combine.</small></div>
       </details>
     </div>
-    <section id="people-gallery" class="people-gallery" aria-live="polite">Loading people...</section>
+    <aside id="people-loading" class="people-loading" role="status" aria-live="polite">
+      <div class="people-loading-heading"><span class="people-loading-spinner" aria-hidden="true"></span><strong id="people-loading-title">Opening the People list</strong><span id="people-loading-elapsed"></span></div>
+      <p id="people-loading-detail">Loading saved people first. Poster availability is checked separately with GitHub and TMDb.</p>
+      <p id="people-github-warning" class="people-github-warning" role="alert" hidden></p>
+      {% if support_access %}<p id="people-github-admin" hidden>Renew or replace the token in GitHub Settings → Developer settings → Personal access tokens. Update GITHUB_TOKEN in the server's .env and recreate the container.</p>{% endif %}
+      <button id="people-loading-retry" type="button" class="secondary-button" hidden>Check again</button>
+    </aside>
+    <section id="people-gallery" class="people-gallery" aria-label="People"></section>
     <nav id="people-pagination" class="pagination" aria-label="People pages"></nav>
   </main>
 </body>
