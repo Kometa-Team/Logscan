@@ -35,6 +35,7 @@ from .people_images import (
     verify_people_image_urls,
 )
 from .config_optimizer import optimize_config
+from .github_inventory import GitHubInventoryCache
 from .recommendations import SCHEMA_CACHE_SECONDS, _load_config_schema, has_yaml_language_server_directive, schema_branch_for_log, schema_fingerprint, validate_redacted_config
 from .scanner import (
     ARCHIVE_SUFFIXES,
@@ -435,6 +436,7 @@ def create_app() -> Flask:
     tmdb_find_cache = TMDbFindCacheStore(app.config["SCAN_STORE"])
     app.register_blueprint(create_support_blueprint(store, RETENTION_SECONDS))
     kometa_images_cache = {"expires_at": 0.0, "images": {}, "entries": {}}
+    github_inventory_cache = GitHubInventoryCache(Path(app.config["SCAN_STORE"]) / ".github-inventory-cache" / hashlib.sha256(app.config["GITHUB_TOKEN"].encode()).hexdigest()[:16])
     kometa_images_lock = threading.Lock()
     kometa_image_probes = {}
     kometa_image_probes_lock = threading.Lock()
@@ -513,7 +515,7 @@ def create_app() -> Flask:
                 tree_url = style.inventory_url.split("?", 1)[0]
 
                 def read_tree(url):
-                    with urlopen(Request(url, headers=headers), timeout=10) as response:
+                    with github_inventory_cache.open(Request(url, headers=headers), open_url=urlopen, timeout=10) as response:
                         if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
                             raise ValueError("Expired file inventory")
                         return json.loads(response.read().decode("utf-8"))
@@ -563,7 +565,7 @@ def create_app() -> Flask:
                 if app.config["GITHUB_TOKEN"]:
                     headers["Authorization"] = f"Bearer {app.config['GITHUB_TOKEN']}"
                 try:
-                    with urlopen(Request(style.inventory_url, headers=headers), timeout=10) as response:
+                    with github_inventory_cache.open(Request(style.inventory_url, headers=headers), open_url=urlopen, timeout=10) as response:
                         if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
                             failure = "GitHub returned an expired file inventory."
                         else:

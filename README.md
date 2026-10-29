@@ -274,6 +274,16 @@ omissions remain unknown and never clear outstanding candidates. Failed checks,
 partial listings, and index fallbacks retry on the next refresh after five minutes
 without refetching fresh styles. When an inventory cannot verify a person's
 images, Logscan checks their standard raw image URLs with small HEAD requests.
+
+GitHub file inventories and their conditional-request headers are cached on disk
+under the scan store, so restarts reuse fresh responses. Unchanged inventories
+use conditional requests; immutable directory snapshots are reused by Git SHA.
+Rate-limit responses pause inventory API requests across all seven styles until
+GitHub's reset or retry time, with increasing delays when no retry time is given.
+The pause survives restarts. Raw README and image checks can still find existing
+posters during the pause. Configure `GITHUB_TOKEN` in the server environment and
+recreate the container to use authenticated requests with a higher API allowance.
+
 Existing images become available even when GitHub's API is rate limited and the
 README is outdated. Failed URL checks stay unknown; they never prove an image is
 missing. Successful URL checks are cached for one hour and failures for five minutes.
