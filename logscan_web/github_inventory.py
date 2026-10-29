@@ -26,7 +26,6 @@ class GitHubInventoryCache:
         self.directory = directory
         self.max_age = max_age
         self.lock = threading.Lock()
-        self.entries = {}
         self.limit = self._read(directory / "rate-limit.json") or {}
         if any(not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 for value in self.limit.values()):
             self.limit = {}
@@ -80,9 +79,9 @@ class GitHubInventoryCache:
         with self.lock:
             url = request.full_url
             path = self.directory / (hashlib.sha256(url.encode("utf-8")).hexdigest() + ".json")
-            entry = self.entries.get(url)
-            if entry is None:
-                entry = self._read(path)
+            # The caller already keeps parsed inventories in memory. Keep raw
+            # trees on disk so large repositories are not retained twice.
+            entry = self._read(path)
             if entry is not None and not (
                 isinstance(entry.get("body"), dict)
                 and isinstance(entry.get("checked_at"), (float, int))
@@ -146,6 +145,5 @@ class GitHubInventoryCache:
                 self.limit = {}
                 self._write(self.directory / "rate-limit.json", self.limit)
             if result.get("etag") or result.get("last_modified") or immutable:
-                self.entries[url] = result
                 self._write(path, result)
             return InventoryResponse(result)
