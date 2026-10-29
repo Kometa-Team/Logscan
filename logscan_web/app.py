@@ -2287,13 +2287,22 @@ def create_app() -> Flask:
         available_tags = available_people_tags(base_candidates)
         candidates = filter_people_by_tag(base_candidates, request.args.get("tag", ""))
         candidates = filter_people_by_selected_tags(candidates, request.args.getlist("tags"), available_tags)
-        export = "\n".join(
-            f"{person['tmdb_id']}|{person.get('original_name', person['name'])}"
-            for person in candidates
-            if person.get("tmdb_id")
-            and person.get("people_image_status") != "pending_verification"
-            and not {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
-        )
+        lines = []
+        for person in candidates:
+            if (
+                not person.get("tmdb_id")
+                or person.get("people_image_status") == "pending_verification"
+                or {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
+            ):
+                continue
+            name = person["name"]
+            original_name = person.get("original_name")
+            # Keep equivalent accented spellings used by existing filenames,
+            # but use the displayed TMDb name for a different log alias.
+            if original_name and _person_name_key(original_name) == _person_name_key(name):
+                name = original_name
+            lines.append(f"{person['tmdb_id']}|{name}")
+        export = "\n".join(lines)
         return send_file(
             BytesIO(export.encode("utf-8")),
             mimetype="text/plain",
