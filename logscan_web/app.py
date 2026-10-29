@@ -36,6 +36,7 @@ from .people_images import (
 )
 from .config_optimizer import optimize_config
 from .github_inventory import GitHubInventoryCache
+from .people_loading import PeopleLoader
 from .recommendations import SCHEMA_CACHE_SECONDS, _load_config_schema, has_yaml_language_server_directive, schema_branch_for_log, schema_fingerprint, validate_redacted_config
 from .scanner import (
     ARCHIVE_SUFFIXES,
@@ -503,7 +504,7 @@ def create_app() -> Flask:
             app.logger.warning("TMDb lookup failed for %s", path)
             return None
 
-    def _kometa_image_urls() -> dict[str, dict[str, str]]:
+    def _kometa_image_urls(progress=None) -> dict[str, dict[str, str]]:
         """Map each image source to its case-insensitive person-name URLs."""
         with kometa_images_lock:
             if kometa_images_cache["expires_at"] > time.monotonic():
@@ -611,8 +612,22 @@ def create_app() -> Flask:
 
             entries = kometa_images_cache["entries"]
             stale = [style for style in PEOPLE_IMAGE_STYLES if entries.get(style.label, {}).get("expires_at", 0) <= time.monotonic()]
+            completed_styles = 0
+            progress_lock = threading.Lock()
+
+            def fetch_with_progress(style):
+                nonlocal completed_styles
+                result = fetch_inventory(style)
+                if progress:
+                    with progress_lock:
+                        completed_styles += 1
+                        progress("repositories", "Checking Kometa poster repositories.", completed_styles, len(stale))
+                return result
+
+            if progress:
+                progress("repositories", "Checking Kometa poster repositories.", 0, len(stale))
             with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-inventory") as executor:
-                for label, inventory, error in executor.map(fetch_inventory, stale):
+                for label, inventory, error in executor.map(fetch_with_progress, stale):
                     entries[label] = {
                         "inventory": inventory,
                         "error": error,
@@ -625,14 +640,14 @@ def create_app() -> Flask:
             kometa_images_cache.update(expires_at=min(entry["expires_at"] for entry in entries.values()), images=images)
             return images
 
-    def kometa_image_urls(candidates=()) -> dict[str, dict[str, str]]:
-        inventories = _kometa_image_urls()
+    def kometa_image_urls(candidates=(), *, progress=None, probe_seconds=None) -> dict[str, dict[str, str]]:
+        inventories = _kometa_image_urls(progress)
         if not candidates:
             return inventories
         with kometa_image_probes_lock:
-            return verify_people_image_urls(candidates, inventories, open_url=urlopen, cache=kometa_image_probes)
+            return verify_people_image_urls(candidates, inventories, open_url=urlopen, cache=kometa_image_probes, progress=progress, max_seconds=probe_seconds)
 
-    def imdb_starmeter_people() -> list[dict]:
+    def imdb_starmeter_people(progress=None) -> list[dict]:
         """Resolve IMDb's current StarMeter chart entries to TMDb people."""
         query = """
             {
@@ -681,8 +696,12 @@ def create_app() -> Flask:
             match = next((person for person in (data or {}).get("person_results", []) if person.get("id")), None)
             return imdb_id, match, True
 
+        lookup_results = []
         with ThreadPoolExecutor(max_workers=TMDB_FIND_MAX_WORKERS, thread_name_prefix="tmdb-find") as executor:
-            lookup_results = list(executor.map(resolve, imdb_ids))
+            for completed, result in enumerate(executor.map(resolve, imdb_ids), start=1):
+                lookup_results.append(result)
+                if progress:
+                    progress("trending", "Matching IMDb trending people with TMDb.", completed, len(imdb_ids))
         resolved = {imdb_id: match for imdb_id, match, _ in lookup_results}
         newly_resolved = {imdb_id: match for imdb_id, match, should_cache in lookup_results if should_cache}
         if newly_resolved:
@@ -723,11 +742,11 @@ def create_app() -> Flask:
                 people=snapshot["people"],
             )
 
-    def _build_popular_people() -> list[dict]:
+    def _build_popular_people(progress=None) -> list[dict]:
         """Build a complete, de-duplicated image-bearing IMDb-first snapshot."""
         popular = []
         seen_ids = set()
-        for starmeter_rank, person in enumerate(imdb_starmeter_people(), start=1):
+        for starmeter_rank, person in enumerate(imdb_starmeter_people(progress), start=1):
             person_id = person.get("id")
             if person_id and person_id not in seen_ids:
                 seen_ids.add(person_id)
@@ -736,6 +755,8 @@ def create_app() -> Flask:
                     return popular
         tmdb_page = 1
         while len(popular) < POPULAR_PEOPLE_LIMIT:
+            if progress:
+                progress("trending", "Loading trending people from TMDb.", len(popular), POPULAR_PEOPLE_LIMIT)
             data = tmdb_get("/person/popular", {"page": tmdb_page})
             results = (data or {}).get("results", [])
             if not results:
@@ -753,8 +774,10 @@ def create_app() -> Flask:
                 break
         return popular
 
-    def record_automated_popular_requests(people: list[dict]) -> int:
-        images = kometa_image_urls(people)
+    def record_automated_popular_requests(people: list[dict], progress=None) -> int:
+        # Only verified inventory gaps can create requests. Unknown fallback
+        # images need not delay publishing a fresh trending snapshot.
+        images = kometa_image_urls(progress=progress)
         if not images:
             app.logger.warning("Automated Top 250 requests skipped; people-image sources are unavailable.")
             return 0
@@ -783,12 +806,12 @@ def create_app() -> Flask:
             analytics.record_people_submitted(created)
         return created
 
-    def _refresh_popular_people() -> None:
+    def _refresh_popular_people(progress=None) -> None:
         nonlocal popular_people_refreshing
         try:
-            people = _build_popular_people()
+            people = _build_popular_people(progress)
             if people:
-                created = record_automated_popular_requests(people)
+                created = record_automated_popular_requests(people, progress)
                 snapshot = popular_people_store.save(people)
                 _install_popular_people_snapshot(snapshot)
                 with popular_people_payload_lock:
@@ -809,7 +832,7 @@ def create_app() -> Flask:
             popular_people_refreshing = True
         threading.Thread(target=_refresh_popular_people, name="popular-people-refresh", daemon=True).start()
 
-    def popular_people() -> list[dict]:
+    def popular_people(progress=None) -> list[dict]:
         """Return a fast cached snapshot and refresh stale data without blocking visitors."""
         nonlocal popular_people_refreshing
         with popular_people_lock:
@@ -831,7 +854,7 @@ def create_app() -> Flask:
             if popular_people_refreshing:
                 return []
             popular_people_refreshing = True
-        _refresh_popular_people()
+        _refresh_popular_people(progress)
         with popular_people_lock:
             refreshed_people = list(popular_people_cache["people"])
         return _filtered_popular_people(refreshed_people)
@@ -839,10 +862,11 @@ def create_app() -> Flask:
     def clear_popular_people_payload_cache() -> None:
         with popular_people_payload_lock:
             popular_people_payload_cache.clear()
+        people_loader.invalidate()
 
-    def popular_people_payload(people: list[dict], flags: dict[int, dict[str, str]]) -> list[dict]:
+    def popular_people_payload(people: list[dict], flags: dict[int, dict[str, str]], *, inventories=None) -> list[dict]:
         """Build display data only for the currently requested page of people."""
-        kometa_images = kometa_image_urls(people)
+        kometa_images = kometa_image_urls(people) if inventories is None else inventories
         payload = []
         for person in people:
             person_id = person.get("id")
@@ -996,11 +1020,21 @@ def create_app() -> Flask:
 
         return [person for person in people if matches(person)]
 
-    def people_union(sources: set[str]) -> list[dict]:
+    def people_union(sources: set[str], *, cached_only=False, progress=None) -> list[dict]:
         """Return missing-log and trending people, keyed by TMDb ID."""
         records = people_store.list()
-        trending = popular_people() if sources & {"missing", "trending"} and app.config["TMDB_API_KEY"] else []
-        inventories = kometa_image_urls([*records, *trending])
+        if progress:
+            progress("trending", "Loading trending people from IMDb and TMDb.")
+        if cached_only:
+            with popular_people_lock:
+                trending = list(popular_people_cache["people"])
+            if not trending:
+                trending = (popular_people_store.load() or {}).get("people", [])
+            trending = _filtered_popular_people(trending)
+            inventories = kometa_images_cache["images"]
+        else:
+            trending = popular_people(progress) if sources & {"missing", "trending"} and app.config["TMDB_API_KEY"] else []
+            inventories = kometa_image_urls([*records, *trending], progress=progress, probe_seconds=8 if progress else None)
         combined: dict[str, dict] = {}
         excluded_ids = popular_people_exclusions.list()
         checked_ids = popular_people_checks.active_ids(POPULAR_PEOPLE_CHECK_SECONDS)
@@ -1024,8 +1058,25 @@ def create_app() -> Flask:
             for person in combined.values():
                 trending_by_name.setdefault(_person_name_key(person.get("name")), []).append(person)
             # A cold trending refresh can create automated requests above.
-            for record in people_store.reconcile_image_availability(inventories):
-                if record["people_image_status"] == "complete":
+            current_records = records if cached_only else people_store.reconcile_image_availability(inventories)
+            profile_ids = {
+                record["tmdb_id"]
+                for record in current_records
+                if record.get("tmdb_id")
+                and f"tmdb-{record['tmdb_id']}" not in combined
+                and record.get("people_image_status") != "complete"
+                and not record.get("manually_completed")
+                and record["tmdb_id"] not in excluded_ids | checked_ids
+            }
+            profiles = {}
+            if progress and profile_ids:
+                progress("profiles", "Loading TMDb profile details.", 0, len(profile_ids))
+                with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-profile") as executor:
+                    for completed, (person_id, details) in enumerate(executor.map(lambda person_id: (person_id, tmdb_get(f"/person/{person_id}")), sorted(profile_ids)), start=1):
+                        profiles[person_id] = details
+                        progress("profiles", "Loading TMDb profile details.", completed, len(profile_ids))
+            for record in current_records:
+                if record.get("people_image_status") == "complete":
                     addressed_records.append(record)
                     continue
                 if record.get("manually_completed") or record.get("tmdb_id") in excluded_ids or record.get("tmdb_id") in checked_ids:
@@ -1037,7 +1088,7 @@ def create_app() -> Flask:
                 key = f"tmdb-{person_id}" if person_id else record["key"]
                 person = combined.get(key)
                 if person is None:
-                    details = tmdb_get(f"/person/{person_id}") if person_id else None
+                    details = profiles.get(person_id) if progress else tmdb_get(f"/person/{person_id}") if person_id and not cached_only else None
                     person = {
                         **(details or {}),
                         "id": person_id,
@@ -1048,7 +1099,7 @@ def create_app() -> Flask:
                     combined[key] = person
                 person["sources"].add("missing")
                 person["missing_record"] = record
-            if addressed_records:
+            if addressed_records and not cached_only:
                 analytics.record_addressed(addressed_records)
 
         people = list(combined.values())
@@ -1060,7 +1111,9 @@ def create_app() -> Flask:
                 person.get("name", "").casefold(),
             )
         )
-        payload = popular_people_payload(people, flags)
+        if progress:
+            progress("preparing", "Preparing people and filter counts.")
+        payload = popular_people_payload(people, flags, inventories=inventories)
         for item, person in zip(payload, people):
             record = person.get("missing_record", {})
             sources = sorted(person["sources"])
@@ -1092,6 +1145,15 @@ def create_app() -> Flask:
                 **{key: record[key] for key in ("style_availability", "people_image_status") if key in record},
             )
         return payload
+
+    def load_people_snapshot(progress):
+        # Relative download URLs need a request context; no visitor identity is
+        # used to build the shared public People dataset.
+        with app.test_request_context("/people"):
+            return people_union({"missing", "trending"}, progress=progress)
+
+    people_loader = PeopleLoader(load_people_snapshot, on_error=lambda: app.logger.exception("Unable to refresh the People list."))
+    app.extensions["people_loader"] = people_loader
 
     def save_missing_people(
         candidates: list[dict],
@@ -1187,6 +1249,8 @@ def create_app() -> Flask:
             person["people_url"] = "/people?tags=Missing+Kometa" if historical else url_for("people_page", tags="Missing Kometa", _external=True)
             person["is_new"] = is_new
             saved.append(person)
+        if saved:
+            people_loader.invalidate()
         return saved
 
     def notify_people_webhook(people: list[dict]) -> None:
@@ -2155,6 +2219,7 @@ def create_app() -> Flask:
         already_added = not any(entry.get("id") == manual_request["id"] and entry["requested_at"] == timestamp for entry in record["manual_requests"])
         if created:
             analytics.record_people_submitted(1)
+        people_loader.invalidate()
         return jsonify(tmdb_id=details["id"], already_added=already_added, message="Already requested" if already_added else "Poster requested"), 200 if already_added else 201
 
     @app.get("/api/people")
@@ -2166,11 +2231,22 @@ def create_app() -> Flask:
             return jsonify(error=f"Per-page count must be between 1 and {POPULAR_PEOPLE_PAGE_SIZE}."), 400
         tag_query = request.args.get("tag", "")
         selected_tags = request.args.getlist("tags")
-        base_candidates = people_union(sources)
+        background = request.args.get("background") == "1"
+        loading = None
+        if background:
+            base_candidates, loading = people_loader.read(retry=request.args.get("retry") == "1")
+            if base_candidates is None:
+                base_candidates = people_union(sources, cached_only=True)
+            loading["retry_at"] = github_inventory_cache.limit.get("retry_at")
+            loading["github_authentication"] = github_inventory_cache.authentication_status(bool(app.config["GITHUB_TOKEN"]))
+        else:
+            base_candidates = people_union(sources)
         available_tags = available_people_tags(base_candidates)
         candidates = filter_people_by_tag(base_candidates, tag_query)
         candidates = filter_people_by_selected_tags(candidates, selected_tags, available_tags)
         total_pages = max(1, (len(candidates) + per_page - 1) // per_page)
+        if background and loading["refreshing"] and page is not None:
+            page = min(max(1, page), total_pages)
         if page is None or not 1 <= page <= total_pages:
             return jsonify(error=f"Page must be between 1 and {total_pages}."), 400
         first_index = (page - 1) * per_page
@@ -2181,7 +2257,8 @@ def create_app() -> Flask:
             total_pages=total_pages,
             per_page=per_page,
             sources=sorted(sources),
-            actions_enabled=support_session_authorized(),
+            actions_enabled=False if background and loading["refreshing"] else support_session_authorized(),
+            loading=loading,
             tag=tag_query,
             selected_tags=selected_tags,
             available_tags=available_tags,

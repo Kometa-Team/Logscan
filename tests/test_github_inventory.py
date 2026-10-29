@@ -154,3 +154,52 @@ def test_corrupt_backoff_metadata_does_not_block_requests(tmp_path, clock):
     fetch = Mock(return_value=Response())
     GitHubInventoryCache(tmp_path).open(Request(URL), open_url=fetch).close()
     fetch.assert_called_once()
+
+
+def test_token_expiration_is_reported_and_survives_restart(tmp_path, clock):
+    from datetime import UTC, datetime
+
+    expiry = clock[0] + 60
+    request = Request(URL, headers={"Authorization": "Bearer secret-test-token"})
+    headers = {"GitHub-Authentication-Token-Expiration": datetime.fromtimestamp(expiry, UTC).strftime("%Y-%m-%d %H:%M:%S UTC")}
+    cache = GitHubInventoryCache(tmp_path)
+    cache.open(request, open_url=Mock(return_value=Response(**headers))).close()
+    assert cache.authentication_status(True) == {"state": "valid", "expires_at": expiry}
+    clock[0] += 61
+    restarted = GitHubInventoryCache(tmp_path)
+    assert restarted.authentication_status(True) == {"state": "expired", "expires_at": expiry}
+    fetch = Mock()
+    with pytest.raises(HTTPError) as expired:
+        restarted.open(Request(OTHER_URL, headers={"Authorization": "Bearer secret-test-token"}), open_url=fetch)
+    assert expired.value.code == 401
+    fetch.assert_not_called()
+    assert all("secret-test-token" not in path.read_text() for path in tmp_path.glob("*.json"))
+
+
+def test_rejected_token_is_distinct_from_rate_limit_and_does_not_claim_confirmed_expiration(tmp_path, clock):
+    request = Request(URL, headers={"Authorization": "Bearer invalid-test-token"})
+    fetch = Mock(side_effect=HTTPError(URL, 401, "Bad credentials", {}, None))
+    cache = GitHubInventoryCache(tmp_path)
+    with pytest.raises(HTTPError):
+        cache.open(request, open_url=fetch)
+    assert cache.authentication_status(True) == {"state": "rejected", "expires_at": None}
+    assert cache.limit == {}
+    restarted = GitHubInventoryCache(tmp_path)
+    with pytest.raises(HTTPError):
+        restarted.open(request, open_url=fetch)
+    fetch.assert_called_once()
+    clock[0] += 301
+    restarted.open(request, open_url=Mock(return_value=Response())).close()
+    assert restarted.authentication_status(True) == {"state": "valid", "expires_at": None}
+    assert restarted.authentication_status(False) == {"state": "missing", "expires_at": None}
+
+
+def test_rate_limit_does_not_mislabel_token_as_expired(tmp_path, clock):
+    cache = GitHubInventoryCache(tmp_path)
+    with pytest.raises(HTTPError):
+        cache.open(
+            Request(URL, headers={"Authorization": "Bearer valid-test-token"}),
+            open_url=Mock(side_effect=HTTPError(URL, 403, "Rate limited", {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(clock[0] + 600)}, None)),
+        )
+    assert cache.authentication_status(True) == {"state": "unknown", "expires_at": None}
+    assert cache.limit["retry_at"] > clock[0]

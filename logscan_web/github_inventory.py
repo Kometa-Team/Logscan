@@ -6,7 +6,7 @@ import math
 import re
 import threading
 import time
-from datetime import UTC
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from io import BytesIO
 from pathlib import Path
@@ -29,6 +29,32 @@ class GitHubInventoryCache:
         self.limit = self._read(directory / "rate-limit.json") or {}
         if any(not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 for value in self.limit.values()):
             self.limit = {}
+        self.authentication = self._read(directory / "authentication.json") or {}
+        if not isinstance(self.authentication.get("checked_at", 0), (int, float)) or not math.isfinite(self.authentication.get("checked_at", 0)):
+            self.authentication = {}
+
+    def authentication_status(self, configured):
+        if not configured:
+            return {"state": "missing", "expires_at": None}
+        state = self.authentication.get("state", "unknown")
+        expires_at = self.authentication.get("expires_at")
+        if not isinstance(expires_at, (int, float)) or not math.isfinite(expires_at):
+            expires_at = None
+        if expires_at is not None and expires_at <= time.time():
+            state = "expired"
+        return {"state": state if state in {"valid", "rejected", "expired"} else "unknown", "expires_at": expires_at}
+
+    def _authentication_result(self, state, headers):
+        expires_at = self.authentication.get("expires_at")
+        value = headers.get("GitHub-Authentication-Token-Expiration")
+        if value:
+            try:
+                parsed = datetime.fromisoformat(value.strip().removesuffix(" UTC"))
+                expires_at = (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                pass
+        self.authentication = {"state": state, "checked_at": time.time(), "expires_at": expires_at}
+        self._write(self.directory / "authentication.json", self.authentication)
 
     @staticmethod
     def _read(path):
@@ -91,6 +117,7 @@ class GitHubInventoryCache:
             ):
                 entry = None
             now = time.time()
+            authenticated = bool(request.get_header("Authorization"))
             immutable = re.search(r"/git/trees/([0-9a-f]{40})(?:\?|$)", url)
             if entry is not None and (
                 0 <= now - entry["checked_at"] < self.max_age or (immutable and entry["body"].get("sha") == immutable[1] and entry["body"].get("truncated") is False)
@@ -99,6 +126,9 @@ class GitHubInventoryCache:
                 if immutable:
                     entry = {**entry, "checked_at": now}
                 return InventoryResponse(entry)
+            authentication = self.authentication_status(authenticated)
+            if authenticated and (authentication["state"] == "expired" or (authentication["state"] == "rejected" and now - float(self.authentication.get("checked_at", 0)) < 300)):
+                raise HTTPError(url, 401, "GitHub token has expired or is invalid", {}, None)
             retry_at = float(self.limit.get("retry_at", 0))
             if retry_at > now:
                 raise HTTPError(url, 429, "GitHub inventory requests paused until the rate limit resets", {"Retry-After": str(int(retry_at - now) + 1)}, None)
@@ -122,6 +152,8 @@ class GitHubInventoryCache:
                     response_headers = response.headers
             except HTTPError as exc:
                 response_headers = exc.headers or {}
+                if authenticated and exc.code == 401:
+                    self._authentication_result("rejected", response_headers)
                 if exc.code == 304 and entry is not None:
                     result = {
                         **entry,
@@ -139,6 +171,8 @@ class GitHubInventoryCache:
                     if rate_limited:
                         self._backoff(response_headers)
                     raise
+            if authenticated:
+                self._authentication_result("valid", response_headers)
             if response_headers.get("X-RateLimit-Remaining") == "0":
                 self._backoff(response_headers)
             elif self.limit:
