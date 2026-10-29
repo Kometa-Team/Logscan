@@ -489,7 +489,7 @@ def create_app() -> Flask:
         api_key = app.config["TMDB_API_KEY"]
         if not api_key:
             return None
-        query = urlencode({"api_key": api_key, **(params or {})})
+        query = urlencode({"api_key": api_key, "language": "en-US", **(params or {})})
         request_url = f"https://api.themoviedb.org/3{path}?{query}"
         try:
             with urlopen(Request(request_url, headers={"Accept": "application/json"}), timeout=10) as response:
@@ -504,6 +504,43 @@ def create_app() -> Flask:
         except (URLError, TimeoutError, ValueError):
             app.logger.warning("TMDb lookup failed for %s", path)
             return None
+
+    trending_name_cache = {}
+    trending_name_lock = threading.Lock()
+
+    def english_trending_names(people: list[dict]) -> list[dict]:
+        # Find/popular results can carry a native-script name even when person
+        # details returns an English label. Resolve only those names, retaining
+        # feed rankings, credits, images and IDs. Cached previews stay offline.
+        candidates = [person for person in people if person.get("id") and any(char.isalpha() and "LATIN" not in unicodedata.name(char, "") for char in person.get("name", ""))]
+        if not candidates:
+            return people
+
+        def resolve(person):
+            key = (person["id"], person["name"])
+            with trending_name_lock:
+                cached = trending_name_cache.get(key)
+            if cached and cached[0] > time.monotonic():
+                return person["id"], cached[1]
+            details = tmdb_get(f"/person/{person['id']}")
+            name = (details or {}).get("name")
+            if not details or details.get("id") != person["id"] or not isinstance(name, str) or not name.strip():
+                name = None
+            with trending_name_lock:
+                if len(trending_name_cache) >= 500:
+                    trending_name_cache.pop(next(iter(trending_name_cache)))
+                trending_name_cache[key] = (time.monotonic() + (POPULAR_PEOPLE_CACHE_SECONDS if name else 5), name)
+            return person["id"], name
+
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="tmdb-name") as executor:
+            names = dict(executor.map(resolve, candidates))
+        # Existing automated requests also need the corrected name so inventory
+        # reconciliation finds posters published under that English filename.
+        for record in people_store.list():
+            name = names.get(record.get("tmdb_id"))
+            if name and name != record.get("name"):
+                people_store.upsert({"key": record["key"], "tmdb_id": record["tmdb_id"], "name": name})
+        return [{**person, "name": names[person["id"]]} if names.get(person.get("id")) else person for person in people]
 
     def _kometa_image_urls(progress=None, *, candidates=()) -> dict[str, dict[str, str]]:
         """Map each image source to its case-insensitive person-name URLs."""
@@ -769,7 +806,7 @@ def create_app() -> Flask:
                 seen_ids.add(person_id)
                 popular.append({**person, "starmeter_rank": starmeter_rank})
                 if len(popular) >= POPULAR_PEOPLE_LIMIT:
-                    return popular
+                    return english_trending_names(popular)
         tmdb_page = 1
         while len(popular) < POPULAR_PEOPLE_LIMIT:
             if progress:
@@ -789,7 +826,7 @@ def create_app() -> Flask:
             tmdb_page += 1
             if tmdb_page > (data or {}).get("total_pages", 0):
                 break
-        return popular
+        return english_trending_names(popular)
 
     def record_automated_popular_requests(people: list[dict], progress=None) -> int:
         # Only verified inventory gaps can create requests. Unknown fallback
@@ -865,7 +902,7 @@ def create_app() -> Flask:
         if cached_people:
             if not fresh:
                 _refresh_popular_people_in_background()
-            return _filtered_popular_people(cached_people)
+            return _filtered_popular_people(english_trending_names(cached_people))
 
         with popular_people_lock:
             if popular_people_refreshing:
@@ -2287,13 +2324,22 @@ def create_app() -> Flask:
         available_tags = available_people_tags(base_candidates)
         candidates = filter_people_by_tag(base_candidates, request.args.get("tag", ""))
         candidates = filter_people_by_selected_tags(candidates, request.args.getlist("tags"), available_tags)
-        export = "\n".join(
-            f"{person['tmdb_id']}|{person.get('original_name', person['name'])}"
-            for person in candidates
-            if person.get("tmdb_id")
-            and person.get("people_image_status") != "pending_verification"
-            and not {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
-        )
+        lines = []
+        for person in candidates:
+            if (
+                not person.get("tmdb_id")
+                or person.get("people_image_status") == "pending_verification"
+                or {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
+            ):
+                continue
+            name = person["name"]
+            original_name = person.get("original_name")
+            # Keep equivalent accented spellings used by existing filenames,
+            # but use the displayed TMDb name for a different log alias.
+            if original_name and _person_name_key(original_name) == _person_name_key(name):
+                name = original_name
+            lines.append(f"{person['tmdb_id']}|{name}")
+        export = "\n".join(lines)
         return send_file(
             BytesIO(export.encode("utf-8")),
             mimetype="text/plain",
