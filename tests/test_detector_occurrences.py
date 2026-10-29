@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from logscan_web.models import ScanContext
-from logscan_web.recommendations import RecommendationRule
+from logscan_web.recommendations import RecommendationRule, schema_fingerprint
 from logscan_web.rules.base import EVIDENCE_LIMIT, TextRule, evaluate_text_rules_bytes
 from logscan_web.rules.kometa import PlexSecurityRule
 from logscan_web.scanner import scan_archive_path, scan_log
@@ -209,12 +209,14 @@ class DetectorOccurrenceTests(unittest.TestCase):
         for item in result.recommendations:
             item.pop("occurrence_count", None)
             item.pop("evidence_truncated", None)
+        config_schema = {"type": "object"}
         schema = {
             "schema_validation_count": 0,
             "schema_validation_version": SCHEMA_VALIDATION_VERSION,
             "schema_validation_checked_at": datetime.now(UTC).isoformat(),
             "schema_validation_failures": [],
             "schema_validation_branch": "develop",
+            "schema_validation_digest": schema_fingerprint(config_schema),
             "schema_directive_missing": True,
         }
         result.metadata.update(analysis_version=7, **schema)
@@ -222,6 +224,9 @@ class DetectorOccurrenceTests(unittest.TestCase):
         result.overview.update(attribution)
         with tempfile.TemporaryDirectory() as directory:
             store = ScanStore(directory)
+            cache = Path(directory) / ".schema-cache"
+            cache.mkdir()
+            (cache / "develop.json").write_text(json.dumps(config_schema), encoding="utf-8")
             scan_id, token = store.create("meta.log", content, result)
             before = store.get(scan_id)
             with (
