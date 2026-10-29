@@ -291,7 +291,7 @@ def test_github_api_failure_uses_validated_index_and_keeps_cache(service, status
     assert record["style_availability"]["bw"]["status"] == "unknown"
     assert "outdated" in record["style_availability"]["bw"]["reason"]
     upload(app, poster_error("signature"))
-    assert sum("api.github.com" in url for url in state["calls"]) == (14 if status == 500 else 7)
+    assert sum("api.github.com" in url for url in state["calls"]) == (14 if status == 500 else 1 if status == 429 else 7)
     assert sum("raw.githubusercontent.com" in url for url in state["calls"]) == 7
 
 
