@@ -260,20 +260,25 @@ style uses PNG assets and the other styles use JPG assets. Legacy root image
 URLs remain recognized. No person-specific applicability exclusions are
 currently declared. Compact card details show each style's availability.
 
-The service loads complete GitHub file trees in batches of four. If a recursive
-tree fails with a server error or is incomplete, it reads smaller directory trees
-from the same repository revision. If a directory fails, verified images from
-other directories remain available, but omitted people stay unknown. Retries reuse
-verified directory contents when the fresh root listing confirms the same Git hash.
-If the root listing fails, it uses each repository's generated image index after
-checking the declared image count and every image URL.
-Poster syncs can skip README updates, so an index omission stays unknown and never
-confirms that a style is missing. Results store the Git revision or index hash and
-verification time. Complete file checks are cached for one hour. Unverified
-omissions remain unknown and never clear outstanding candidates. Failed checks,
-partial listings, and index fallbacks retry on the next refresh after five minutes
-without refetching fresh styles. When an inventory cannot verify a person's
-images, Logscan checks their standard raw image URLs with small HEAD requests.
+The service downloads the seven full repository READMEs in batches of four and
+checks the declared image count and every image URL. These public indexes are the
+primary source for all people lookups. They are cached for one hour in memory and
+on disk under `.people-readme-cache` in the scan store, including across restarts.
+Expired indexes use conditional requests so unchanged files need not be downloaded
+again. Displaying trending people makes no individual image probes or file-tree
+requests when the indexes are available.
+
+Poster syncs can skip README updates, so an index omission stays unknown until
+verified. For submitted people and automated Top 250 requests, Logscan checks a
+GitHub file inventory only for styles whose index cannot resolve the candidate.
+If the recursive tree fails and a valid README exists, Logscan keeps that index
+without expanding the lookup into directory trees. Directory-tree recovery is
+reserved for unavailable or invalid READMEs. Verified images from successful
+directories remain usable, but partial listings cannot confirm absence. Standard
+raw image URLs are probed only for unresolved submitted people, never the entire
+trending list. Results retain the index hash or Git revision and verification time.
+Complete file checks are cached for one hour. Failed verification retries on the
+next relevant refresh after five minutes without downloading fresh READMEs again.
 
 GitHub file inventories and their conditional-request headers are cached on disk
 under the scan store, so restarts reuse fresh responses. Unchanged inventories

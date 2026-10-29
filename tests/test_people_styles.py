@@ -291,8 +291,74 @@ def test_github_api_failure_uses_validated_index_and_keeps_cache(service, status
     assert record["style_availability"]["bw"]["status"] == "unknown"
     assert "outdated" in record["style_availability"]["bw"]["reason"]
     upload(app, poster_error("signature"))
-    assert sum("api.github.com" in url for url in state["calls"]) == (14 if status == 500 else 1 if status == 429 else 7)
+    assert sum("api.github.com" in url for url in state["calls"]) == 1
     assert sum("raw.githubusercontent.com" in url for url in state["calls"]) == 7
+
+
+def test_seven_readmes_resolve_all_styles_and_survive_restart(service):
+    state, create, root = service
+    state["missing"] = set()
+    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    state["http_errors"] = {style.key: 500 for style in PEOPLE_IMAGE_STYLES}
+    app = create()
+    person = app.test_client().get("/api/people").json["people"][0]
+    assert person["people_image_status"] == "complete"
+    assert all(style["image_url"].startswith("https://raw.githubusercontent.com/") for style in person["style_availability"].values())
+    upload(app)
+    restarted = create()
+    assert restarted.test_client().get("/api/people").json["people"][0]["people_image_status"] == "complete"
+    assert sum("README.md" in url for url in state["calls"]) == 7
+    assert not any("api.github.com" in url for url in state["calls"])
+    assert not state["head_calls"]
+    assert len(list((root / ".people-readme-cache").glob("*.json"))) == 7
+
+
+def test_trending_gaps_do_not_trigger_file_trees_or_per_person_probes(service):
+    state, create, root = service
+    state["missing"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    (root / "popular_people_cache.json").write_text(
+        json.dumps(
+            {
+                "updated_at": datetime.now(UTC).isoformat(),
+                "people": [{"id": index + 1, "name": f"Trending Person {index}", "profile_path": "/current.jpg"} for index in range(250)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = create().test_client()
+    payload = client.get("/api/people").json
+    assert payload["people"]
+    assert all(person["people_image_status"] == "pending_verification" for person in payload["people"])
+    client.get("/api/people?page=2")
+    assert sum("README.md" in url for url in state["calls"]) == 7
+    assert not any("api.github.com" in url for url in state["calls"])
+    assert not state["head_calls"]
+    assert not PeopleStore(root).list()
+
+
+def test_new_log_candidate_verifies_only_the_gap_in_a_cached_readme(service):
+    state, create, root = service
+    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    app = create()
+    assert app.test_client().get("/api/people").json["people"][0]["people_image_status"] == "pending_verification"
+    assert not any("api.github.com" in url for url in state["calls"])
+    result = upload(app)
+    assert any(item["id"] == "missing_people_images_pending" for item in result["recommendations"])
+    assert PeopleStore(root).list()[0]["style_availability"]["bw"]["status"] == "missing"
+    assert [url for url in state["calls"] if "api.github.com" in url] == [PEOPLE_IMAGE_STYLES[1].inventory_url]
+    assert sum("README.md" in url for url in state["calls"]) == 7
+    assert not state["head_calls"]
+
+
+def test_valid_readme_prevents_large_directory_fallback_when_gap_check_fails(service):
+    state, create, root = service
+    state["index_available"] = {style.key for style in PEOPLE_IMAGE_STYLES}
+    state["missing"] = {"transparent"}
+    state["split_styles"] = {"transparent"}
+    upload(create())
+    assert PeopleStore(root).list()[0]["people_image_status"] == "pending_verification"
+    assert [url for url in state["calls"] if "api.github.com" in url] == [PEOPLE_IMAGE_STYLES[-1].inventory_url]
 
 
 @pytest.mark.parametrize("missing", [False, True])
@@ -314,7 +380,7 @@ def test_large_transparent_inventory_uses_immutable_directory_trees(service, mis
     assert person["people_image_status"] == ("incomplete" if missing else "complete")
     assert person["sources"] == (["missing", "trending"] if missing else ["trending"])
     assert sum("api.github.com" in url for url in state["calls"]) == 9
-    assert not any("README.md" in url for url in state["calls"])
+    assert sum("README.md" in url for url in state["calls"]) == 7
 
 
 @pytest.mark.parametrize("status", [403, 429, 500])
@@ -395,7 +461,7 @@ def test_verified_directory_images_survive_failure_in_another_directory(service,
     else:
         assert transparent["image_url"].endswith("/B/Images/Bruce%20Langley.png")
         assert PeopleStore(root).list() == []
-    assert not any("README.md" in url for url in state["calls"])
+    assert sum("README.md" in url for url in state["calls"]) == 7
     initial_calls = len(state["calls"])
     now = time.monotonic()
     monkeypatch.setattr("logscan_web.app.time.monotonic", lambda: now + 301)

@@ -5,6 +5,7 @@ import time
 from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 from urllib.parse import urlsplit
+from urllib.error import URLError
 
 import pytest
 
@@ -179,6 +180,8 @@ def test_people_worker_builds_real_payload_with_relative_image_links(service, mo
 
     def fetch(request, **_kwargs):
         url = request.full_url
+        if url.endswith("/README.md"):
+            raise URLError("Index unavailable")
         if "api.github.com" in url:
             return Response({"sha": "current", "truncated": False, "tree": []})
         if "/person/2?" in url:

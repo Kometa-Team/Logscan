@@ -132,7 +132,7 @@ def parse_people_inventory(style: PeopleImageStyle, tree: dict) -> dict[str, str
 
 
 def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] | None:
-    """Validate a repository's generated image index when GitHub's tree API fails.
+    """Validate a repository's generated image index for the primary lookup.
 
     Every declared image must be listed and point into the expected repository.
     Even a valid index can lag behind poster syncs, so it cannot confirm absence.
