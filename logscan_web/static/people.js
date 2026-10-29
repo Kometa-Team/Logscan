@@ -68,13 +68,16 @@ function addImage(images, image, label, missingMessage, name) {
   images.append(image ? imageCard({ ...image, label, alt: `${name} ${label}` }) : noImage(missingMessage));
 }
 
-function sourceBadges(sources, requesters = [], metadataTags = [], provenanceTags = [], tmdbImagesUrl = null, imageStatus = null) {
+function sourceBadges(sources = [], requesters = [], metadataTags = [], provenanceTags = [], tmdbImagesUrl = null, imageStatus = null) {
   const badges = document.createElement("div");
   badges.className = "source-badges";
   sources.forEach((source) => {
     const badge = document.createElement("span");
     badge.className = `source-badge ${source}`;
-    badge.textContent = source === "missing" ? imageStatus === "pending_verification" ? "Pending verification" : "Missing Kometa" : source[0].toUpperCase() + source.slice(1);
+    badge.textContent = source === "missing" ? imageStatus === "pending_verification" ? "Kometa verification pending" : "Missing Kometa" : source[0].toUpperCase() + source.slice(1);
+    if (source === "missing" && imageStatus === "pending_verification") {
+      badge.title = "A Kometa repository check could not finish. Logscan retries automatically after five minutes.";
+    }
     badges.append(badge);
   });
   metadataTags.forEach((tag) => {
@@ -136,7 +139,7 @@ function addTmdbImage(images, person) {
   addImage(images, person.tmdb_image, imageLabel, noImageMessage, person.name);
 }
 
-function addPerson(person) {
+function addPerson(person, targetGallery = gallery, searchResult = false) {
   const card = document.createElement("article");
   card.className = "person-card";
   if (person.sources?.includes("missing")) card.classList.add("missing-kometa-person");
@@ -177,7 +180,8 @@ function addPerson(person) {
   exclude.innerHTML = '<i class="fa-solid fa-ban" aria-hidden="true"></i>';
   exclude.addEventListener("click", () => runAction(person, "exclude", card));
   controls.append(check, flag, exclude);
-  controls.hidden = !actionsEnabled;
+  controls.hidden = searchResult || !actionsEnabled;
+  if (!controls.hidden) card.classList.add("has-person-controls");
 
   const heading = document.createElement("h2");
   if (person.tmdb_person_url) {
@@ -221,13 +225,17 @@ function addPerson(person) {
     label.textContent = "TMDb image required";
     const message = document.createElement("span");
     if (person.tmdb_images_url) {
-      message.append("Use the Google Image Search tile below to find an acceptable person poster, then upload it to ");
+      message.append("Find a suitable portrait using ");
+      const imageSearch = googleImageSearchTile(person.name);
+      imageSearch.className = "";
+      imageSearch.replaceChildren(document.createTextNode("Google Image Search"));
+      message.append(imageSearch, ", then submit it to ");
       const link = document.createElement("a");
       link.href = person.tmdb_images_url;
       link.target = "_blank";
       link.rel = "noopener";
       link.textContent = "TMDb profile images";
-      message.append(link, ".");
+      message.append(link, ". Once a suitable image is available on TMDb, search again to request the poster.");
     } else {
       message.textContent = "This person could not be resolved on TMDb. Resolve the TMDb person before processing their poster.";
     }
@@ -237,21 +245,15 @@ function addPerson(person) {
   const images = document.createElement("div");
   images.className = "image-row";
   addTmdbImage(images, person);
-  if (person.kometa_image) {
-    addImage(images, { preview_url: person.kometa_image, download_url: person.kometa_image }, "Kometa Repo Image", "", person.name);
-  }
-  images.append(googleImageSearchTile(person.name));
-
-  const variants = person.kometa_variant_images || [];
   const variantSection = document.createElement("details");
   variantSection.className = "people-variant-section";
-  if (variants.length) {
+  if (Object.keys(person.style_availability || {}).length) {
     const summary = document.createElement("summary");
-    summary.textContent = `Show ${variants.length} more repository ${variants.length === 1 ? "style" : "styles"}`;
-    const variantImages = document.createElement("div");
-    variantImages.className = "image-row variant-image-row";
-    variants.forEach((variant) => addImage(variantImages, { preview_url: variant.url, download_url: variant.url }, variant.label, "", person.name));
-    variantSection.append(summary, variantImages);
+    summary.textContent = "Show all seven Kometa poster styles";
+    const imageSearch = googleImageSearchTile(person.name);
+    imageSearch.className = "people-image-search";
+    imageSearch.replaceChildren(document.createTextNode("Google Image Search"));
+    variantSection.append(summary, window.PeopleImages.styleGallery(person), imageSearch);
   } else variantSection.hidden = true;
 
   const flagReason = document.createElement("aside");
@@ -261,7 +263,8 @@ function addPerson(person) {
     flagReason.append(label, document.createTextNode(person.flag_reason));
   } else flagReason.hidden = true;
   card.append(controls, identity, detail, knownFor, guidance, flagReason, images, styleAvailability(person), variantSection);
-  gallery.append(card);
+  targetGallery.append(card);
+  return card;
 }
 
 function pageLink(number, label, disabled = false) {
@@ -298,6 +301,6 @@ fetch(`/api/people?${apiParams}`).then(async (response) => {
   if (tagQuery) tagCount.textContent = `${totalResults} ${totalResults === 1 ? "result" : "results"}`;
   gallery.replaceChildren();
   if (!people.length) gallery.textContent = "No people match these filters.";
-  else people.forEach(addPerson);
+  else people.forEach((person) => addPerson(person));
   pagination.replaceChildren(pageLink(currentPage - 1, "Previous", currentPage === 1), pageJumper(currentPage, totalPages), pageLink(currentPage + 1, "Next", currentPage === totalPages));
 }).catch((error) => { gallery.textContent = error.message; });

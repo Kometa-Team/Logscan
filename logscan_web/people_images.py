@@ -2,11 +2,16 @@
 
 import re
 import hashlib
+import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from http.client import HTTPException
 from pathlib import PurePosixPath
+from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urlsplit
+from urllib.request import Request
 
 
 def person_name_key(value: str | None) -> str:
@@ -43,16 +48,17 @@ PEOPLE_IMAGE_STYLES = (
     PeopleImageStyle("diiivoycolor", "DIIIVOY Color", "People-Images-diiivoycolor"),
     PeopleImageStyle("rainier", "Rainier", "People-Images-rainier"),
     PeopleImageStyle("signature", "Signature", "People-Images-signature"),
-    PeopleImageStyle("transparent", "Transparent", "People-Images-transparent"),
+    PeopleImageStyle("transparent", "Transparent", "People-Images-transparent", extensions=(".png", ".jpg")),
 )
 
 
 class PeopleImageInventory(dict):
     """Name index with the Git revision and time successfully verified."""
 
-    def __init__(self, images: dict[str, str], revision: str):
+    def __init__(self, images: dict[str, str], revision: str, *, complete: bool = True):
         super().__init__(images)
         self.revision = revision
+        self.complete = complete
         self.checked_at = datetime.now(UTC).isoformat()
 
 
@@ -129,7 +135,7 @@ def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] 
     """Validate a repository's generated image index when GitHub's tree API fails.
 
     Every declared image must be listed and point into the expected repository.
-    Truncated or malformed documents cannot confirm absence.
+    Even a valid index can lag behind poster syncs, so it cannot confirm absence.
     """
     header = re.search(r"^# Kometa People Images[^\n]*\(([\d,]+) Images\)\s*$", readme, re.M)
     if not header:
@@ -147,7 +153,78 @@ def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] 
         if parsed is None or parsed[0] != style:
             return None
         images[person_name_key(parsed[1])] = url
-    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest())
+    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest(), complete=False)
+
+
+def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_url, cache: dict) -> PeopleImageInventories:
+    """Recover present images omitted by unverified listings, without inferring absence.
+
+    Raw image HEAD requests do not consume GitHub's inventory API quota. A 404
+    cannot rule out another filename, so unsuccessful checks stay unknown.
+    The caller serializes access to the short-lived probe cache.
+    """
+    now = time.monotonic()
+    for url in list(cache):
+        if cache[url]["expires_at"] <= now:
+            del cache[url]
+    tasks = {}
+    for candidate in candidates:
+        assessment = assess_people_images(candidate, inventories)
+        for style in PEOPLE_IMAGE_STYLES:
+            if assessment["style_availability"][style.key]["status"] != "unknown":
+                continue
+            names = tuple(dict.fromkeys(unicodedata.normalize("NFC", candidate.get(field) or "").strip() for field in ("name", "original_name")))
+            tasks[(style.key, names)] = (style, names)
+
+    def check_candidate(task):
+        style, names = task
+        for name in names:
+            if not name:
+                continue
+            for prefix in (f"{name[0].upper()}/Images/", ""):
+                for extension in style.extensions:
+                    url = f"https://raw.githubusercontent.com/Kometa-Team/{style.repository}/{style.branch}/{quote(prefix + name + extension, safe='/')}"
+                    parsed = person_from_image_url(url)
+                    if parsed is None:
+                        continue
+                    result = cache.get(url)
+                    if result is None:
+                        result = {"present": False, "try_next": False, "checked_at": datetime.now(UTC).isoformat()}
+                        try:
+                            with open_url(Request(url, method="HEAD", headers={"User-Agent": "Kometa-Logscan/1.0", "Accept": "image/*"}), timeout=5) as response:
+                                result["present"] = getattr(response, "status", None) == 200 and response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() in {
+                                    "image/jpeg",
+                                    "image/png",
+                                }
+                        except HTTPError as exc:
+                            result["try_next"] = exc.code == 404
+                        except (OSError, ValueError, HTTPException):
+                            pass
+                        result["expires_at"] = time.monotonic() + (3600 if result["present"] else 300)
+                        cache[url] = result
+                    if result["present"]:
+                        return style, person_name_key(parsed[1]), url, result["checked_at"]
+                    if not result["try_next"]:
+                        return None
+        return None
+
+    images = PeopleImageInventories(inventories, errors=dict(getattr(inventories, "errors", {})))
+    copied = set()
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-image-check") as executor:
+        for result in executor.map(check_candidate, tasks.values()):
+            if result is None:
+                continue
+            style, name, url, checked_at = result
+            if style.label not in copied:
+                previous = images.get(style.label)
+                inventory = PeopleImageInventory(dict(previous or {}), getattr(previous, "revision", "image-urls"), complete=False)
+                inventory.checked_at = getattr(previous, "checked_at", checked_at)
+                inventory.verified_images = {}
+                images[style.label] = inventory
+                copied.add(style.label)
+            images[style.label][name] = url
+            images[style.label].verified_images[name] = checked_at
+    return images
 
 
 def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]] | None) -> dict:
@@ -162,11 +239,26 @@ def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]]
             status = "unknown"
         else:
             status = "present" if any(name in inventory for name in names) else "missing"
+            if status == "missing" and isinstance(inventory, PeopleImageInventory) and not inventory.complete:
+                status = "unknown"
         availability[style.key] = {"label": style.label, "repository": style.repository, "status": status}
+        if status == "present":
+            url = next(inventory[name] for name in sorted(names) if name in inventory)
+            parsed = person_from_image_url(url)
+            if parsed and parsed[0] == style:
+                availability[style.key]["image_url"] = url
         if status == "unknown":
-            availability[style.key]["reason"] = getattr(inventories, "errors", {}).get(style.label, "Repository inventory has not been verified.")
+            failure = getattr(inventories, "errors", {}).get(style.label, "")
+            availability[style.key]["reason"] = (
+                (failure + " " if failure else "") + "The repository inventory may be incomplete or outdated; absence has not been verified against the current files."
+                if isinstance(inventory, PeopleImageInventory) and not inventory.complete
+                else failure or "Repository inventory has not been verified."
+            )
         if isinstance(inventory, PeopleImageInventory):
             availability[style.key].update(checked_at=inventory.checked_at, revision=inventory.revision)
+            verified_at = next((getattr(inventory, "verified_images", {}).get(name) for name in names if name in getattr(inventory, "verified_images", {})), None)
+            if verified_at:
+                availability[style.key].update(checked_at=verified_at, verification_source="image_url")
     states = {item["status"] for item in availability.values()}
     overall = "incomplete" if "missing" in states else "pending_verification" if "unknown" in states else "complete"
     return {**candidate, "style_availability": availability, "people_image_status": overall}

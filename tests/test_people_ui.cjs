@@ -36,7 +36,8 @@ test("distinguishes verified completeness from pending verification", () => {
 
 test("pending verification does not claim artwork is confirmed missing", () => {
   const badges = context.sourceBadges(["missing"], [], [], [], null, "pending_verification");
-  assert.equal(badges.children[0].textContent, "Pending verification");
+  assert.equal(badges.children[0].textContent, "Kometa verification pending");
+  assert.match(badges.children[0].title, /Kometa repository.*retries automatically/);
 });
 
 test("log image previews have a source label and lookup failures do not claim absence", () => {
@@ -51,4 +52,197 @@ test("log image previews have a source label and lookup failures do not claim ab
   assert.equal(images[1][3], "TMDb preview unavailable");
   rendering.addTmdbImage({}, { tmdb_image_status: "missing" });
   assert.equal(images[2][3], "No current TMDb image");
+});
+
+function searchHarness(responses) {
+  class Element {
+    constructor(tag) {
+      this.tag = tag; this.children = []; this.events = {}; this.dataset = {}; this.attributes = {};
+      this.classList = { add: () => {} };
+    }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    setAttribute(key, value) { this.attributes[key] = value; }
+    addEventListener(key, callback) { this.events[key] = callback; }
+  }
+  const ids = Object.fromEntries(["poster-search", "poster-search-input", "poster-search-status", "poster-search-choices", "poster-search-result"].map((id) => [id, new Element("div")]));
+  ids["poster-search"].dataset.csrf = "server-token";
+  const calls = [];
+  const sandbox = vm.createContext({
+    document: { createElement: (tag) => new Element(tag), createTextNode: (text) => text, querySelector: (selector) => ids[selector.slice(1)] },
+    window: {}, URLSearchParams,
+    fetch: async (...args) => {
+      calls.push(args);
+      const next = responses.shift();
+      return { ok: !next.error, json: async () => next };
+    },
+  });
+  vm.runInContext(readFileSync("logscan_web/static/people_images.js", "utf8"), sandbox);
+  vm.runInContext("const { imageCard, noImage, googleImageSearchTile } = window.PeopleImages; const gallery = document.createElement('div'); const actionsEnabled = false;", sandbox);
+  vm.runInContext(source.slice(source.indexOf("function addImage("), source.indexOf("async function runAction(")), sandbox);
+  vm.runInContext(source.slice(source.indexOf("function styleAvailability("), source.indexOf("function pageLink(")), sandbox);
+  vm.runInContext(readFileSync("logscan_web/static/people_search.js", "utf8"), sandbox);
+  return { ids, calls, sandbox, async search(value) {
+    ids["poster-search-input"].value = value;
+    ids["poster-search"].events.submit({ preventDefault() {} });
+    await new Promise(setImmediate);
+  } };
+}
+
+function descendants(element, predicate) {
+  return [element, ...(element.children || []).flatMap((child) => typeof child === "object" ? descendants(child, predicate) : [])].filter(predicate);
+}
+
+function searchPerson(status = "incomplete", alreadyAdded = false) {
+  return {
+    tmdb_id: 777, name: "张子枫 <script>", sources: [], tmdb_person_url: "https://www.themoviedb.org/person/777",
+    known_for_department: "Acting", known_for: [{ title: "A known film", url: "https://www.themoviedb.org/movie/123" }],
+    tmdb_image: { preview_url: "https://image.tmdb.org/t/p/w342/profile.jpg", download_url: "/api/tmdb/image-download?image_path=/profile.jpg" },
+    tmdb_image_status: "available", people_image_status: status, can_add: status === "incomplete", already_added: alreadyAdded,
+    style_availability: Object.fromEntries(["primary", "bw", "diiivoy", "diiivoycolor", "rainier", "signature", "transparent"].map((key, index) => [key, {
+      label: key, status: status === "pending_verification" ? "unknown" : status === "complete" || index % 2 === 0 ? "present" : "missing",
+      image_url: `https://raw.githubusercontent.com/Kometa-Team/People-Images/master/P/Images/${key}.jpg`,
+    }])),
+  };
+}
+
+test("search reuses the People card with only the TMDb image expanded and seven styles collapsed", async () => {
+  const person = searchPerson();
+  const harness = searchHarness([{ people: [person] }, { message: "Poster requested" }]);
+  await harness.search("777");
+  const card = harness.ids["poster-search-result"].children[0];
+  assert.equal(card.className, "person-card");
+  const visibleImages = card.children.find((child) => child.className === "image-row");
+  assert.equal(visibleImages.children.length, 1);
+  assert.equal(descendants(visibleImages, (node) => node.tag === "img")[0].src, person.tmdb_image.preview_url);
+  const sections = descendants(card, (node) => node.tag === "details");
+  assert.equal(sections.length, 2);
+  assert(sections.every((node) => !node.open));
+  const grid = descendants(card, (node) => node.className === "poster-style-gallery")[0];
+  assert.equal(grid.children.length, 7);
+  assert.equal(descendants(grid, (node) => node.tag === "img").length, 4);
+  const previews = descendants(grid, (node) => node.className === "person-image");
+  const downloads = descendants(grid, (node) => node.className === "image-download");
+  assert.equal(previews.length, 4); assert.equal(downloads.length, 4);
+  previews.forEach((preview, index) => assert.equal(preview.href, downloads[index].href));
+  assert.equal(descendants(card, (node) => node.tag === "h2")[0].children[0].textContent, person.name);
+  const button = descendants(card, (node) => node.textContent === "Request poster")[0];
+  await button.events.click();
+  assert.equal(button.textContent, "Already requested"); assert.equal(button.disabled, true);
+  const [url, options] = harness.calls[1];
+  assert.equal(url, "/api/people/request");
+  assert.deepEqual(JSON.parse(options.body), { tmdb_id: 777 });
+  assert.equal(options.headers["X-CSRF-Token"], "server-token");
+});
+
+test("name search offers separate Unicode identities and fetches the selected exact TMDb ID", async () => {
+  const harness = searchHarness([{ choices: [{ tmdb_id: 777, name: "Renée", profile_image_url: "https://image.tmdb.org/t/p/w185/renee.jpg", known_for_department: "Acting", known_for: ["Film"] }, { tmdb_id: 778, name: "Renée" }] }, { people: [searchPerson()] }]);
+  await harness.search("Renée");
+  const choices = harness.ids["poster-search-choices"].children;
+  assert.equal(choices.length, 2);
+  assert.equal(choices[0].attributes["aria-label"], "Select Renée, TMDb 777");
+  assert.equal(descendants(choices[0], (node) => node.tag === "img")[0].src, "https://image.tmdb.org/t/p/w185/renee.jpg");
+  assert.equal(descendants(choices[0], (node) => node.textContent === "Known For: Acting (Film)").length, 1);
+  assert.equal(descendants(choices[1], (node) => node.textContent === "TMDb ID: 778").length, 1);
+  assert.equal(descendants(choices[1], (node) => node.textContent === "No profile image")[0].hidden, false);
+  choices[1].events.click();
+  await new Promise(setImmediate);
+  assert.equal(harness.calls[1][0], "/api/people/search?q=778");
+});
+
+test("failed search thumbnails retain identity and show a missing-photo placeholder", async () => {
+  const harness = searchHarness([{ choices: [{ tmdb_id: 777, name: "Mel Gibson", profile_image_url: "https://image.tmdb.org/t/p/w185/mel.jpg" }] }]);
+  await harness.search("Mel Gibson");
+  const choice = harness.ids["poster-search-choices"].children[0];
+  const image = descendants(choice, (node) => node.tag === "img")[0];
+  const placeholder = descendants(choice, (node) => node.textContent === "No profile image")[0];
+  assert.equal(placeholder.hidden, true);
+  image.events.error();
+  assert.equal(image.hidden, true);
+  assert.equal(placeholder.hidden, false);
+  assert.equal(choice.attributes["aria-label"], "Select Mel Gibson, TMDb 777");
+});
+
+test("selected search and main-list cards share identical metadata, image layout and collapsed sections", async () => {
+  const person = searchPerson("complete");
+  const harness = searchHarness([{ people: [person] }]);
+  await harness.search("777");
+  const searchCard = harness.ids["poster-search-result"].children[0];
+  const listCard = harness.sandbox.addPerson(person, harness.sandbox.document.createElement("div"));
+  const serialize = (card) => JSON.stringify(card, (key, value) => ["events", "classList"].includes(key) ? undefined : value);
+  assert.equal(serialize(searchCard), serialize(listCard));
+  for (const card of [searchCard, listCard]) {
+    assert.equal(card.children.find((child) => child.className === "image-row").children.length, 1);
+    assert.equal(descendants(card, (node) => node.textContent === "Show all seven Kometa poster styles").length, 1);
+    assert.equal(descendants(card, (node) => node.textContent === "A known film").length, 1);
+    assert.equal(descendants(card, (node) => node.className === "people-image-search").length, 1);
+    assert(descendants(card, (node) => node.tag === "details").every((node) => !node.open));
+  }
+});
+
+test("complete and unavailable inventories have no request button and keep seven gallery states", async () => {
+  for (const state of ["complete", "pending_verification"]) {
+    const harness = searchHarness([{ people: [searchPerson(state)] }]);
+    await harness.search("777");
+    const card = harness.ids["poster-search-result"].children[0];
+    assert.equal(descendants(card, (node) => node.textContent === "Request poster").length, 0);
+    const grid = descendants(card, (node) => node.className === "poster-style-gallery")[0];
+    assert.equal(grid.children.length, 7);
+    if (state === "pending_verification") {
+      assert.equal(descendants(grid, (node) => node.textContent === "Verification unavailable").length, 7);
+      assert.equal(descendants(grid, (node) => node.textContent === "Missing").length, 0);
+    } else assert.equal(descendants(grid, (node) => node.tag === "img").length, 7);
+  }
+});
+
+test("duplicate requests stay disabled and failed requests can be retried with a visible error", async () => {
+  const duplicate = searchHarness([{ people: [searchPerson("incomplete", true)] }]);
+  await duplicate.search("777");
+  assert.equal(descendants(duplicate.ids["poster-search-result"], (node) => node.textContent === "Already requested")[0].disabled, true);
+  const failing = searchHarness([{ people: [searchPerson()] }, { error: "TMDb unavailable" }]);
+  await failing.search("777");
+  const button = descendants(failing.ids["poster-search-result"], (node) => node.textContent === "Request poster")[0];
+  await button.events.click();
+  assert.equal(button.disabled, false);
+  assert.equal(failing.ids["poster-search-status"].textContent, "TMDb unavailable");
+});
+
+test("people without TMDb artwork get portrait search and submission links instead of a request button", async () => {
+  for (const posterStatus of ["incomplete", "pending_verification"]) {
+    const person = { ...searchPerson(posterStatus), tmdb_id: 2026, tmdb_image: null, tmdb_image_status: "missing", can_add: false, metadata_tags: ["Missing TMDb"], tmdb_images_url: "https://www.themoviedb.org/person/2026/images/profiles" };
+    const harness = searchHarness([{ people: [person] }]);
+    await harness.search("2026");
+    const card = harness.ids["poster-search-result"].children[0];
+    assert.equal(descendants(card, (node) => node.textContent === "Request poster").length, 0);
+    const guidance = descendants(card, (node) => node.className === "person-guidance")[0];
+    assert(!guidance.hidden);
+    assert.equal(guidance.children[0].textContent, "TMDb image required");
+    const links = descendants(guidance, (node) => node.tag === "a");
+    assert.equal(links[0].children[0], "Google Image Search");
+    assert.equal(new URL(links[0].href).searchParams.get("q"), person.name);
+    assert.equal(links[1].href, person.tmdb_images_url);
+    assert(guidance.children[1].children.includes(", then submit it to "));
+    assert(guidance.children[1].children.some((child) => typeof child === "string" && child.includes("Once a suitable image is available on TMDb")));
+    assert.equal(harness.calls.length, 1);
+  }
+});
+
+test("inconclusive TMDb artwork checks offer a retry explanation rather than a new request", async () => {
+  const reason = "TMDb image verification is unavailable. Please try again later.";
+  const person = { ...searchPerson(), tmdb_image: null, tmdb_image_status: "unknown", can_add: false, metadata_tags: ["TMDb verification pending"], request_unavailable_reason: reason };
+  const harness = searchHarness([{ people: [person] }]);
+  await harness.search("777");
+  const card = harness.ids["poster-search-result"].children[0];
+  assert.equal(descendants(card, (node) => node.textContent === "Request poster").length, 0);
+  assert.equal(descendants(card, (node) => node.textContent === reason).length, 1);
+  assert.equal(descendants(card, (node) => node.className === "person-guidance")[0].hidden, true);
+});
+
+test("existing requests stay visibly requested when TMDb artwork is missing", async () => {
+  const person = { ...searchPerson("incomplete", true), tmdb_image: null, tmdb_image_status: "missing", can_add: false, metadata_tags: ["Missing TMDb"], tmdb_images_url: "https://www.themoviedb.org/person/777/images/profiles" };
+  const harness = searchHarness([{ people: [person] }]);
+  await harness.search("777");
+  const card = harness.ids["poster-search-result"].children[0];
+  assert.equal(descendants(card, (node) => node.textContent === "Already requested")[0].disabled, true);
+  assert.equal(descendants(card, (node) => node.textContent === "Request poster").length, 0);
 });

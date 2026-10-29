@@ -192,6 +192,41 @@ missing obligation completes only when every applicable style is verified presen
 independent trending sources remain available. Filters and exports use the same union.
 Set `TMDB_API_KEY` so the service can resolve people and load profile images.
 
+Search by a person's name or exact numeric TMDb ID, including people outside
+the current queue. Name searches offer up to 20 TMDb identities before selection.
+Search results reuse the People card: the TMDb image is visible, and the seven
+Kometa styles are collapsed with previews, original-image links, and explicit
+missing or unavailable states. Select **Request poster** when at least one style
+is verified missing and usable TMDb profile artwork is verified. If TMDb has no
+suitable image, the card links to Google Image Search and the person's TMDb
+profile-image page so a visitor can find and submit a portrait before requesting
+a poster. Failed verification also prevents a new request. **Already requested**
+applies to everyone once a manual request exists for that TMDb ID. Signing in or
+changing Discord accounts does not create another request or change the original
+attribution. Existing requester and discovery history is retained.
+
+Requests join the existing `people.json` records and preserve discovery history.
+Anonymous requests show **Manually Added**; authenticated requests also show
+**Manually Added by** the Discord display name. Discord IDs come from the signed
+OAuth session. Request timestamps and durable requester IDs remain after all
+styles become available. Requests never trigger rendering or publication.
+
+For processing, select **TMDb Ready** alone and use the existing download button.
+The same `tmdbid|name` export includes qualifying trending, uploaded-log, and manual
+requests once each. Readiness requires verified TMDb artwork and at least one
+verified missing Kometa style. Unknown inventories do not establish readiness or
+completion. Once refreshed inventories verify all seven styles, the person leaves
+this processing export automatically; historical request information is retained.
+
+No migration or additional service is required. New request fields are optional
+in existing records. Writes reuse the scan store's SQLite transaction lock and
+atomic JSON replacement. A throttle table is created automatically in the existing
+`dedup.sqlite3`: searches allow 30 per minute; requests allow 10 per ten minutes
+per anonymous address or 30 per authenticated Discord identity. Only hashed
+throttle identities are stored, and expired entries are removed. The request route
+requires the page's session CSRF token. Keep the existing `LOGSCAN_SECRET_KEY`
+stable and shared across web workers so sessions and request tokens remain valid.
+
 For website uploads, set `DISCORD_PEOPLE_WEBHOOK_URL` to a webhook created in
 the destination Discord channel. A non-embedding notice is posted only when a
 actionable person is first added to the queue, preventing repeat notifications for the
@@ -211,15 +246,26 @@ style uses PNG assets and the other styles use JPG assets. Legacy root image
 URLs remain recognized. No person-specific applicability exclusions are
 currently declared. Compact card details show each style's availability.
 
-The service loads complete GitHub file trees in batches of four. If the API
-fails, it uses each repository's generated image index after checking the
-declared image count and every image URL. Successful checks are cached for one
-hour and store the Git revision or index hash and verification time. Failed,
-truncated, malformed, or expired inventories remain unknown; they never clear
-outstanding candidates. Failed styles retry on the next refresh after five
-minutes without refetching fresh styles. No per-person image requests are needed.
-An optional `GITHUB_TOKEN` increases API limits; the raw index fallback does not
-require it. Unknown statuses explain the failed checks.
+The service loads complete GitHub file trees in batches of four. If a recursive
+tree fails with a server error or is incomplete, it reads smaller directory trees
+from the same repository revision. If a directory fails, verified images from
+other directories remain available, but omitted people stay unknown. Retries reuse
+verified directory contents when the fresh root listing confirms the same Git hash.
+If the root listing fails, it uses each repository's generated image index after
+checking the declared image count and every image URL.
+Poster syncs can skip README updates, so an index omission stays unknown and never
+confirms that a style is missing. Results store the Git revision or index hash and
+verification time. Complete file checks are cached for one hour. Unverified
+omissions remain unknown and never clear outstanding candidates. Failed checks,
+partial listings, and index fallbacks retry on the next refresh after five minutes
+without refetching fresh styles. When an inventory cannot verify a person's
+images, Logscan checks their standard raw image URLs with small HEAD requests.
+Existing images become available even when GitHub's API is rate limited and the
+README is outdated. Failed URL checks stay unknown; they never prove an image is
+missing. Successful URL checks are cached for one hour and failures for five minutes.
+An optional `GITHUB_TOKEN` increases API limits and is passed through by the Saltbox
+Compose file; raw image checks and the index fallback do not require it. Unknown
+statuses explain the failed checks.
 
 People advice retains both earlier outcomes: posters already available (check
 the failed update) and missing posters needing creation (review the People
