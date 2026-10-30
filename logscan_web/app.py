@@ -36,6 +36,7 @@ from .people_images import (
 from .config_optimizer import optimize_config
 from .github_inventory import GitHubInventoryCache
 from .people_loading import PeopleLoader
+from .poster_labels import poster_label_supported
 from .people_readme import PeopleReadmeCache
 from .recommendations import SCHEMA_CACHE_SECONDS, _load_config_schema, has_yaml_language_server_directive, schema_branch_for_log, schema_fingerprint, validate_redacted_config
 from .scanner import (
@@ -2336,8 +2337,10 @@ def create_app() -> Flask:
             original_name = person.get("original_name")
             # Keep equivalent accented spellings used by existing filenames,
             # but use the displayed TMDb name for a different log alias.
-            if original_name and _person_name_key(original_name) == _person_name_key(name):
+            if original_name and _person_name_key(original_name) == _person_name_key(name) and poster_label_supported(original_name):
                 name = original_name
+            if not poster_label_supported(name):
+                continue
             lines.append(f"{person['tmdb_id']}|{name}")
         export = "\n".join(lines)
         return send_file(

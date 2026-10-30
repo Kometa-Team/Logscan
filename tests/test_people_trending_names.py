@@ -58,7 +58,7 @@ def service(tmp_path, monkeypatch):
             return Response({"person_results": [person]})
         if url.path == "/3/person/popular":
             return Response({"results": [person], "total_pages": 1})
-        if url.path == "/3/person/2746726":
+        if url.path == f"/3/person/{person["id"]}":
             if state["offline"]:
                 raise URLError("offline")
             return Response({**person, "name": state["details_name"]})
@@ -132,3 +132,22 @@ def test_old_automated_request_reconciles_against_corrected_english_filename(ser
     assert saved["name"] == "Kosuke Suzuki"
     assert saved["original_name"] == person["name"]
     assert saved["people_image_status"] == "complete"
+
+
+@pytest.mark.parametrize("name", ["吴 梦梦", "宋雨川", "梁佳芯", "温芮欣", "박지", "桜みお", "Catherine Lagaʻaia", "Lương Bích Hữu", "Ronkẹ Adékoluẹjo", "Văn Phượng"])
+def test_export_excludes_unsupported_names_but_keeps_cards_for_review(service, name):
+    state, create, _root, person = service
+    person["name"] = state["details_name"] = name
+    client = create()
+    assert client.get("/api/people").json["people"][0]["name"] == name
+    assert client.get("/api/people/export").get_data(as_text=True) == ""
+
+
+def test_export_keeps_verified_english_name_despite_an_unsupported_native_alias(service):
+    state, create, root, person = service
+    state["details_name"] = "Mio Sakura"
+    person["id"] = 6285230
+    (root / "popular_people_cache.json").write_text(json.dumps({"updated_at": datetime.now(UTC).isoformat(), "people": [person]}), encoding="utf-8")
+    PeopleStore(root).upsert({"key": "tmdb-6285230", "tmdb_id": 6285230, "name": person["name"], "original_name": "桜みお"})
+    client = create()
+    assert client.get("/api/people/export").get_data(as_text=True).splitlines() == ["6285230|Mio Sakura"]
