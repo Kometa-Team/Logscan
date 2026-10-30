@@ -232,6 +232,12 @@ verified missing Kometa style. Unknown inventories do not establish readiness or
 completion. Once refreshed inventories verify all seven styles, the person leaves
 this processing export automatically; historical request information is retained.
 
+Processing exports also require a name supported by all poster label fonts.
+English TMDb names remain eligible when an old native-script alias is unsupported;
+unsupported names remain visible on the People page for review. Character coverage
+comes from the poster fonts recorded in `logscan_web/poster_label_glyphs.json`;
+refresh that data when the renderer's fonts change.
+
 No migration or additional service is required. New request fields are optional
 in existing records. Writes reuse the scan store's SQLite transaction lock and
 atomic JSON replacement. A throttle table is created automatically in the existing
