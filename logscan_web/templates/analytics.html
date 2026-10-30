@@ -6,7 +6,7 @@
   <title>Analytics | Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261012-3') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261029-heading-links-2') }}">
   <script src="{{ url_for('static', filename='analytics.js', v='20261012-5') }}" defer></script>
 </head>
 <body>
@@ -14,7 +14,7 @@
   {% macro tool_icon(tool) -%}<img class="tool-icon" src="{{ url_for('static', filename=tool ~ '.png') }}" alt="">{%- endmacro %}
   {% macro breakdown(label, id) -%}<div><h2>{{ label }}</h2><div id="analytics-{{ id }}" class="metric-bars"></div></div>{%- endmacro %}
   <main class="shell analytics-shell">
-    <section class="analytics-heading"><p class="eyebrow">Service Activity</p><h1>Analytics</h1><p class="hero-copy">Anonymous aggregate activity only. No IP addresses, filenames, log content, Discord identities, or individual histories are retained.</p></section>
+    <section class="analytics-heading"><p class="eyebrow">Service Activity</p><h1><a class="page-heading-link" href="{{ request.full_path if request.query_string else request.path }}" title="Refresh this page">Analytics</a></h1><p class="hero-copy">Anonymous aggregate activity only. No IP addresses, filenames, log content, Discord identities, or individual histories are retained.</p></section>
     <section id="analytics-summary" class="analytics-summary" aria-label="Lifetime totals"></section>
     <details class="analytics-group">
       <summary><span>Service activity</span><span class="analytics-group-total" id="analytics-since"></span></summary>

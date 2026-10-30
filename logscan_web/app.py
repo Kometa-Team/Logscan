@@ -29,13 +29,16 @@ from .people_images import (
     PeopleImageInventories,
     assess_people_images,
     parse_people_inventory,
-    parse_people_readme,
     person_name_key as _person_name_key,
     tmdb_image_path,
     verify_people_image_urls,
 )
 from .config_optimizer import optimize_config
-from .recommendations import SCHEMA_CACHE_SECONDS, has_yaml_language_server_directive, schema_branch_for_log, validate_redacted_config
+from .github_inventory import GitHubInventoryCache
+from .people_loading import PeopleLoader
+from .poster_labels import poster_label_supported
+from .people_readme import PeopleReadmeCache
+from .recommendations import SCHEMA_CACHE_SECONDS, _load_config_schema, has_yaml_language_server_directive, schema_branch_for_log, schema_fingerprint, validate_redacted_config
 from .scanner import (
     ARCHIVE_SUFFIXES,
     MAX_FILE_BYTES,
@@ -234,7 +237,7 @@ def _stored_log_lines(path: Path, index: dict, start: int, count: int) -> list[s
 RETENTION_SECONDS = 48 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 60 * 60
 ANALYSIS_VERSION = 14
-SCHEMA_VALIDATION_VERSION = 7
+SCHEMA_VALIDATION_VERSION = 8
 POPULAR_PEOPLE_PAGE_SIZE = 25
 TMDB_POPULAR_PAGE_SIZE = 20
 KOMETA_IMAGE_SOURCES = tuple((style.label, style.readme_url) for style in PEOPLE_IMAGE_STYLES)
@@ -434,7 +437,9 @@ def create_app() -> Flask:
     popular_people_store = PopularPeopleCacheStore(app.config["SCAN_STORE"])
     tmdb_find_cache = TMDbFindCacheStore(app.config["SCAN_STORE"])
     app.register_blueprint(create_support_blueprint(store, RETENTION_SECONDS))
-    kometa_images_cache = {"expires_at": 0.0, "images": {}, "entries": {}}
+    kometa_images_cache = {"images": {}, "entries": {}}
+    github_inventory_cache = GitHubInventoryCache(Path(app.config["SCAN_STORE"]) / ".github-inventory-cache" / hashlib.sha256(app.config["GITHUB_TOKEN"].encode()).hexdigest()[:16])
+    people_readme_cache = PeopleReadmeCache(Path(app.config["SCAN_STORE"]) / ".people-readme-cache", max_age=KOMETA_IMAGE_CACHE_SECONDS)
     kometa_images_lock = threading.Lock()
     kometa_image_probes = {}
     kometa_image_probes_lock = threading.Lock()
@@ -449,14 +454,17 @@ def create_app() -> Flask:
     schema_cache = {}
     schema_cache_dir = Path(app.config["SCAN_STORE"]) / ".schema-cache"
     schema_cache_lock = threading.Lock()
+    schema_refresh_event = threading.Event()
 
-    def validate_config(log_content: str | Path) -> list[dict]:
+    def validate_config(log_content: str | Path, *, schema_metadata: dict | None = None) -> list[dict]:
         """Validate using the process cache without serializing validation work."""
         return validate_redacted_config(
             log_content,
             schema_cache=schema_cache,
             schema_cache_dir=schema_cache_dir,
             schema_cache_lock=schema_cache_lock,
+            schema_metadata=schema_metadata,
+            schema_changed=schema_refresh_event.set,
         )
 
     def update_scan_job(job_id: str | None, phase: str, *, error: str | None = None, redirect_url: str | None = None, result: dict | None = None) -> None:
@@ -482,7 +490,7 @@ def create_app() -> Flask:
         api_key = app.config["TMDB_API_KEY"]
         if not api_key:
             return None
-        query = urlencode({"api_key": api_key, **(params or {})})
+        query = urlencode({"api_key": api_key, "language": "en-US", **(params or {})})
         request_url = f"https://api.themoviedb.org/3{path}?{query}"
         try:
             with urlopen(Request(request_url, headers={"Accept": "application/json"}), timeout=10) as response:
@@ -498,10 +506,62 @@ def create_app() -> Flask:
             app.logger.warning("TMDb lookup failed for %s", path)
             return None
 
-    def _kometa_image_urls() -> dict[str, dict[str, str]]:
+    trending_name_cache = {}
+    trending_name_lock = threading.Lock()
+
+    def english_trending_names(people: list[dict]) -> list[dict]:
+        # Find/popular results can carry a native-script name even when person
+        # details returns an English label. Resolve only those names, retaining
+        # feed rankings, credits, images and IDs. Cached previews stay offline.
+        candidates = [person for person in people if person.get("id") and any(char.isalpha() and "LATIN" not in unicodedata.name(char, "") for char in person.get("name", ""))]
+        if not candidates:
+            return people
+
+        def resolve(person):
+            key = (person["id"], person["name"])
+            with trending_name_lock:
+                cached = trending_name_cache.get(key)
+            if cached and cached[0] > time.monotonic():
+                return person["id"], cached[1]
+            details = tmdb_get(f"/person/{person['id']}")
+            name = (details or {}).get("name")
+            if not details or details.get("id") != person["id"] or not isinstance(name, str) or not name.strip():
+                name = None
+            with trending_name_lock:
+                if len(trending_name_cache) >= 500:
+                    trending_name_cache.pop(next(iter(trending_name_cache)))
+                trending_name_cache[key] = (time.monotonic() + (POPULAR_PEOPLE_CACHE_SECONDS if name else 5), name)
+            return person["id"], name
+
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="tmdb-name") as executor:
+            names = dict(executor.map(resolve, candidates))
+        # Existing automated requests also need the corrected name so inventory
+        # reconciliation finds posters published under that English filename.
+        for record in people_store.list():
+            name = names.get(record.get("tmdb_id"))
+            if name and name != record.get("name"):
+                people_store.upsert({"key": record["key"], "tmdb_id": record["tmdb_id"], "name": name})
+        return [{**person, "name": names[person["id"]]} if names.get(person.get("id")) else person for person in people]
+
+    def _kometa_image_urls(progress=None, *, candidates=()) -> dict[str, dict[str, str]]:
         """Map each image source to its case-insensitive person-name URLs."""
         with kometa_images_lock:
-            if kometa_images_cache["expires_at"] > time.monotonic():
+            entries = kometa_images_cache["entries"]
+
+            def has_unresolved_candidates(inventory):
+                if inventory is None:
+                    return bool(candidates)
+                if inventory.complete:
+                    return False
+                return any(not any(_person_name_key(candidate.get(field)) in inventory for field in ("name", "original_name") if candidate.get(field)) for candidate in candidates)
+
+            def needs_refresh(style):
+                entry = entries.get(style.label, {})
+                now = time.monotonic()
+                return entry.get("expires_at", 0) <= now or (entry.get("verification_expires_at", 0) <= now and has_unresolved_candidates(entry.get("inventory")))
+
+            stale = [style for style in PEOPLE_IMAGE_STYLES if needs_refresh(style)]
+            if not stale:
                 return kometa_images_cache["images"]
 
             def fetch_partitioned_inventory(style, headers):
@@ -510,7 +570,7 @@ def create_app() -> Flask:
                 tree_url = style.inventory_url.split("?", 1)[0]
 
                 def read_tree(url):
-                    with urlopen(Request(url, headers=headers), timeout=10) as response:
+                    with github_inventory_cache.open(Request(url, headers=headers), open_url=urlopen, timeout=10) as response:
                         if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
                             raise ValueError("Expired file inventory")
                         return json.loads(response.read().decode("utf-8"))
@@ -553,14 +613,14 @@ def create_app() -> Flask:
                     inventory.complete = complete
                 return inventory
 
-            def fetch_inventory(style):
+            def fetch_file_inventory(style, index_failure):
                 failure = "GitHub returned an incomplete file inventory."
                 partitioned = False
                 headers = {"Accept": "application/vnd.github+json", "User-Agent": "Kometa-Logscan/1.0"}
                 if app.config["GITHUB_TOKEN"]:
                     headers["Authorization"] = f"Bearer {app.config['GITHUB_TOKEN']}"
                 try:
-                    with urlopen(Request(style.inventory_url, headers=headers), timeout=10) as response:
+                    with github_inventory_cache.open(Request(style.inventory_url, headers=headers), open_url=urlopen, timeout=10) as response:
                         if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
                             failure = "GitHub returned an expired file inventory."
                         else:
@@ -585,49 +645,64 @@ def create_app() -> Flask:
                     except (OSError, ValueError, HTTPException):
                         pass
                     failure += " The directory file inventories could not be verified."
-                # Generated indexes can lag behind syncs that skip README updates.
-                # They supply image URLs, but cannot establish that a person is absent.
-                try:
-                    with urlopen(Request(style.readme_url, headers={"Accept": "text/plain", "User-Agent": "Kometa-Logscan/1.0"}), timeout=10) as response:
-                        if int(response.headers.get("Age", "0")) >= KOMETA_IMAGE_CACHE_SECONDS:
-                            index_failure = "The repository image index was expired."
-                        else:
-                            inventory = parse_people_readme(style, response.read().decode("utf-8"))
-                            if inventory is not None:
-                                return style.label, inventory, failure
-                            index_failure = "The repository image index was incomplete."
-                except HTTPError as exc:
-                    index_failure = f"The repository image index failed (HTTP {exc.code})."
-                except (OSError, ValueError, HTTPException):
-                    index_failure = "The repository image index could not be reached."
                 failure += " " + index_failure
                 app.logger.warning("Unable to verify %s: %s", style.label, failure)
                 return style.label, None, failure
 
-            entries = kometa_images_cache["entries"]
-            stale = [style for style in PEOPLE_IMAGE_STYLES if entries.get(style.label, {}).get("expires_at", 0) <= time.monotonic()]
-            with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-inventory") as executor:
-                for label, inventory, error in executor.map(fetch_inventory, stale):
+            def fetch_inventory(style):
+                index = None
+                index_failure = "The repository image index could not be reached."
+                try:
+                    index = people_readme_cache.load(style, open_url=urlopen)
+                except HTTPError as exc:
+                    index_failure = f"The repository image index failed (HTTP {exc.code})."
+                except ValueError as exc:
+                    index_failure = str(exc)
+                except (OSError, HTTPException):
+                    pass
+                # One full README resolves every candidate, including names not
+                # listed. Only an unavailable/invalid index needs a fallback.
+                if index is not None:
+                    return style.label, index, None, False
+                return (*fetch_file_inventory(style, index_failure), True)
+
+            completed_styles = 0
+            progress_lock = threading.Lock()
+
+            def fetch_with_progress(style):
+                nonlocal completed_styles
+                result = fetch_inventory(style)
+                if progress:
+                    with progress_lock:
+                        completed_styles += 1
+                        progress("repositories", "Checking Kometa poster repositories.", completed_styles, len(stale))
+                return result
+
+            if progress:
+                progress("repositories", "Checking Kometa poster repositories.", 0, len(stale))
+            with ThreadPoolExecutor(max_workers=len(PEOPLE_IMAGE_STYLES), thread_name_prefix="people-inventory") as executor:
+                for label, inventory, error, verified in executor.map(fetch_with_progress, stale):
                     entries[label] = {
                         "inventory": inventory,
                         "error": error,
                         "expires_at": time.monotonic() + (KOMETA_IMAGE_CACHE_SECONDS if inventory is not None and inventory.complete else KOMETA_IMAGE_RETRY_SECONDS),
+                        "verification_expires_at": time.monotonic() + KOMETA_IMAGE_RETRY_SECONDS if verified else 0,
                     }
             images = PeopleImageInventories(
                 {label: entry["inventory"] for label, entry in entries.items() if entry["inventory"] is not None},
                 errors={label: entry["error"] for label, entry in entries.items() if entry["error"]},
             )
-            kometa_images_cache.update(expires_at=min(entry["expires_at"] for entry in entries.values()), images=images)
+            kometa_images_cache["images"] = images
             return images
 
-    def kometa_image_urls(candidates=()) -> dict[str, dict[str, str]]:
-        inventories = _kometa_image_urls()
+    def kometa_image_urls(candidates=(), *, progress=None, probe_seconds=None) -> dict[str, dict[str, str]]:
+        inventories = _kometa_image_urls(progress, candidates=candidates)
         if not candidates:
             return inventories
         with kometa_image_probes_lock:
-            return verify_people_image_urls(candidates, inventories, open_url=urlopen, cache=kometa_image_probes)
+            return verify_people_image_urls(candidates, inventories, open_url=urlopen, cache=kometa_image_probes, progress=progress, max_seconds=probe_seconds)
 
-    def imdb_starmeter_people() -> list[dict]:
+    def imdb_starmeter_people(progress=None) -> list[dict]:
         """Resolve IMDb's current StarMeter chart entries to TMDb people."""
         query = """
             {
@@ -676,8 +751,12 @@ def create_app() -> Flask:
             match = next((person for person in (data or {}).get("person_results", []) if person.get("id")), None)
             return imdb_id, match, True
 
+        lookup_results = []
         with ThreadPoolExecutor(max_workers=TMDB_FIND_MAX_WORKERS, thread_name_prefix="tmdb-find") as executor:
-            lookup_results = list(executor.map(resolve, imdb_ids))
+            for completed, result in enumerate(executor.map(resolve, imdb_ids), start=1):
+                lookup_results.append(result)
+                if progress:
+                    progress("trending", "Matching IMDb trending people with TMDb.", completed, len(imdb_ids))
         resolved = {imdb_id: match for imdb_id, match, _ in lookup_results}
         newly_resolved = {imdb_id: match for imdb_id, match, should_cache in lookup_results if should_cache}
         if newly_resolved:
@@ -718,19 +797,21 @@ def create_app() -> Flask:
                 people=snapshot["people"],
             )
 
-    def _build_popular_people() -> list[dict]:
+    def _build_popular_people(progress=None) -> list[dict]:
         """Build a complete, de-duplicated image-bearing IMDb-first snapshot."""
         popular = []
         seen_ids = set()
-        for starmeter_rank, person in enumerate(imdb_starmeter_people(), start=1):
+        for starmeter_rank, person in enumerate(imdb_starmeter_people(progress), start=1):
             person_id = person.get("id")
             if person_id and person_id not in seen_ids:
                 seen_ids.add(person_id)
                 popular.append({**person, "starmeter_rank": starmeter_rank})
                 if len(popular) >= POPULAR_PEOPLE_LIMIT:
-                    return popular
+                    return english_trending_names(popular)
         tmdb_page = 1
         while len(popular) < POPULAR_PEOPLE_LIMIT:
+            if progress:
+                progress("trending", "Loading trending people from TMDb.", len(popular), POPULAR_PEOPLE_LIMIT)
             data = tmdb_get("/person/popular", {"page": tmdb_page})
             results = (data or {}).get("results", [])
             if not results:
@@ -746,10 +827,12 @@ def create_app() -> Flask:
             tmdb_page += 1
             if tmdb_page > (data or {}).get("total_pages", 0):
                 break
-        return popular
+        return english_trending_names(popular)
 
-    def record_automated_popular_requests(people: list[dict]) -> int:
-        images = kometa_image_urls(people)
+    def record_automated_popular_requests(people: list[dict], progress=None) -> int:
+        # Only verified inventory gaps can create requests. Unknown fallback
+        # images need not delay publishing a fresh trending snapshot.
+        images = _kometa_image_urls(progress, candidates=_filtered_popular_people(people))
         if not images:
             app.logger.warning("Automated Top 250 requests skipped; people-image sources are unavailable.")
             return 0
@@ -778,12 +861,12 @@ def create_app() -> Flask:
             analytics.record_people_submitted(created)
         return created
 
-    def _refresh_popular_people() -> None:
+    def _refresh_popular_people(progress=None) -> None:
         nonlocal popular_people_refreshing
         try:
-            people = _build_popular_people()
+            people = _build_popular_people(progress)
             if people:
-                created = record_automated_popular_requests(people)
+                created = record_automated_popular_requests(people, progress)
                 snapshot = popular_people_store.save(people)
                 _install_popular_people_snapshot(snapshot)
                 with popular_people_payload_lock:
@@ -804,7 +887,7 @@ def create_app() -> Flask:
             popular_people_refreshing = True
         threading.Thread(target=_refresh_popular_people, name="popular-people-refresh", daemon=True).start()
 
-    def popular_people() -> list[dict]:
+    def popular_people(progress=None) -> list[dict]:
         """Return a fast cached snapshot and refresh stale data without blocking visitors."""
         nonlocal popular_people_refreshing
         with popular_people_lock:
@@ -820,13 +903,13 @@ def create_app() -> Flask:
         if cached_people:
             if not fresh:
                 _refresh_popular_people_in_background()
-            return _filtered_popular_people(cached_people)
+            return _filtered_popular_people(english_trending_names(cached_people))
 
         with popular_people_lock:
             if popular_people_refreshing:
                 return []
             popular_people_refreshing = True
-        _refresh_popular_people()
+        _refresh_popular_people(progress)
         with popular_people_lock:
             refreshed_people = list(popular_people_cache["people"])
         return _filtered_popular_people(refreshed_people)
@@ -834,10 +917,11 @@ def create_app() -> Flask:
     def clear_popular_people_payload_cache() -> None:
         with popular_people_payload_lock:
             popular_people_payload_cache.clear()
+        people_loader.invalidate()
 
-    def popular_people_payload(people: list[dict], flags: dict[int, dict[str, str]]) -> list[dict]:
+    def popular_people_payload(people: list[dict], flags: dict[int, dict[str, str]], *, inventories=None) -> list[dict]:
         """Build display data only for the currently requested page of people."""
-        kometa_images = kometa_image_urls(people)
+        kometa_images = kometa_image_urls() if inventories is None else inventories
         payload = []
         for person in people:
             person_id = person.get("id")
@@ -991,11 +1075,21 @@ def create_app() -> Flask:
 
         return [person for person in people if matches(person)]
 
-    def people_union(sources: set[str]) -> list[dict]:
+    def people_union(sources: set[str], *, cached_only=False, progress=None) -> list[dict]:
         """Return missing-log and trending people, keyed by TMDb ID."""
         records = people_store.list()
-        trending = popular_people() if sources & {"missing", "trending"} and app.config["TMDB_API_KEY"] else []
-        inventories = kometa_image_urls([*records, *trending])
+        if progress:
+            progress("trending", "Loading trending people from IMDb and TMDb.")
+        if cached_only:
+            with popular_people_lock:
+                trending = list(popular_people_cache["people"])
+            if not trending:
+                trending = (popular_people_store.load() or {}).get("people", [])
+            trending = _filtered_popular_people(trending)
+            inventories = kometa_images_cache["images"]
+        else:
+            trending = popular_people(progress) if sources & {"missing", "trending"} and app.config["TMDB_API_KEY"] else []
+            inventories = kometa_image_urls(records, progress=progress, probe_seconds=8 if progress else None)
         combined: dict[str, dict] = {}
         excluded_ids = popular_people_exclusions.list()
         checked_ids = popular_people_checks.active_ids(POPULAR_PEOPLE_CHECK_SECONDS)
@@ -1019,8 +1113,25 @@ def create_app() -> Flask:
             for person in combined.values():
                 trending_by_name.setdefault(_person_name_key(person.get("name")), []).append(person)
             # A cold trending refresh can create automated requests above.
-            for record in people_store.reconcile_image_availability(inventories):
-                if record["people_image_status"] == "complete":
+            current_records = records if cached_only else people_store.reconcile_image_availability(inventories)
+            profile_ids = {
+                record["tmdb_id"]
+                for record in current_records
+                if record.get("tmdb_id")
+                and f"tmdb-{record['tmdb_id']}" not in combined
+                and record.get("people_image_status") != "complete"
+                and not record.get("manually_completed")
+                and record["tmdb_id"] not in excluded_ids | checked_ids
+            }
+            profiles = {}
+            if progress and profile_ids:
+                progress("profiles", "Loading TMDb profile details.", 0, len(profile_ids))
+                with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-profile") as executor:
+                    for completed, (person_id, details) in enumerate(executor.map(lambda person_id: (person_id, tmdb_get(f"/person/{person_id}")), sorted(profile_ids)), start=1):
+                        profiles[person_id] = details
+                        progress("profiles", "Loading TMDb profile details.", completed, len(profile_ids))
+            for record in current_records:
+                if record.get("people_image_status") == "complete":
                     addressed_records.append(record)
                     continue
                 if record.get("manually_completed") or record.get("tmdb_id") in excluded_ids or record.get("tmdb_id") in checked_ids:
@@ -1032,7 +1143,7 @@ def create_app() -> Flask:
                 key = f"tmdb-{person_id}" if person_id else record["key"]
                 person = combined.get(key)
                 if person is None:
-                    details = tmdb_get(f"/person/{person_id}") if person_id else None
+                    details = profiles.get(person_id) if progress else tmdb_get(f"/person/{person_id}") if person_id and not cached_only else None
                     person = {
                         **(details or {}),
                         "id": person_id,
@@ -1043,7 +1154,7 @@ def create_app() -> Flask:
                     combined[key] = person
                 person["sources"].add("missing")
                 person["missing_record"] = record
-            if addressed_records:
+            if addressed_records and not cached_only:
                 analytics.record_addressed(addressed_records)
 
         people = list(combined.values())
@@ -1055,7 +1166,9 @@ def create_app() -> Flask:
                 person.get("name", "").casefold(),
             )
         )
-        payload = popular_people_payload(people, flags)
+        if progress:
+            progress("preparing", "Preparing people and filter counts.")
+        payload = popular_people_payload(people, flags, inventories=inventories)
         for item, person in zip(payload, people):
             record = person.get("missing_record", {})
             sources = sorted(person["sources"])
@@ -1087,6 +1200,15 @@ def create_app() -> Flask:
                 **{key: record[key] for key in ("style_availability", "people_image_status") if key in record},
             )
         return payload
+
+    def load_people_snapshot(progress):
+        # Relative download URLs need a request context; no visitor identity is
+        # used to build the shared public People dataset.
+        with app.test_request_context("/people"):
+            return people_union({"missing", "trending"}, progress=progress)
+
+    people_loader = PeopleLoader(load_people_snapshot, on_error=lambda: app.logger.exception("Unable to refresh the People list."))
+    app.extensions["people_loader"] = people_loader
 
     def save_missing_people(
         candidates: list[dict],
@@ -1182,6 +1304,8 @@ def create_app() -> Flask:
             person["people_url"] = "/people?tags=Missing+Kometa" if historical else url_for("people_page", tags="Missing Kometa", _external=True)
             person["is_new"] = is_new
             saved.append(person)
+        if saved:
+            people_loader.invalidate()
         return saved
 
     def notify_people_webhook(people: list[dict]) -> None:
@@ -1231,12 +1355,31 @@ def create_app() -> Flask:
         except (URLError, TimeoutError) as exc:
             app.logger.warning("Unable to send missing-person Discord webhook: %s", exc)
 
-    def backfill_schema_validation_counts():
-        records = [
-            record
-            for record in store.list()
-            if (record.get("metadata") or {}).get("tool_name", "kometa") == "kometa" and not _schema_validation_is_fresh(record.get("metadata") or {})
-        ]
+    def backfill_schema_validation_counts(branch_fingerprints: dict[str, str] | None = None):
+        if branch_fingerprints is None:
+            records = [
+                record
+                for record in store.list()
+                if (record.get("metadata") or {}).get("tool_name", "kometa") == "kometa" and not _schema_validation_is_fresh(record.get("metadata") or {})
+            ]
+        else:
+            records = []
+            for record in store.list():
+                metadata = record.get("metadata") or {}
+                if metadata.get("tool_name", "kometa") != "kometa":
+                    continue
+                branch = metadata.get("schema_validation_branch")
+                if branch not in {"master", "develop"}:
+                    path = store.log_path(record.get("id", ""))
+                    if path is None:
+                        continue
+                    branch = schema_branch_for_log(path)
+                if branch in branch_fingerprints and (
+                    metadata.get("schema_validation_digest") != branch_fingerprints[branch]
+                    or metadata.get("schema_validation_version") != SCHEMA_VALIDATION_VERSION
+                    or not isinstance(metadata.get("schema_validation_failures"), list)
+                ):
+                    records.append(record)
         if not records:
             return
         app.logger.info("Backfilling schema validation counts for %d retained scan(s).", len(records))
@@ -1246,14 +1389,19 @@ def create_app() -> Flask:
             path = store.log_path(scan_id)
             if path is None:
                 continue
+            schema_metadata = {}
+            if branch_fingerprints is not None:
+                digest = branch_fingerprints.get(schema_branch_for_log(path))
+                if digest is not None:
+                    schema_metadata["schema_validation_digest"] = digest
             try:
                 log_content = path
-                failures = validate_config(log_content)
+                failures = validate_config(log_content, schema_metadata=schema_metadata)
                 count = len(failures)
             except ValueError:
                 failures = []
                 count = 0
-            except RuntimeError as exc:
+            except (RuntimeError, OSError) as exc:
                 app.logger.warning("Schema count backfill unavailable for scan %s: %s", scan_id, exc)
                 continue
             store.update_metadata(
@@ -1264,10 +1412,49 @@ def create_app() -> Flask:
                 schema_directive_missing=not has_yaml_language_server_directive(log_content),
                 schema_validation_version=SCHEMA_VALIDATION_VERSION,
                 schema_validation_checked_at=datetime.now(UTC).isoformat(),
+                **schema_metadata,
             )
             completed += 1
             time.sleep(0.5)
         app.logger.info("Backfilled schema validation counts for %d of %d retained scan(s).", completed, len(records))
+
+    def refresh_retained_schema_validation():
+        """Poll retained release channels and revalidate only changed schemas."""
+        branches = set()
+        outdated_versions = set()
+        for record in store.list():
+            metadata = record.get("metadata") or {}
+            if metadata.get("tool_name", "kometa") != "kometa":
+                continue
+            branch = metadata.get("schema_validation_branch")
+            if branch not in {"master", "develop"}:
+                path = store.log_path(record.get("id", ""))
+                if path is None:
+                    continue
+                branch = schema_branch_for_log(path)
+            branches.add(branch)
+            if metadata.get("schema_validation_version") != SCHEMA_VALIDATION_VERSION:
+                outdated_versions.add(branch)
+        fingerprints = {}
+        for branch in sorted(branches):
+            try:
+                with schema_cache_lock:
+                    schema = _load_config_schema(branch, memory_cache=schema_cache, cache_dir=schema_cache_dir, force_refresh=branch in outdated_versions)
+                    fingerprints[branch] = schema_fingerprint(schema)
+            except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+                app.logger.exception("Unable to refresh the Kometa %s schema; retained results will be retried.", branch)
+        backfill_schema_validation_counts(fingerprints)
+
+    def schema_refresh_loop():
+        while True:
+            schema_refresh_event.clear()
+            try:
+                refresh_retained_schema_validation()
+            except Exception:
+                app.logger.exception("Unable to refresh retained schema validation.")
+            schema_refresh_event.wait(SCHEMA_CACHE_SECONDS)
+
+    app.extensions["refresh_retained_schema_validation"] = refresh_retained_schema_validation
 
     def backfill_scan_analysis():
         records = [record for record in store.list() if (record.get("metadata") or {}).get("analysis_version") != ANALYSIS_VERSION]
@@ -1301,6 +1488,7 @@ def create_app() -> Flask:
                 "schema_validation_failures",
                 "schema_validation_version",
                 "schema_validation_checked_at",
+                "schema_validation_digest",
             ):
                 if key in previous_metadata:
                     result.metadata[key] = previous_metadata[key]
@@ -1356,9 +1544,15 @@ def create_app() -> Flask:
         app.logger.info("Backfilled Quickstart metadata for %d of %d retained scan(s).", completed, len(records))
 
     def backfill_retained_scans():
-        backfill_scan_analysis()
-        backfill_schema_validation_counts()
-        backfill_quickstart_metadata()
+        try:
+            backfill_scan_analysis()
+            refresh_retained_schema_validation()
+            backfill_schema_validation_counts()
+            backfill_quickstart_metadata()
+        finally:
+            threading.Thread(target=schema_refresh_loop, name="kometa-schema-refresh", daemon=True).start()
+
+    app.extensions["backfill_retained_scans"] = backfill_retained_scans
 
     def cleanup_loop():
         while True:
@@ -1731,7 +1925,7 @@ def create_app() -> Flask:
             if result.metadata.get("tool_name", "kometa") == "kometa" and not app.config.get("TESTING"):
                 try:
                     log_content = content if isinstance(content, Path) else content.decode("utf-8", errors="replace")
-                    schema_failures = validate_config(log_content)
+                    schema_failures = validate_config(log_content, schema_metadata=result.metadata)
                     result.metadata["schema_validation_count"] = len(schema_failures)
                     result.metadata["schema_validation_branch"] = schema_branch_for_log(log_content)
                     result.metadata["schema_validation_failures"] = schema_failures
@@ -2080,6 +2274,7 @@ def create_app() -> Flask:
         already_added = not any(entry.get("id") == manual_request["id"] and entry["requested_at"] == timestamp for entry in record["manual_requests"])
         if created:
             analytics.record_people_submitted(1)
+        people_loader.invalidate()
         return jsonify(tmdb_id=details["id"], already_added=already_added, message="Already requested" if already_added else "Poster requested"), 200 if already_added else 201
 
     @app.get("/api/people")
@@ -2091,11 +2286,22 @@ def create_app() -> Flask:
             return jsonify(error=f"Per-page count must be between 1 and {POPULAR_PEOPLE_PAGE_SIZE}."), 400
         tag_query = request.args.get("tag", "")
         selected_tags = request.args.getlist("tags")
-        base_candidates = people_union(sources)
+        background = request.args.get("background") == "1"
+        loading = None
+        if background:
+            base_candidates, loading = people_loader.read(retry=request.args.get("retry") == "1")
+            if base_candidates is None:
+                base_candidates = people_union(sources, cached_only=True)
+            loading["retry_at"] = github_inventory_cache.limit.get("retry_at")
+            loading["github_authentication"] = github_inventory_cache.authentication_status(bool(app.config["GITHUB_TOKEN"]))
+        else:
+            base_candidates = people_union(sources)
         available_tags = available_people_tags(base_candidates)
         candidates = filter_people_by_tag(base_candidates, tag_query)
         candidates = filter_people_by_selected_tags(candidates, selected_tags, available_tags)
         total_pages = max(1, (len(candidates) + per_page - 1) // per_page)
+        if background and loading["refreshing"] and page is not None:
+            page = min(max(1, page), total_pages)
         if page is None or not 1 <= page <= total_pages:
             return jsonify(error=f"Page must be between 1 and {total_pages}."), 400
         first_index = (page - 1) * per_page
@@ -2106,7 +2312,8 @@ def create_app() -> Flask:
             total_pages=total_pages,
             per_page=per_page,
             sources=sorted(sources),
-            actions_enabled=support_session_authorized(),
+            actions_enabled=False if background and loading["refreshing"] else support_session_authorized(),
+            loading=loading,
             tag=tag_query,
             selected_tags=selected_tags,
             available_tags=available_tags,
@@ -2118,13 +2325,24 @@ def create_app() -> Flask:
         available_tags = available_people_tags(base_candidates)
         candidates = filter_people_by_tag(base_candidates, request.args.get("tag", ""))
         candidates = filter_people_by_selected_tags(candidates, request.args.getlist("tags"), available_tags)
-        export = "\n".join(
-            f"{person['tmdb_id']}|{person.get('original_name', person['name'])}"
-            for person in candidates
-            if person.get("tmdb_id")
-            and person.get("people_image_status") != "pending_verification"
-            and not {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
-        )
+        lines = []
+        for person in candidates:
+            if (
+                not person.get("tmdb_id")
+                or person.get("people_image_status") == "pending_verification"
+                or {"Missing TMDb", "TMDb verification pending"}.intersection(person.get("metadata_tags", []))
+            ):
+                continue
+            name = person["name"]
+            original_name = person.get("original_name")
+            # Keep equivalent accented spellings used by existing filenames,
+            # but use the displayed TMDb name for a different log alias.
+            if original_name and _person_name_key(original_name) == _person_name_key(name) and poster_label_supported(original_name):
+                name = original_name
+            if not poster_label_supported(name):
+                continue
+            lines.append(f"{person['tmdb_id']}|{name}")
+        export = "\n".join(lines)
         return send_file(
             BytesIO(export.encode("utf-8")),
             mimetype="text/plain",
@@ -2295,7 +2513,10 @@ def create_app() -> Flask:
         if metadata.get("tool_name") == "imagemaid":
             return jsonify(error="Kometa schema validation does not apply to ImageMaid logs."), 409
         cached_failures = metadata.get("schema_validation_failures")
-        if isinstance(cached_failures, list) and _schema_validation_is_fresh(metadata):
+        with schema_cache_lock:
+            current_schema = schema_cache.get(metadata.get("schema_validation_branch"))
+            schema_matches = current_schema is None or metadata.get("schema_validation_digest") == schema_fingerprint(current_schema)
+        if isinstance(cached_failures, list) and _schema_validation_is_fresh(metadata) and schema_matches:
             return jsonify(
                 branch=metadata.get("schema_validation_branch", "master"),
                 failures=cached_failures,
@@ -2306,7 +2527,8 @@ def create_app() -> Flask:
             abort(404)
         try:
             log_content = path
-            failures = validate_config(log_content)
+            schema_metadata = {}
+            failures = validate_config(log_content, schema_metadata=schema_metadata)
             branch = schema_branch_for_log(log_content)
             directive_missing = not has_yaml_language_server_directive(log_content)
             store.update_metadata(
@@ -2317,6 +2539,7 @@ def create_app() -> Flask:
                 schema_directive_missing=directive_missing,
                 schema_validation_version=SCHEMA_VALIDATION_VERSION,
                 schema_validation_checked_at=datetime.now(UTC).isoformat(),
+                **schema_metadata,
             )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

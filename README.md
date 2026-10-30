@@ -17,6 +17,20 @@ deleted logs may be uploaded again. Reused scans do not increase aggregate
 processed-log or cleanup totals. Anonymous aggregate totals survive retention
 cleanup; log content and identities do not.
 
+Kometa configuration schemas are checked hourly for the release channels used
+by retained logs. A schema content change automatically revalidates all retained
+Kometa logs on that channel and updates their saved schema findings and counts.
+Validation during an upload or a result-page visit also wakes this background
+check when it discovers a change. Unchanged schemas do not trigger another sweep;
+failed validations are retried. If GitHub is unavailable, the cached schema remains
+usable. Schema checks preserve source logs, share links, retention deadlines,
+upload receipts, and aggregate statistics.
+
+Schema validation version **8** forces retained Kometa logs to be revalidated on
+startup, including results created before the recent upstream schema changes.
+The upgrade checks GitHub even when the local schema cache is less than an hour
+old. Deploy and restart the web service to apply this backfill.
+
 Quickstart checks `/api/capabilities` before uploading ImageMaid logs. Update the
 web service before enabling the updated Quickstart and Discord integration.
 
@@ -218,6 +232,12 @@ verified missing Kometa style. Unknown inventories do not establish readiness or
 completion. Once refreshed inventories verify all seven styles, the person leaves
 this processing export automatically; historical request information is retained.
 
+Processing exports also require a name supported by all poster label fonts.
+English TMDb names remain eligible when an old native-script alias is unsupported;
+unsupported names remain visible on the People page for review. Character coverage
+comes from the poster fonts recorded in `logscan_web/poster_label_glyphs.json`;
+refresh that data when the renderer's fonts change.
+
 No migration or additional service is required. New request fields are optional
 in existing records. Writes reuse the scan store's SQLite transaction lock and
 atomic JSON replacement. A throttle table is created automatically in the existing
@@ -246,20 +266,49 @@ style uses PNG assets and the other styles use JPG assets. Legacy root image
 URLs remain recognized. No person-specific applicability exclusions are
 currently declared. Compact card details show each style's availability.
 
-The service loads complete GitHub file trees in batches of four. If a recursive
-tree fails with a server error or is incomplete, it reads smaller directory trees
-from the same repository revision. If a directory fails, verified images from
-other directories remain available, but omitted people stay unknown. Retries reuse
-verified directory contents when the fresh root listing confirms the same Git hash.
-If the root listing fails, it uses each repository's generated image index after
-checking the declared image count and every image URL.
-Poster syncs can skip README updates, so an index omission stays unknown and never
-confirms that a style is missing. Results store the Git revision or index hash and
-verification time. Complete file checks are cached for one hour. Unverified
-omissions remain unknown and never clear outstanding candidates. Failed checks,
-partial listings, and index fallbacks retry on the next refresh after five minutes
-without refetching fresh styles. When an inventory cannot verify a person's
-images, Logscan checks their standard raw image URLs with small HEAD requests.
+The service downloads the seven full repository READMEs concurrently and
+checks the declared image count and every image URL. These public indexes are the
+primary source for all people lookups. They are cached for one hour in memory and
+on disk under `.people-readme-cache` in the scan store, including across restarts.
+Expired indexes use conditional requests so unchanged files need not be downloaded
+again. A valid index resolves both listed and unlisted names locally for saved,
+searched, submitted, and trending people. Missing entries show **Not listed** and
+can qualify for the processing queue; they do not trigger file-tree requests or
+guessed image URL probes. The result identifies the README as its source, since
+an index can lag behind a poster publication until its README workflow finishes.
+
+GitHub file inventories and directory-tree recovery are reserved for unavailable,
+expired, or invalid READMEs. Verified images from successful directories remain
+usable, but partial listings cannot confirm absence. Standard raw image URLs are
+probed only for unresolved submitted people when no usable index exists, never
+the entire trending list. Failed checks remain unavailable rather than claiming
+an image is missing. Results retain the index hash or Git revision and check time.
+Complete file checks are cached for one hour. Failed verification retries on the
+next relevant refresh after five minutes without downloading fresh READMEs again.
+
+GitHub file inventories and their conditional-request headers are cached on disk
+under the scan store, so restarts reuse fresh responses. Unchanged inventories
+use conditional requests; immutable directory snapshots are reused by Git SHA.
+Rate-limit responses pause inventory API requests across all seven styles until
+GitHub's reset or retry time, with increasing delays when no retry time is given.
+The pause survives restarts. Raw README and image checks can still find existing
+posters during the pause. Configure `GITHUB_TOKEN` in the server environment and
+recreate the container to use authenticated requests with a higher API allowance.
+
+The People page displays saved people immediately while one shared background
+refresh checks trending sources, repositories, profiles, and poster images.
+It reports the current stage, completed checks, elapsed time, and GitHub retry
+time instead of waiting behind a single loading message. Fallback image probes
+have an eight-second budget per refresh; checks that cannot finish stay unknown.
+Progress polling keeps existing cards in place, preserves saved results on
+errors, and provides a retry button after a timeout.
+
+The page warns when GitHub rejects a configured token and, when GitHub reports
+the expiration date, when it has expired or will expire within seven days.
+A rejected token without a known expiration is described as expired, revoked,
+or invalid. Support users see renewal instructions. Only authentication status
+and expiration metadata are cached or returned; the token itself stays private.
+
 Existing images become available even when GitHub's API is rate limited and the
 README is outdated. Failed URL checks stay unknown; they never prove an image is
 missing. Successful URL checks are cached for one hour and failures for five minutes.

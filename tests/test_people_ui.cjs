@@ -195,6 +195,19 @@ test("complete and unavailable inventories have no request button and keep seven
   }
 });
 
+test("README omissions show not listed while unavailable checks remain distinct", async () => {
+  const person = searchPerson();
+  person.style_availability.bw = { label: "BW", status: "missing", verification_source: "readme_index", reason: "Not listed in the repository's generated README index." };
+  person.style_availability.transparent = { label: "Transparent", status: "unknown", reason: "Index unavailable." };
+  const harness = searchHarness([{ people: [person] }]);
+  await harness.search("777");
+  const grid = descendants(harness.ids["poster-search-result"], (node) => node.className === "poster-style-gallery")[0];
+  assert.equal(descendants(grid, (node) => node.textContent === "Not listed").length, 1);
+  assert.equal(grid.children[1].title, person.style_availability.bw.reason);
+  assert.equal(descendants(grid, (node) => node.textContent === "Verification unavailable").length, 1);
+  assert.equal(descendants(grid, (node) => node.textContent === "Missing").length, 2);
+});
+
 test("duplicate requests stay disabled and failed requests can be retried with a visible error", async () => {
   const duplicate = searchHarness([{ people: [searchPerson("incomplete", true)] }]);
   await duplicate.search("777");
@@ -245,4 +258,155 @@ test("existing requests stay visibly requested when TMDb artwork is missing", as
   const card = harness.ids["poster-search-result"].children[0];
   assert.equal(descendants(card, (node) => node.textContent === "Already requested")[0].disabled, true);
   assert.equal(descendants(card, (node) => node.textContent === "Request poster").length, 0);
+});
+
+function loadingHarness(responses) {
+  class Element {
+    constructor() { this.children = []; this.dataset = {}; this.events = {}; this.replacements = 0; this.textContent = ""; }
+    replaceChildren(...children) { this.children = children; this.replacements += 1; }
+    addEventListener(name, callback) { this.events[name] = callback; }
+    querySelector() { return null; }
+  }
+  const ids = Object.fromEntries(["gallery", "pagination", "loadingPanel", "loadingTitle", "loadingDetail", "loadingElapsed", "loadingRetry", "tagCount", "githubWarning", "githubAdmin"].map((id) => [id, new Element()]));
+  const timers = new Map();
+  const calls = [];
+  const windowEvents = {};
+  let timerId = 0;
+  const clock = { now: Date.now() };
+  class TestDate extends Date { static now() { return clock.now; } }
+  const sandbox = vm.createContext({
+    ...ids, apiParams: new URLSearchParams("background=1&per_page=10"),
+    tagQuery: "", renderedPeople: "", actionsEnabled: false, stopped: false, loadingStarted: clock.now, loadingTimer: null,
+    renderDynamicTagFilters: () => {},
+    addPerson: (person) => ids.gallery.children.push({ person, expanded: false }),
+    pageLink: () => ({}), pageJumper: () => ({}),
+    URLSearchParams, AbortController, Date: TestDate,
+    setTimeout: (callback, delay) => { timerId += 1; timers.set(timerId, { callback, delay }); return timerId; },
+    clearTimeout: (id) => timers.delete(id),
+    window: { addEventListener: (name, callback) => { windowEvents[name] = callback; } },
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      const next = responses.shift();
+      if (typeof next === "function") return next(options);
+      if (next instanceof Error) throw next;
+      return { ok: !next.error, json: async () => next };
+    },
+  });
+  vm.runInContext(source.slice(source.indexOf("function renderPeoplePage(")), sandbox);
+  return {
+    ids, calls, sandbox, timers, clock, windowEvents,
+    async settle() { await new Promise(setImmediate); },
+    async tick(delay) {
+      const [id, timer] = [...timers].find(([, item]) => item.delay === delay);
+      timers.delete(id);
+      await timer.callback();
+      await new Promise(setImmediate);
+    },
+  };
+}
+
+function loadingResponse(overrides = {}) {
+  return {
+    people: [{ name: "Gabee" }], page: 1, total: 1, total_pages: 1,
+    actions_enabled: false, available_tags: [],
+    loading: { refreshing: true, phase: "repositories", message: "Checking Kometa poster repositories.", completed: 2, total: 7 },
+    ...overrides,
+  };
+}
+
+test("People loading shows saved cards and real progress without rebuilding their images on each poll", async () => {
+  const harness = loadingHarness([
+    loadingResponse(),
+    loadingResponse({ loading: { refreshing: true, phase: "profiles", message: "Loading TMDb profile details.", completed: 3, total: 10 } }),
+    loadingResponse({ loading: { refreshing: false, phase: "complete", message: "People and poster checks updated." } }),
+  ]);
+  await harness.settle();
+  assert.equal(harness.ids.gallery.children[0].person.name, "Gabee");
+  assert.match(harness.ids.loadingTitle.textContent, /2 of 7/);
+  assert.match(harness.ids.loadingDetail.textContent, /Showing saved people/);
+  const card = harness.ids.gallery.children[0];
+  card.expanded = true;
+  await harness.tick(1500);
+  assert.match(harness.ids.loadingTitle.textContent, /3 of 10/);
+  assert.equal(harness.ids.gallery.children[0], card);
+  assert.equal(harness.ids.gallery.replacements, 1);
+  await harness.tick(1500);
+  assert.equal(harness.ids.loadingPanel.dataset.busy, "false");
+  assert.equal(harness.ids.loadingRetry.hidden, false);
+  assert.equal(harness.timers.size, 0);
+  assert.equal(card.expanded, true);
+});
+
+test("People loading explains GitHub cooldown instead of showing an endless spinner", async () => {
+  const harness = loadingHarness([loadingResponse({ loading: { refreshing: true, message: "Checking poster availability.", retry_at: Date.now() / 1000 + 3600 } })]);
+  await harness.settle();
+  assert.match(harness.ids.loadingDetail.textContent, /GitHub has temporarily paused poster verification/);
+  assert.match(harness.ids.loadingDetail.textContent, /resume after/);
+  assert.equal(harness.ids.gallery.children.length, 1);
+});
+
+test("People loading explains confirmed token expiration and rejected credentials separately", async () => {
+  for (const [state, message] of [["expired", /token has expired/], ["rejected", /expired, been revoked, or be invalid/], ["missing", /No GitHub token is configured/]]) {
+    const harness = loadingHarness([loadingResponse({ loading: { refreshing: false, phase: "complete", github_authentication: { state } } })]);
+    await harness.settle();
+    assert.equal(harness.ids.githubWarning.hidden, false);
+    assert.match(harness.ids.githubWarning.textContent, message);
+    assert.equal(harness.ids.githubAdmin.hidden, false);
+    assert.equal(harness.ids.gallery.children.length, 1);
+  }
+});
+
+test("People loading warns ahead of known token expiration without inventing an expiration date", async () => {
+  const expiring = loadingHarness([loadingResponse({ loading: { refreshing: false, github_authentication: { state: "valid", expires_at: Date.now() / 1000 + 86400 } } })]);
+  await expiring.settle();
+  assert.match(expiring.ids.githubWarning.textContent, /token expires on/);
+  assert.equal(expiring.ids.githubWarning.hidden, false);
+  const unknown = loadingHarness([loadingResponse({ loading: { refreshing: false, github_authentication: { state: "valid", expires_at: null } } })]);
+  await unknown.settle();
+  assert.equal(unknown.ids.githubWarning.hidden, true);
+});
+
+test("People loading preserves saved cards when a later progress request fails and offers retry", async () => {
+  const harness = loadingHarness([loadingResponse(), new Error("Network unavailable"), loadingResponse({ loading: { refreshing: false, phase: "complete" } })]);
+  await harness.settle();
+  await harness.tick(1500);
+  assert.equal(harness.ids.gallery.children.length, 1);
+  assert.match(harness.ids.loadingDetail.textContent, /Network unavailable/);
+  assert.equal(harness.ids.loadingRetry.hidden, false);
+  assert.equal(harness.ids.loadingPanel.dataset.busy, "false");
+  await harness.ids.loadingRetry.events.click();
+  assert.equal(new URL(harness.calls[2].url, "https://example.test").searchParams.get("retry"), "1");
+});
+
+test("People loading times out an unresponsive request with an explanation and retry", async () => {
+  const harness = loadingHarness([({ signal }) => new Promise((resolve, reject) => signal.addEventListener("abort", () => {
+    const error = new Error("Aborted"); error.name = "AbortError"; reject(error);
+  }))]);
+  await harness.tick(15000);
+  assert.match(harness.ids.loadingTitle.textContent, /taking too long/);
+  assert.match(harness.ids.loadingDetail.textContent, /timed out/);
+  assert.equal(harness.ids.loadingRetry.hidden, false);
+  assert.equal(harness.ids.loadingPanel.dataset.busy, "false");
+});
+
+test("People loading does not claim there are no matches while the list is still being prepared", async () => {
+  const harness = loadingHarness([loadingResponse({ people: [] })]);
+  await harness.settle();
+  assert.equal(harness.ids.gallery.textContent, "The People list is still being prepared.");
+});
+
+test("People loading bounds automatic polling and stops when the visitor leaves", async () => {
+  const harness = loadingHarness([loadingResponse(), loadingResponse()]);
+  await harness.settle();
+  harness.clock.now += 180000;
+  await harness.tick(1500);
+  assert.equal(harness.timers.size, 0);
+  assert.match(harness.ids.loadingDetail.textContent, /taking longer than expected/);
+  assert.equal(harness.ids.loadingRetry.hidden, false);
+  assert.equal(harness.ids.gallery.children.length, 1);
+
+  const leaving = loadingHarness([loadingResponse()]);
+  await leaving.settle();
+  leaving.windowEvents.pagehide();
+  assert.equal(leaving.timers.size, 0);
 });

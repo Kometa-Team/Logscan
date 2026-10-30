@@ -53,7 +53,7 @@ PEOPLE_IMAGE_STYLES = (
 
 
 class PeopleImageInventory(dict):
-    """Name index with the Git revision and time successfully verified."""
+    """Name index with its source revision and time successfully checked."""
 
     def __init__(self, images: dict[str, str], revision: str, *, complete: bool = True):
         super().__init__(images)
@@ -132,10 +132,12 @@ def parse_people_inventory(style: PeopleImageStyle, tree: dict) -> dict[str, str
 
 
 def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] | None:
-    """Validate a repository's generated image index when GitHub's tree API fails.
+    """Validate a repository's generated image index for the primary lookup.
 
     Every declared image must be listed and point into the expected repository.
-    Even a valid index can lag behind poster syncs, so it cannot confirm absence.
+    A validated index resolves both listed and unlisted names locally. Its
+    freshness is enforced by PeopleReadmeCache; it describes the generated
+    README, which may lag behind a poster publication.
     """
     header = re.search(r"^# Kometa People Images[^\n]*\(([\d,]+) Images\)\s*$", readme, re.M)
     if not header:
@@ -153,10 +155,10 @@ def parse_people_readme(style: PeopleImageStyle, readme: str) -> dict[str, str] 
         if parsed is None or parsed[0] != style:
             return None
         images[person_name_key(parsed[1])] = url
-    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest(), complete=False)
+    return PeopleImageInventory(images, "index:" + hashlib.sha256(readme.encode()).hexdigest())
 
 
-def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_url, cache: dict) -> PeopleImageInventories:
+def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_url, cache: dict, progress=None, max_seconds: float | None = None) -> PeopleImageInventories:
     """Recover present images omitted by unverified listings, without inferring absence.
 
     Raw image HEAD requests do not consume GitHub's inventory API quota. A 404
@@ -164,6 +166,7 @@ def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_
     The caller serializes access to the short-lived probe cache.
     """
     now = time.monotonic()
+    deadline = now + max_seconds if max_seconds is not None else None
     for url in list(cache):
         if cache[url]["expires_at"] <= now:
             del cache[url]
@@ -189,6 +192,8 @@ def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_
                         continue
                     result = cache.get(url)
                     if result is None:
+                        if deadline is not None and time.monotonic() >= deadline:
+                            return None
                         result = {"present": False, "try_next": False, "checked_at": datetime.now(UTC).isoformat()}
                         try:
                             with open_url(Request(url, method="HEAD", headers={"User-Agent": "Kometa-Logscan/1.0", "Accept": "image/*"}), timeout=5) as response:
@@ -210,8 +215,12 @@ def verify_people_image_urls(candidates: list[dict], inventories: dict, *, open_
 
     images = PeopleImageInventories(inventories, errors=dict(getattr(inventories, "errors", {})))
     copied = set()
+    if progress:
+        progress("images", "Checking Kometa poster images.", 0, len(tasks))
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="people-image-check") as executor:
-        for result in executor.map(check_candidate, tasks.values()):
+        for completed, result in enumerate(executor.map(check_candidate, tasks.values()), start=1):
+            if progress:
+                progress("images", "Checking Kometa poster images.", completed, len(tasks))
             if result is None:
                 continue
             style, name, url, checked_at = result
@@ -256,6 +265,10 @@ def assess_people_images(candidate: dict, inventories: dict[str, dict[str, str]]
             )
         if isinstance(inventory, PeopleImageInventory):
             availability[style.key].update(checked_at=inventory.checked_at, revision=inventory.revision)
+            if inventory.revision.startswith("index:"):
+                availability[style.key]["verification_source"] = "readme_index"
+                if status == "missing":
+                    availability[style.key]["reason"] = "Not listed in the repository's generated README index."
             verified_at = next((getattr(inventory, "verified_images", {}).get(name) for name in names if name in getattr(inventory, "verified_images", {})), None)
             if verified_at:
                 availability[style.key].update(checked_at=verified_at, verification_source="image_url")

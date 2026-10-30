@@ -76,7 +76,7 @@ function sourceBadges(sources = [], requesters = [], metadataTags = [], provenan
     badge.className = `source-badge ${source}`;
     badge.textContent = source === "missing" ? imageStatus === "pending_verification" ? "Kometa verification pending" : "Missing Kometa" : source[0].toUpperCase() + source.slice(1);
     if (source === "missing" && imageStatus === "pending_verification") {
-      badge.title = "A Kometa repository check could not finish. Logscan retries automatically after five minutes.";
+      badge.title = "A Kometa repository check could not finish. Logscan retries automatically when services are available and their rate limits allow it.";
     }
     badges.append(badge);
   });
@@ -291,16 +291,105 @@ function pageJumper(currentPage, totalPages) {
 updateControls();
 const apiParams = filteredParams(page);
 apiParams.set("per_page", matchMedia("(max-width: 760px)").matches ? "10" : "25");
-fetch(`/api/people?${apiParams}`).then(async (response) => {
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Unable to load people.");
-  return data;
-}).then(({ people, page: currentPage, total: totalResults, total_pages: totalPages, actions_enabled: canManagePeople, available_tags: availableTags }) => {
+apiParams.set("background", "1");
+const loadingPanel = document.querySelector("#people-loading");
+const loadingTitle = document.querySelector("#people-loading-title");
+const loadingDetail = document.querySelector("#people-loading-detail");
+const loadingElapsed = document.querySelector("#people-loading-elapsed");
+const loadingRetry = document.querySelector("#people-loading-retry");
+const githubWarning = document.querySelector("#people-github-warning");
+const githubAdmin = document.querySelector("#people-github-admin");
+let loadingTimer;
+let loadingStarted;
+let renderedPeople = "";
+let stopped = false;
+
+function renderPeoplePage({ people, page: currentPage, total: totalResults, total_pages: totalPages, actions_enabled: canManagePeople, available_tags: availableTags, loading }) {
+  const signature = JSON.stringify([people, currentPage, totalResults, totalPages, canManagePeople, availableTags, !people.length && loading?.refreshing]);
+  // Keep loaded portraits and expanded cards in place during progress polling.
+  if (signature === renderedPeople) return;
+  renderedPeople = signature;
   actionsEnabled = canManagePeople;
   renderDynamicTagFilters(availableTags);
   if (tagQuery) tagCount.textContent = `${totalResults} ${totalResults === 1 ? "result" : "results"}`;
   gallery.replaceChildren();
-  if (!people.length) gallery.textContent = "No people match these filters.";
+  if (!people.length) gallery.textContent = loading?.refreshing ? "The People list is still being prepared." : "No people match these filters.";
   else people.forEach((person) => addPerson(person));
   pagination.replaceChildren(pageLink(currentPage - 1, "Previous", currentPage === 1), pageJumper(currentPage, totalPages), pageLink(currentPage + 1, "Next", currentPage === totalPages));
-}).catch((error) => { gallery.textContent = error.message; });
+}
+
+function updatePeopleLoading(loading, hasPeople, pendingChecks = false) {
+  const elapsed = Math.floor((Date.now() - loadingStarted) / 1000);
+  loadingElapsed.textContent = `${elapsed}s`;
+  const busy = Boolean(loading?.refreshing);
+  loadingPanel.dataset.busy = String(busy);
+  loadingRetry.hidden = busy;
+  const authentication = loading?.github_authentication;
+  const expiresAt = Number(authentication?.expires_at) * 1000;
+  let warning = "";
+  if (authentication?.state === "expired") {
+    warning = "The GitHub token has expired. An administrator needs to renew it to restore poster verification.";
+  } else if (authentication?.state === "rejected") {
+    warning = "GitHub rejected the configured token. It may have expired, been revoked, or be invalid. An administrator needs to renew or replace it.";
+  } else if (authentication?.state === "missing") {
+    warning = "No GitHub token is configured. Poster verification uses GitHub's limited public allowance; an administrator can add a read-only token.";
+  } else if (expiresAt > Date.now() && expiresAt - Date.now() <= 7 * 86400000) {
+    warning = `The GitHub token expires on ${new Date(expiresAt).toLocaleString()}. An administrator should renew it before then.`;
+  }
+  githubWarning.hidden = !warning;
+  githubWarning.textContent = warning;
+  if (githubAdmin) githubAdmin.hidden = !warning;
+  loadingTitle.textContent = loading?.message || "People loaded";
+  if (busy && loading.total > 0 && Number.isFinite(loading.completed)) {
+    loadingTitle.textContent += ` (${loading.completed} of ${loading.total})`;
+  }
+  const retryAt = Number(loading?.retry_at) * 1000;
+  if (retryAt > Date.now()) {
+    loadingDetail.textContent = `GitHub has temporarily paused poster verification. Checks can resume after ${new Date(retryAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. ${hasPeople ? "Saved people remain available below." : "The list will appear as soon as people are available."}`;
+  } else if (busy) {
+    loadingDetail.textContent = `${hasPeople ? "Showing saved people while their details and posters are checked." : "Waiting for IMDb, TMDb, or Kometa poster checks."} Unavailable checks stay pending. ${elapsed >= 15 ? "Some services are responding slowly; you can keep searching while this runs." : "You can search for a person while this runs."}`;
+  } else {
+    loadingDetail.textContent = loading?.phase === "failed" ? "The refresh stopped. Saved people remain available; use Check again to retry." : pendingChecks ? "People loaded. Some poster checks are unavailable and remain pending; open a person's style details for the reason." : "People loaded. Expand a person to review all seven poster styles.";
+  }
+}
+
+async function loadPeoplePage(retry = false) {
+  clearTimeout(loadingTimer);
+  stopped = false;
+  if (retry) {
+    loadingStarted = Date.now();
+    loadingRetry.hidden = true;
+  }
+  const controller = new AbortController();
+  const requestTimeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const params = new URLSearchParams(apiParams);
+    if (retry) params.set("retry", "1");
+    const response = await fetch(`/api/people?${params}`, { signal: controller.signal, cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Unable to load people.");
+    if (stopped) return;
+    renderPeoplePage(data);
+    updatePeopleLoading(data.loading, data.people.length > 0, data.people.some((person) => Object.values(person.style_availability || {}).some((style) => style.status === "unknown")));
+    if (data.loading?.refreshing) {
+      if (Date.now() - loadingStarted >= 180000) {
+        loadingPanel.dataset.busy = "false";
+        loadingRetry.hidden = false;
+        loadingDetail.textContent = "Verification is taking longer than expected. Saved people remain available. Use Check again to see the latest progress.";
+      } else loadingTimer = setTimeout(() => loadPeoplePage(), 1500);
+    }
+  } catch (error) {
+    if (stopped) return;
+    loadingPanel.dataset.busy = "false";
+    loadingRetry.hidden = false;
+    loadingTitle.textContent = error.name === "AbortError" ? "The People service is taking too long to respond" : "Unable to refresh people";
+    loadingDetail.textContent = `${error.name === "AbortError" ? "The request timed out." : error.message} ${renderedPeople ? "The people already loaded are still available." : "Use Check again to retry."}`;
+  } finally {
+    clearTimeout(requestTimeout);
+  }
+}
+
+loadingRetry.addEventListener("click", () => loadPeoplePage(true));
+window.addEventListener("pagehide", () => { stopped = true; clearTimeout(loadingTimer); });
+loadingStarted = Date.now();
+loadPeoplePage();

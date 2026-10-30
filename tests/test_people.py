@@ -2490,8 +2490,8 @@ class PeopleUnionTests(unittest.TestCase):
             json.dumps(
                 [
                     {
-                        "key": "tmdb-1",
-                        "tmdb_id": 1,
+                        "key": "tmdb-6",
+                        "tmdb_id": 6,
                         "name": "Hikaru Kondo",
                         "original_name": "Hikaru Kondô",
                         "log_url": "/scan/hikaru",
@@ -2505,7 +2505,27 @@ class PeopleUnionTests(unittest.TestCase):
                 "/api/people/export",
                 query_string=[("tags", "Log Upload")],
             )
-        self.assertEqual(response.get_data(as_text=True).splitlines(), ["1|Hikaru Kondô"])
+        self.assertEqual(response.get_data(as_text=True).splitlines(), ["6|Hikaru Kondô"])
+
+    def test_export_uses_displayed_tmdb_name_instead_of_original_log_alias(self):
+        original_name = "铃木浩介"
+        Path(STORE.name, "people.json").write_text(
+            json.dumps([{"key": "tmdb-2746726", "tmdb_id": 2746726, "name": original_name, "original_name": original_name, "log_url": "/scan/suzuki"}]),
+            encoding="utf-8",
+        )
+
+        def suzuki_urlopen(request, timeout=0):
+            if "/person/2746726?" in request.full_url:
+                return Response({"id": 2746726, "name": "Kosuke Suzuki", "profile_path": "/suzuki.jpg", "known_for_department": "Directing"})
+            return fake_urlopen(request, timeout)
+
+        with patch("logscan_web.app.urlopen", side_effect=suzuki_urlopen):
+            people = self.client.get("/api/people", query_string=[("tags", "Log Upload")]).get_json()["people"]
+            response = self.client.get("/api/people/export", query_string=[("tags", "Log Upload")])
+        self.assertEqual(people[0]["name"], "Kosuke Suzuki")
+        self.assertEqual(people[0]["original_name"], original_name)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(as_text=True).splitlines(), ["2746726|Kosuke Suzuki"])
 
     def test_export_respects_requester_tag_filter(self):
         with patch("logscan_web.app.urlopen", side_effect=fake_urlopen):

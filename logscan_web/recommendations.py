@@ -1,6 +1,7 @@
 """Single-source recommendation catalogue."""
 
 from __future__ import annotations
+import hashlib
 import json
 import re
 import time
@@ -302,7 +303,12 @@ def _schema_failure_guidance(error: object, path: str, unexpected: str | None = 
     }
 
 
-def _load_config_schema(branch: str, *, memory_cache: dict[str, dict] | None, cache_dir: Path | None) -> dict:
+def schema_fingerprint(schema: dict) -> str:
+    """Identify schema content independently of JSON formatting and key order."""
+    return hashlib.sha256(json.dumps(schema, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _load_config_schema(branch: str, *, memory_cache: dict[str, dict] | None, cache_dir: Path | None, on_change=None, force_refresh: bool = False) -> dict:
     """Load a branch schema locally and refresh it with a conditional request."""
     schema_path = cache_dir / f"{branch}.json" if cache_dir is not None else None
     metadata_path = cache_dir / f"{branch}.metadata.json" if cache_dir is not None else None
@@ -314,7 +320,7 @@ def _load_config_schema(branch: str, *, memory_cache: dict[str, dict] | None, ca
                 memory_cache[branch] = local_schema
         except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
             local_schema = None
-    if schema_path is not None and local_schema is not None:
+    if not force_refresh and schema_path is not None and local_schema is not None:
         try:
             if time.time() - schema_path.stat().st_mtime < SCHEMA_CACHE_SECONDS:
                 return local_schema
@@ -352,6 +358,8 @@ def _load_config_schema(branch: str, *, memory_cache: dict[str, dict] | None, ca
             metadata_path.write_text(json.dumps(response_metadata), encoding="utf-8")
         if memory_cache is not None:
             memory_cache[branch] = schema
+        if on_change is not None and (local_schema is None or schema_fingerprint(local_schema) != schema_fingerprint(schema)):
+            on_change()
         return schema
     except HTTPError as exc:
         if exc.code == 304 and local_schema is not None:
@@ -373,6 +381,8 @@ def validate_redacted_config(
     schema_cache: dict[str, dict] | None = None,
     schema_cache_dir: str | Path | None = None,
     schema_cache_lock=None,
+    schema_metadata: dict | None = None,
+    schema_changed=None,
 ) -> list[dict[str, object]]:
     """Validate a log's extracted config against its matching Kometa schema.
 
@@ -420,6 +430,7 @@ def validate_redacted_config(
                 schema_branch,
                 memory_cache=schema_cache,
                 cache_dir=Path(schema_cache_dir) if schema_cache_dir is not None else None,
+                on_change=schema_changed,
             )
 
         if schema_cache_lock is None:
@@ -429,6 +440,9 @@ def validate_redacted_config(
                 schema = load_schema()
     except (HTTPError, URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"The Kometa {schema_branch} configuration schema could not be fetched.") from exc
+
+    if schema_metadata is not None:
+        schema_metadata["schema_validation_digest"] = schema_fingerprint(schema)
 
     failures = []
     failures_by_source = {}
