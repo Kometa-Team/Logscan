@@ -2281,13 +2281,16 @@ def create_app() -> Flask:
         if not token or not hmac.compare_digest(request.headers.get("X-CSRF-Token", "").encode(), token.encode()):
             return jsonify(error="Refresh the People page before adding a person."), 403
         payload = request.get_json(silent=True)
-        if not isinstance(payload, dict) or set(payload) != {"tmdb_id"} or not valid_person_id(payload.get("tmdb_id")):
+        if not isinstance(payload, dict) or not {"tmdb_id"} <= set(payload) <= {"tmdb_id", "source_key"} or not valid_person_id(payload.get("tmdb_id")):
             return jsonify(error="Provide a valid TMDb person ID."), 400
+        source_key = payload.get("source_key")
+        if "source_key" in payload and (not isinstance(source_key, str) or not source_key or len(source_key) > 100):
+            return jsonify(error="Provide a valid source person key."), 400
         limited = public_people_limit("request")
         if limited:
             return limited
         existing = next((item for item in people_store.list() if item.get("tmdb_id") == payload["tmdb_id"]), {})
-        if existing.get("manual_requests"):
+        if existing.get("manual_requests") and not source_key:
             return jsonify(tmdb_id=payload["tmdb_id"], already_added=True, message="Already requested")
         details, status = verified_person(payload["tmdb_id"])
         if details is None:
@@ -2311,10 +2314,21 @@ def create_app() -> Flask:
                     "requested_by": [{"id": user["id"], "name": user["username"]}] if user else [],
                     "style_availability": person["style_availability"],
                     "people_image_status": person["people_image_status"],
+                    **(
+                        {
+                            "identity_ambiguous": False,
+                            "tmdb_lookup": {"status": "matched", "checked_at": time.time(), "reason": "TMDb identity explicitly selected by a user and verified with TMDb."},
+                        }
+                        if source_key
+                        else {}
+                    ),
                 },
                 manual_request_once=True,
+                unresolved_key=source_key,
             )
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            if source_key and isinstance(exc, ValueError):
+                return jsonify(error="The source person changed or could not be resolved. Refresh People and try again."), 409
             app.logger.warning("Unable to persist manual People request.")
             return jsonify(error="Unable to save this request. Please try again later."), 503
         already_added = not any(entry.get("id") == manual_request["id"] and entry["requested_at"] == timestamp for entry in record["manual_requests"])

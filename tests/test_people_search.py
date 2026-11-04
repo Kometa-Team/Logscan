@@ -102,6 +102,127 @@ def submit(client, headers, **extra):
     return client.post("/api/people/request", json={"tmdb_id": 777, **extra}, headers=headers)
 
 
+@pytest.mark.parametrize("status", ["no_match", "ambiguous", "unavailable"])
+def test_selected_search_match_resolves_original_log_record(service, status):
+    _, create, root, _ = service
+    store = PeopleStore(root)
+    original = store.upsert(
+        {
+            "key": "name-original",
+            "name": "Lupita Nyongo",
+            "original_name": "Lupita Nyongo",
+            "identity_ambiguous": status == "ambiguous",
+            "tmdb_lookup": {"status": status},
+            "log_url": "/scan/original",
+            "log_provenance": [{"log_url": "/scan/original", "evidence_lines": [44]}],
+            "source_styles": ["bw"],
+            "detection_reasons": ["poster_error"],
+            "requested_by": [{"id": "uploader", "name": "Original uploader"}],
+            "provenance_tags": ["Log Upload"],
+        }
+    )
+    client, headers = visitor(create(), {"id": "requester", "username": "Requester"})
+    # Searching and inspecting a candidate never changes the original identity.
+    assert client.get("/api/people/search?q=Lupita+Nyongo").json["choices"]
+    assert client.get("/api/people/search?q=777").json["people"][0]["can_add"]
+    assert store.get("name-original") == original
+    assert submit(client, headers, source_key="name-original").status_code == 201
+    record = store.list()[0]
+    assert len(store.list()) == 1 and record["tmdb_id"] == 777 and record["key"] == "tmdb-777"
+    assert record["name"] == "Lupita Nyong'o" and record["original_name"] == original["original_name"]
+    assert record["tmdb_lookup"]["status"] == "matched" and not record["identity_ambiguous"]
+    for field in ("created_at", "log_url", "log_provenance", "source_styles", "detection_reasons"):
+        assert record[field] == original[field]
+    assert record["requested_by"] == original["requested_by"] + [{"id": "requester", "name": "Requester"}]
+    assert record["provenance_tags"] == ["Log Upload", "Manually Added"]
+    assert record["style_availability"]["bw"]["status"] == "missing"
+    assert submit(client, headers, source_key="name-original").status_code == 200
+    assert store.list()[0] == record
+    assert client.get("/api/people?tags=TMDb+verification+pending").json["people"] == []
+    assert [item["tmdb_id"] for item in client.get("/api/people?tags=TMDb+Ready").json["people"]] == [777]
+
+
+def test_selected_existing_request_merges_log_history_without_rewriting_requester(service):
+    _, create, root, _ = service
+    app = create()
+    first, headers = visitor(app, {"id": "first", "username": "First requester"})
+    assert submit(first, headers).status_code == 201
+    store = PeopleStore(root)
+    request = store.list()[0]
+    original = store.upsert(
+        {
+            "key": "name-original",
+            "name": "Log alias",
+            "log_url": "/scan/original",
+            "log_provenance": [{"log_url": "/scan/original"}],
+            "provenance_tags": ["Log Upload"],
+            "requested_by": [{"id": "uploader", "name": "Uploader"}],
+        }
+    )
+    second, headers = visitor(app, {"id": "second", "username": "Second requester"})
+    response = submit(second, headers, source_key=original["key"])
+    assert response.status_code == 200 and response.json["already_added"]
+    record = store.list()[0]
+    assert len(store.list()) == 1 and record["manual_requests"] == request["manual_requests"]
+    assert record["requested_by"] == request["requested_by"] + original["requested_by"]
+    assert record["log_provenance"] == original["log_provenance"]
+    assert set(record["provenance_tags"]) == {"Manually Added", "Log Upload"}
+
+
+@pytest.mark.parametrize("source_key, source_id", [("missing", None), ("name-original", 778)])
+def test_selection_rejects_missing_or_differently_resolved_source(service, source_key, source_id):
+    _, create, root, _ = service
+    store = PeopleStore(root)
+    store.upsert({"key": "name-original", "name": "Original", "tmdb_id": source_id})
+    before = store.list()
+    client, headers = visitor(create())
+    assert submit(client, headers, source_key=source_key).status_code == 409
+    assert store.list() == before
+
+
+@pytest.mark.parametrize("source_key", [None, "", 123, "x" * 101])
+def test_selection_validates_source_key(service, source_key):
+    _, create, root, _ = service
+    client, headers = visitor(create())
+    assert submit(client, headers, source_key=source_key).status_code == 400
+    assert PeopleStore(root).list() == []
+
+
+@pytest.mark.parametrize("offline", [True, False])
+def test_selection_requires_verified_tmdb_person_and_image(service, offline):
+    state, create, root, _ = service
+    state.update(tmdb_offline=offline, profile=None, profiles=[])
+    store = PeopleStore(root)
+    store.upsert({"key": "name-original", "name": "Original"})
+    before = store.list()
+    client, headers = visitor(create())
+    assert submit(client, headers, source_key="name-original").status_code == (503 if offline else 409)
+    assert store.list() == before
+
+
+@pytest.mark.parametrize("same_identity", [True, False])
+def test_concurrent_selections_resolve_source_once(service, same_identity):
+    _, create, root, _ = service
+    app = create()
+    store = PeopleStore(root)
+    store.upsert({"key": "name-original", "name": "Original"})
+    barrier = Barrier(2)
+    original_upsert = PeopleStore.upsert_with_status
+
+    def concurrent_upsert(store, person, **kwargs):
+        barrier.wait(timeout=20)
+        return original_upsert(store, person, **kwargs)
+
+    def choose(person_id):
+        client, headers = visitor(app)
+        return submit(client, headers, tmdb_id=person_id, source_key="name-original").status_code
+
+    with patch.object(PeopleStore, "upsert_with_status", new=concurrent_upsert), ThreadPoolExecutor(max_workers=2) as executor:
+        codes = list(executor.map(choose, [777, 777 if same_identity else 778]))
+    assert sorted(codes) == ([200, 201] if same_identity else [201, 409])
+    assert len(store.list()) == 1 and len(store.list()[0]["manual_requests"]) == 1
+
+
 def test_search_request_ready_export_and_publication_end_to_end(service):
     state, create, root, _ = service
     app = create()
