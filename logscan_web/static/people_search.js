@@ -14,25 +14,26 @@
     return data;
   }
 
-  function showPerson(person) {
+  function showPerson(person, sourcePerson) {
     result.replaceChildren();
     const card = addPerson(person, result, true);
     if (person.can_add || (person.already_added && person.people_image_status !== "complete")) {
       const add = document.createElement("button");
       add.type = "button";
       add.className = "secondary-button";
-      add.textContent = person.already_added ? "Already requested" : "Request poster";
-      add.disabled = person.already_added;
+      add.textContent = person.already_added ? sourcePerson && person.can_add ? "Use this person" : "Already requested" : "Request poster";
+      add.disabled = person.already_added && !(sourcePerson && person.can_add);
       add.addEventListener("click", async () => {
         add.disabled = true;
         try {
           const data = await readResponse(await fetch("/api/people/request", {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-CSRF-Token": form.dataset.csrf },
-            body: JSON.stringify({ tmdb_id: person.tmdb_id }),
+            body: JSON.stringify({ tmdb_id: person.tmdb_id, ...(sourcePerson ? { source_key: sourcePerson.person_key } : {}) }),
           }));
           add.textContent = "Already requested";
           status.textContent = data.message;
+          if (sourcePerson) window.location.reload();
         } catch (error) {
           status.textContent = error.message;
           add.disabled = false;
@@ -47,7 +48,7 @@
     }
   }
 
-  async function search(query) {
+  async function search(query, sourcePerson = null) {
     const version = ++searchVersion;
     choices.replaceChildren();
     result.replaceChildren();
@@ -56,10 +57,10 @@
       const data = await readResponse(await fetch(`/api/people/search?${new URLSearchParams({ q: query })}`));
       if (version !== searchVersion) return;
       if (data.people?.length) {
-        showPerson(data.people[0]);
+        showPerson(data.people[0], sourcePerson);
         status.textContent = "";
       } else {
-        status.textContent = data.choices.length ? "Select the correct TMDb person." : "No people found on TMDb.";
+        status.textContent = data.choices.length ? `Select the correct TMDb person${sourcePerson ? ` for ${sourcePerson.name}` : ""}.` : "No people found on TMDb.";
         data.choices.forEach((person) => {
           const button = document.createElement("button");
           button.type = "button";
@@ -92,7 +93,7 @@
           knownFor.textContent = `Known For: ${person.known_for_department || "Not specified"}${person.known_for?.length ? ` (${person.known_for.filter(Boolean).join(", ")})` : ""}`;
           identity.append(name, id, knownFor);
           button.append(preview, identity);
-          button.addEventListener("click", () => search(String(person.tmdb_id)));
+          button.addEventListener("click", () => search(String(person.tmdb_id), sourcePerson));
           choices.append(button);
         });
       }
@@ -105,4 +106,12 @@
     event.preventDefault();
     search(input.value.trim());
   });
+  window.PeopleSearch = {
+    searchFor(person) {
+      input.value = person.original_name || person.name;
+      form.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      input.focus?.({ preventScroll: true });
+      return search(input.value.trim(), person);
+    },
+  };
 })();

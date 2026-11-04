@@ -765,15 +765,40 @@ class PeopleStore:
     def upsert(self, person: dict) -> dict:
         return self.upsert_with_status(person)[0]
 
-    def upsert_with_status(self, person: dict, *, manual_request_once: bool = False) -> tuple[dict, bool]:
+    def upsert_with_status(self, person: dict, *, manual_request_once: bool = False, unresolved_key: str | None = None) -> tuple[dict, bool]:
         from .people_images import person_name_key
 
         with self.transactions._transaction():
             people = self._read()
             existing = next((item for item in people if item["key"] == person["key"] or (person.get("tmdb_id") and item.get("tmdb_id") == person["tmdb_id"])), None)
+            resolving = False
+            if unresolved_key:
+                source = next((item for item in people if item["key"] == unresolved_key), None)
+                if source is None:
+                    if existing and unresolved_key in existing.get("resolved_from_keys", []):
+                        return existing.copy(), False
+                    raise ValueError("The unresolved person has changed. Refresh People before selecting a match.")
+                if source.get("tmdb_id") and source["tmdb_id"] != person.get("tmdb_id"):
+                    raise ValueError("This person already has a different TMDb identity. Refresh People before selecting a match.")
+                if source is not existing:
+                    resolving = True
+                    # Explicit selection alone may join different names. Keep
+                    # both histories in the same transaction as the request.
+                    incoming = dict(person)
+                    if manual_request_once and existing and existing.get("manual_requests"):
+                        incoming.pop("manual_requests", None)
+                        incoming.pop("requested_by", None)
+                    person = {**{key: value for key, value in source.items() if not existing or key not in existing}, **incoming}
+                    for field in ("requested_by", "provenance_tags", "source_styles", "detection_reasons", "log_provenance", "manual_requests", "resolved_from_keys"):
+                        person[field] = list(source.get(field, [])) + list(incoming.get(field, []))
+                    person["resolved_from_keys"].append(unresolved_key)
+                    if existing:
+                        people.remove(source)
+                    else:
+                        existing = source
             # Public requests are person-level, including simultaneous requests
             # from different sessions. Keep the original attribution untouched.
-            if manual_request_once and existing and existing.get("manual_requests"):
+            if manual_request_once and existing and existing.get("manual_requests") and not resolving:
                 return existing.copy(), False
             if existing is None and not person.get("manual_requests"):
                 incoming_names = {person_name_key(person.get(field)) for field in ("name", "original_name") if person.get(field)}
@@ -788,7 +813,7 @@ class PeopleStore:
             if existing:
                 incoming_requesters = person.get("requested_by", [])
                 incoming_provenance_tags = person.get("provenance_tags", [])
-                merged_fields = ("source_styles", "detection_reasons", "log_provenance", "manual_requests")
+                merged_fields = ("source_styles", "detection_reasons", "log_provenance", "manual_requests", "resolved_from_keys")
                 merged = {field: list(existing.get(field, [])) for field in merged_fields}
                 for field in merged_fields:
                     for value in person.get(field, []):

@@ -116,6 +116,49 @@ test("unresolved People cards show the saved lookup reason as text", () => {
   assert(detail.children.includes(` · ${person.tmdb_lookup.reason}`));
 });
 
+test("unresolved cards offer candidate selection and request the chosen ID for the original record", async () => {
+  const harness = searchHarness([
+    { choices: [{ tmdb_id: 777, name: "Andy Wilman" }, { tmdb_id: 778, name: "Andy Wilman" }] },
+    { people: [searchPerson()] }, { message: "Poster requested" },
+  ]);
+  let reloads = 0;
+  harness.sandbox.window.location = { reload: () => { reloads++; } };
+  const target = harness.sandbox.document.createElement("div");
+  harness.sandbox.addPerson({ name: "Andy Wylman", original_name: "Andy Wilman", person_key: "name-andy", tmdb_id: null }, target);
+  const search = descendants(target, (node) => node.textContent === "Search TMDb matches")[0];
+  await search.events.click();
+  assert.equal(harness.ids["poster-search-input"].value, "Andy Wilman");
+  assert.equal(harness.calls[0][0], "/api/people/search?q=Andy+Wilman");
+  assert.equal(harness.ids["poster-search-status"].textContent, "Select the correct TMDb person for Andy Wylman.");
+  assert.equal(harness.calls.length, 1);
+  await harness.ids["poster-search-choices"].children[0].events.click();
+  assert.equal(harness.calls[1][0], "/api/people/search?q=777");
+  assert.equal(harness.calls.length, 2);
+  const request = descendants(harness.ids["poster-search-result"], (node) => node.textContent === "Request poster")[0];
+  await request.events.click();
+  assert.deepEqual(JSON.parse(harness.calls[2][1].body), { tmdb_id: 777, source_key: "name-andy" });
+  assert.equal(reloads, 1);
+});
+
+test("a previously requested candidate can resolve an unresolved card", async () => {
+  const harness = searchHarness([{ people: [searchPerson("incomplete", true)] }, { message: "Already requested" }]);
+  harness.sandbox.window.location = { reload: () => {} };
+  await harness.sandbox.window.PeopleSearch.searchFor({ name: "Andy Wilman", person_key: "name-andy" });
+  const request = descendants(harness.ids["poster-search-result"], (node) => node.textContent === "Use this person")[0];
+  assert.equal(request.disabled, false);
+  await request.events.click();
+  assert.deepEqual(JSON.parse(harness.calls[1][1].body), { tmdb_id: 777, source_key: "name-andy" });
+});
+
+test("starting a separate manual search clears the original-record association", async () => {
+  const harness = searchHarness([{ choices: [] }, { people: [searchPerson()] }, { message: "Poster requested" }]);
+  await harness.sandbox.window.PeopleSearch.searchFor({ name: "Andy Wilman", person_key: "name-andy" });
+  await harness.search("777");
+  const request = descendants(harness.ids["poster-search-result"], (node) => node.textContent === "Request poster")[0];
+  await request.events.click();
+  assert.deepEqual(JSON.parse(harness.calls[2][1].body), { tmdb_id: 777 });
+});
+
 test("search reuses the People card with only the TMDb image expanded and seven styles collapsed", async () => {
   const person = searchPerson();
   const harness = searchHarness([{ people: [person] }, { message: "Poster requested" }]);

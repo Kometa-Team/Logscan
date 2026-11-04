@@ -206,6 +206,14 @@ function addPerson(person, targetGallery = gallery, searchResult = false) {
     detail.append(logLink);
   }
   if (!person.tmdb_id && person.tmdb_lookup?.reason) detail.append(` · ${person.tmdb_lookup.reason}`);
+  if (!person.tmdb_id && !searchResult) {
+    const search = document.createElement("button");
+    search.type = "button";
+    search.className = "secondary-button";
+    search.textContent = "Search TMDb matches";
+    search.addEventListener("click", () => window.PeopleSearch.searchFor(person));
+    detail.append(" ", search);
+  }
   const knownFor = document.createElement("p");
   knownFor.append("Known For: ", person.known_for_department || "Not specified");
   if (person.known_for?.length) {
