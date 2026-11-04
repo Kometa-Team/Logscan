@@ -6,7 +6,7 @@
   <title>Discord sign in � Kometa Utilities</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20260929-1') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261104-help-search') }}">
 </head>
 <body>
   {% set active_page = 'support' %}{% include '_site_header.html' %}
@@ -20,5 +20,6 @@
       <a class="primary-button support-discord-login" href="{{ url_for('support.authorize', next=next) }}">Continue with Discord</a>
     </section>
   </main>
+  {% include '_site_footer.html' %}
 </body>
 </html>

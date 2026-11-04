@@ -1,0 +1,10 @@
+<footer>
+  <div class="footer-identity">
+    <a class="footer-brand" href="/" aria-label="Kometa Logscan home">
+      <img src="{{ url_for('static', filename='logscan.png') }}" alt="">
+      <span>Kometa Logscan</span>
+    </a>
+    {% if active_page|default('') == 'scanner' %}<span id="retention-countdown">Logs and results are automatically deleted after 48 hours.</span>{% endif %}
+  </div>
+  <nav class="footer-links" aria-label="Help and community">{% include '_help_links.html' %}</nav>
+</footer>

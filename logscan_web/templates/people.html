@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261029-heading-links-2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css', v='20261104-help-search') }}">
   <script src="{{ url_for('static', filename='people_images.js', v='20261026-1') }}" defer></script><script src="{{ url_for('static', filename='confirm_dialog.js') }}" defer></script><script src="{{ url_for('static', filename='people.js', v='20261104-resolve') }}" defer></script>
-  <script src="{{ url_for('static', filename='people_search.js', v='20261104-resolve') }}" defer></script>
+  <script src="{{ url_for('static', filename='people_search.js', v='20261104-visible-search') }}" defer></script>
 </head>
 <body>
   {% set active_page = 'people' %}{% include '_site_header.html' %}
@@ -30,7 +30,7 @@
           <button type="submit" class="secondary-button">Search</button>
         </div>
       </form>
-      <p id="poster-search-status" role="status"></p>
+      <p id="poster-search-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
       <div id="poster-search-choices" class="poster-search-choices"></div>
       <div id="poster-search-result" class="people-gallery" aria-live="polite"></div>
     </section>
@@ -62,5 +62,13 @@
     <section id="people-gallery" class="people-gallery" aria-label="People"></section>
     <nav id="people-pagination" class="pagination" aria-label="People pages"></nav>
   </main>
+  <aside id="poster-search-notice" class="poster-search-notice" aria-label="People search update" hidden>
+    <p id="poster-search-notice-message"></p>
+    <div class="poster-search-notice-actions">
+      <button id="poster-search-notice-view" type="button" class="secondary-button">View search</button>
+      <button id="poster-search-notice-dismiss" type="button" class="icon-button" aria-label="Dismiss search update">&#215;</button>
+    </div>
+  </aside>
+  {% include '_site_footer.html' %}
 </body>
 </html>
