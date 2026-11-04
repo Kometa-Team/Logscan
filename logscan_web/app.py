@@ -506,6 +506,52 @@ def create_app() -> Flask:
             app.logger.warning("TMDb lookup failed for %s", path)
             return None
 
+    def lookup_person_identity(name: str, log_image_path=None) -> tuple[dict | None, dict]:
+        """Keep a failed request distinct from a completed, inconclusive search."""
+        checked_at = time.time()
+        data = tmdb_get("/search/person", {"query": name})
+        matches = data.get("results") if isinstance(data, dict) else None
+        total_pages = data.get("total_pages", 1) if isinstance(data, dict) else 1
+        if (
+            not isinstance(matches, list)
+            or type(total_pages) is not int
+            or total_pages < 0
+            or any(not isinstance(item, dict) or type(item.get("id")) is not int or item["id"] <= 0 or not isinstance(item.get("name"), str) for item in matches)
+        ):
+            return None, {
+                "status": "unavailable",
+                "checked_at": checked_at,
+                "retry_at": checked_at + KOMETA_IMAGE_RETRY_SECONDS,
+                "reason": "TMDb name lookup is unavailable or returned invalid data. It will retry on a People refresh after five minutes; check TMDb configuration if this persists.",
+            }
+        exact = [item for item in matches if _person_name_key(item.get("name")) == _person_name_key(name)]
+        match = exact[0] if len(exact) == 1 else None
+        if match is None and log_image_path:
+            photo_matches = [item for item in exact if item.get("profile_path") == log_image_path]
+            match = photo_matches[0] if len(photo_matches) == 1 else None
+        # Other search pages may contain another exact-name identity.
+        if total_pages > 1:
+            match = None
+        status = "matched" if match else "ambiguous" if matches or total_pages > 1 else "no_match"
+        reasons = {
+            "matched": "TMDb identity matched by exact name and, when needed, the logged profile image.",
+            "no_match": "TMDb returned no matching person. Review the source-log name and search TMDb before processing the poster.",
+            "ambiguous": "TMDb search did not establish a unique exact-name identity. Review the source log and TMDb candidates before processing the poster.",
+        }
+        return match, {"status": status, "checked_at": checked_at, "reason": reasons[status]}
+
+    def refresh_person_identity(record: dict) -> dict:
+        lookup = record.get("tmdb_lookup") or {}
+        if record.get("tmdb_id") or record.get("manually_completed") or record.get("people_image_status") == "complete":
+            return record
+        if lookup and (lookup.get("status") != "unavailable" or lookup.get("retry_at", 0) > time.time()):
+            return record
+        match, lookup = lookup_person_identity(record.get("original_name") or record["name"], record.get("log_tmdb_image_path"))
+        updates = {"key": record["key"], "tmdb_lookup": lookup, "identity_ambiguous": lookup["status"] == "ambiguous"}
+        if match:
+            updates.update(tmdb_id=match["id"], name=match["name"], tmdb_profile_path=match.get("profile_path"))
+        return people_store.upsert(updates)
+
     trending_name_cache = {}
     trending_name_lock = threading.Lock()
 
@@ -1108,12 +1154,11 @@ def create_app() -> Flask:
                 combined[f"tmdb-{person['id']}"] = {**person, "sources": person_sources}
 
         if "missing" in sources:
-            trending_by_name: dict[str, list[dict]] = {}
             addressed_records = []
-            for person in combined.values():
-                trending_by_name.setdefault(_person_name_key(person.get("name")), []).append(person)
             # A cold trending refresh can create automated requests above.
             current_records = records if cached_only else people_store.reconcile_image_availability(inventories)
+            if not cached_only:
+                current_records = [refresh_person_identity(record) for record in current_records]
             profile_ids = {
                 record["tmdb_id"]
                 for record in current_records
@@ -1137,9 +1182,6 @@ def create_app() -> Flask:
                 if record.get("manually_completed") or record.get("tmdb_id") in excluded_ids or record.get("tmdb_id") in checked_ids:
                     continue
                 person_id = record.get("tmdb_id")
-                if not person_id and not record.get("identity_ambiguous"):
-                    matches = trending_by_name.get(_person_name_key(record.get("name")), [])
-                    person_id = matches[0].get("id") if len(matches) == 1 else None
                 key = f"tmdb-{person_id}" if person_id else record["key"]
                 person = combined.get(key)
                 if person is None:
@@ -1173,10 +1215,17 @@ def create_app() -> Flask:
             record = person.get("missing_record", {})
             sources = sorted(person["sources"])
             metadata_tags = []
-            tmdb_ready = (bool(item.get("tmdb_image")) or bool(record.get("tmdb_image_found"))) and item["people_image_status"] == "incomplete"
+            lookup = record.get("tmdb_lookup") or {}
+            tmdb_ready = bool(item.get("tmdb_id")) and (bool(item.get("tmdb_image")) or bool(record.get("tmdb_image_found"))) and item["people_image_status"] == "incomplete"
             if "missing" in sources:
                 if tmdb_ready:
                     metadata_tags.append("TMDb Ready")
+                elif not item.get("tmdb_id") and lookup.get("status") == "no_match":
+                    metadata_tags.append("Missing TMDb")
+                elif not item.get("tmdb_id") and lookup.get("status") == "ambiguous":
+                    metadata_tags.append("TMDb unresolved")
+                elif not item.get("tmdb_id"):
+                    metadata_tags.append("TMDb verification pending")
                 elif item["tmdb_image_status"] == "missing":
                     metadata_tags.append("Missing TMDb")
                 elif item["tmdb_image_status"] == "unknown":
@@ -1188,6 +1237,7 @@ def create_app() -> Flask:
                 person_key=f"tmdb-{person['id']}" if person.get("id") else record.get("key"),
                 sources=sources,
                 metadata_tags=metadata_tags,
+                tmdb_lookup=lookup,
                 provenance_tags=list(record.get("provenance_tags", ["Log Upload"] if record else []))
                 + [f"Manually Added by {entry['name']}" for entry in record.get("manual_requests", []) if entry.get("id") and entry.get("name")],
                 log_url=record.get("log_url"),
@@ -1241,15 +1291,10 @@ def create_app() -> Flask:
             if existing and existing.get("tmdb_id"):
                 match = {"id": existing["tmdb_id"], "name": existing["name"]}
                 identity_ambiguous = False
+                lookup = existing.get("tmdb_lookup")
             else:
-                match_data = tmdb_get("/search/person", {"query": name})
-                matches = (match_data or {}).get("results", [])
-                exact = [item for item in matches if _person_name_key(item.get("name")) == _person_name_key(name)]
-                match = exact[0] if len(exact) == 1 else None
-                if match is None and log_image_path:
-                    photo_matches = [item for item in exact if item.get("profile_path") == log_image_path]
-                    match = photo_matches[0] if len(photo_matches) == 1 else None
-                identity_ambiguous = bool(matches) and match is None
+                match, lookup = lookup_person_identity(name, log_image_path)
+                identity_ambiguous = lookup["status"] == "ambiguous"
             tmdb_id = match.get("id") if match else None
             if tmdb_id in excluded_ids or tmdb_id in checked_ids:
                 continue
@@ -1274,6 +1319,7 @@ def create_app() -> Flask:
                     "original_name": name,
                     "tmdb_id": tmdb_id,
                     "identity_ambiguous": identity_ambiguous,
+                    "tmdb_lookup": lookup,
                     "tmdb_image_found": tmdb_image_found,
                     "tmdb_profile_path": api_image_path,
                     "log_tmdb_image_path": log_image_path,

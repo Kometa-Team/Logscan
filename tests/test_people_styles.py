@@ -130,6 +130,10 @@ def service(tmp_path, monkeypatch):
             entry = f"* [Bruce Langley](https://raw.githubusercontent.com/Kometa-Team/{style.repository}/master/B/Images/Bruce%20Langley.jpg)\n" if count else ""
             return Response(f"# Kometa People Images ({count} Images)\n" + entry)
         if "/search/person?" in url:
+            if state.get("search_error"):
+                raise HTTPError(url, state["search_error"], "private API failure", {}, None)
+            if "search_data" in state:
+                return Response(state["search_data"])
             return Response({"results": state["matches"]})
         if "/person/909/images?" in url:
             return Response({"profiles": [{"file_path": "/bruce.jpg"}]})
@@ -580,7 +584,7 @@ def test_unresolved_person_still_shows_trusted_image_from_log(service):
     person = next(item for item in app.test_client().get("/api/people").json["people"] if item["tmdb_id"] is None)
     assert person["tmdb_image_source"] == "log" and person["tmdb_image_status"] == "available"
     assert person["tmdb_image"]["preview_url"] == "https://image.tmdb.org/t/p/w342" + BRUCE_PROFILE
-    assert person["metadata_tags"] == ["TMDb Ready"]
+    assert person["metadata_tags"] == ["TMDb unresolved"]
     assert PeopleStore(root).list()[0]["log_tmdb_image_path"] == BRUCE_PROFILE
     finding = next(item for item in result["recommendations"] if item["id"] == "missing_people_images_pending")
     assert finding["evidence_lines"] == [44] and "Log line number(s): 44" in finding["message"]
@@ -725,6 +729,114 @@ def test_ambiguous_identity_remains_unresolved(service):
     assert record["tmdb_id"] is None and record["key"].startswith("name-")
     unresolved = next(person for person in app.test_client().get("/api/people").json["people"] if person["person_key"].startswith("name-"))
     assert unresolved["tmdb_id"] is None
+    assert unresolved["metadata_tags"] == ["TMDb unresolved"]
+    assert unresolved["tmdb_lookup"]["status"] == "ambiguous"
+
+
+@pytest.mark.parametrize(
+    "matches, status, tag",
+    [
+        ([{"id": 909, "name": "Bruce Langley", "profile_path": "/bruce.jpg"}], "matched", "TMDb Ready"),
+        ([], "no_match", "Missing TMDb"),
+        ([{"id": 909, "name": "Bruce Langley"}, {"id": 910, "name": "Bruce Langley"}], "ambiguous", "TMDb unresolved"),
+        ([{"id": 910, "name": "Different Person"}], "ambiguous", "TMDb unresolved"),
+    ],
+)
+def test_refresh_verifies_legacy_name_only_records_and_persists_outcome(service, matches, status, tag):
+    state, create, root = service
+    state["matches"] = matches
+    store = PeopleStore(root)
+    original = store.upsert(
+        {
+            "key": "name-legacy",
+            "name": "Bruce Langley",
+            "tmdb_id": None,
+            "requested_by": [{"id": "42", "name": "Original requester"}],
+            "log_provenance": [{"log_url": "/scan/original", "evidence_lines": [44]}],
+            "source_styles": ["bw"],
+            "log_url": "/scan/original",
+            "provenance_tags": ["Log Upload"],
+        }
+    )
+    app = create()
+    client = app.test_client()
+    response = client.get("/api/people").json
+    person = next(item for item in response["people"] if item["log_url"] == "/scan/original")
+    assert person["metadata_tags"] == [tag]
+    assert person["tmdb_lookup"]["status"] == status
+    assert person["tmdb_id"] == (909 if status == "matched" else None)
+    assert any(item["tag"] == tag and item["count"] == 1 for item in response["available_tags"])
+    assert not any(item["tag"] == "TMDb verification pending" for item in response["available_tags"])
+    record = store.list()[0]
+    assert len(store.list()) == 1 and record["tmdb_lookup"]["status"] == status
+    for field in ("key", "created_at", "requested_by", "log_provenance", "source_styles", "log_url", "provenance_tags"):
+        assert record[field] == original[field]
+    assert record["style_availability"]["bw"]["status"] == "missing"
+    # Outcomes survive a new application/worker without another name lookup.
+    create().test_client().get("/api/people")
+    assert sum("/search/person?" in url for url in state["calls"]) == 1
+
+
+@pytest.mark.parametrize("failure", [401, 429, 503, "malformed"])
+def test_name_lookup_failure_retries_after_five_minutes_and_survives_restart(service, monkeypatch, failure):
+    state, create, root = service
+    if failure == "malformed":
+        state["search_data"] = {"results": "invalid"}
+    else:
+        state["search_error"] = failure
+    store = PeopleStore(root)
+    store.upsert({"key": "name-legacy", "name": "Bruce Langley", "tmdb_id": None})
+    app = create()
+    person = next(item for item in app.test_client().get("/api/people").json["people"] if item["tmdb_id"] is None)
+    assert person["metadata_tags"] == ["TMDb verification pending"]
+    lookup = store.list()[0]["tmdb_lookup"]
+    assert lookup["status"] == "unavailable" and lookup["retry_at"] - lookup["checked_at"] == 300
+    assert "private" not in lookup["reason"] and "test-key" not in lookup["reason"]
+    create().test_client().get("/api/people")
+    assert sum("/search/person?" in url for url in state["calls"]) == 1
+    monkeypatch.setattr("logscan_web.app.time.time", lambda: lookup["retry_at"] + 1)
+    # Repeated failures retain a documented retry rather than becoming no-match.
+    app.test_client().get("/api/people")
+    assert store.list()[0]["tmdb_lookup"]["status"] == "unavailable"
+    assert store.list()[0]["tmdb_lookup"]["retry_at"] > lookup["retry_at"]
+    state.pop("search_data", None)
+    state.pop("search_error", None)
+    monkeypatch.setattr("logscan_web.app.time.time", lambda: lookup["retry_at"] + 302)
+    app.test_client().get("/api/people")
+    assert store.list()[0]["tmdb_id"] == 909
+    assert store.list()[0]["tmdb_lookup"]["status"] == "matched"
+
+
+def test_ingestion_persists_no_match_and_refresh_does_not_guess_from_trending(service):
+    state, create, root = service
+    state["matches"] = []
+    app = create()
+    upload(app)
+    record = PeopleStore(root).list()[0]
+    assert record["tmdb_lookup"]["status"] == "no_match"
+    person = next(item for item in app.test_client().get("/api/people").json["people"] if item["person_key"] == record["key"])
+    assert person["tmdb_id"] is None and person["metadata_tags"] == ["Missing TMDb"]
+    assert sum("/search/person?" in url for url in state["calls"]) == 1
+
+
+def test_multiple_search_pages_do_not_establish_unique_identity(service):
+    state, create, root = service
+    state["search_data"] = {"results": [{"id": 909, "name": "Bruce Langley"}], "total_pages": 2}
+    app = create()
+    upload(app)
+    record = PeopleStore(root).list()[0]
+    assert record["tmdb_id"] is None and record["tmdb_lookup"]["status"] == "ambiguous"
+
+
+def test_cached_people_preview_does_not_attempt_name_verification(service):
+    state, create, root = service
+    PeopleStore(root).upsert({"key": "name-legacy", "name": "Bruce Langley", "tmdb_id": None})
+    app = create()
+    with patch.object(app.extensions["people_loader"], "read", return_value=(None, {"phase": "queued", "refreshing": True})):
+        response = app.test_client().get("/api/people?background=1").json
+    person = next(item for item in response["people"] if item["person_key"] == "name-legacy")
+    assert person["tmdb_id"] is None and person["metadata_tags"] == ["TMDb verification pending"]
+    assert state["calls"] == []
 
 
 def test_name_fallback_upgrades_without_duplicate_identity(tmp_path):

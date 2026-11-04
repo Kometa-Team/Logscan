@@ -205,6 +205,7 @@ function addPerson(person, targetGallery = gallery, searchResult = false) {
     logLink.textContent = "Source log";
     detail.append(logLink);
   }
+  if (!person.tmdb_id && person.tmdb_lookup?.reason) detail.append(` · ${person.tmdb_lookup.reason}`);
   const knownFor = document.createElement("p");
   knownFor.append("Known For: ", person.known_for_department || "Not specified");
   if (person.known_for?.length) {

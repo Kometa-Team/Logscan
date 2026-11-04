@@ -106,6 +106,16 @@ function searchPerson(status = "incomplete", alreadyAdded = false) {
   };
 }
 
+test("unresolved People cards show the saved lookup reason as text", () => {
+  const harness = searchHarness([]);
+  const person = { ...searchPerson(), tmdb_id: null, tmdb_person_url: null,
+    metadata_tags: ["TMDb unresolved"], tmdb_lookup: { reason: "Review the source log and TMDb candidates. <script>" } };
+  const target = vm.runInContext("document.createElement('div')", harness.sandbox);
+  harness.sandbox.addPerson(person, target);
+  const detail = descendants(target, (node) => node.tag === "p").find((node) => node.textContent === "TMDb ID unresolved");
+  assert(detail.children.includes(` · ${person.tmdb_lookup.reason}`));
+});
+
 test("search reuses the People card with only the TMDb image expanded and seven styles collapsed", async () => {
   const person = searchPerson();
   const harness = searchHarness([{ people: [person] }, { message: "Poster requested" }]);
