@@ -6,7 +6,25 @@
   const status = document.querySelector("#poster-search-status");
   const choices = document.querySelector("#poster-search-choices");
   const result = document.querySelector("#poster-search-result");
+  const notice = document.querySelector("#poster-search-notice");
+  const noticeMessage = document.querySelector("#poster-search-notice-message");
+  const noticeView = document.querySelector("#poster-search-notice-view");
   let searchVersion = 0;
+
+  function revealSearch() {
+    status.focus({ preventScroll: true });
+    status.scrollIntoView({ behavior: "instant", block: "start" });
+  }
+
+  function showStatus(message, action = "View search") {
+    status.textContent = message;
+    noticeMessage.textContent = message;
+    noticeView.textContent = action;
+    notice.hidden = false;
+  }
+
+  noticeView.addEventListener("click", () => { revealSearch(); notice.hidden = true; });
+  document.querySelector("#poster-search-notice-dismiss").addEventListener("click", () => { notice.hidden = true; });
 
   async function readResponse(response) {
     const data = await response.json();
@@ -32,10 +50,10 @@
             body: JSON.stringify({ tmdb_id: person.tmdb_id, ...(sourcePerson ? { source_key: sourcePerson.person_key } : {}) }),
           }));
           add.textContent = "Already requested";
-          status.textContent = data.message;
+          showStatus(data.message, "View result");
           if (sourcePerson) window.location.reload();
         } catch (error) {
-          status.textContent = error.message;
+          showStatus(error.message, "View result");
           add.disabled = false;
         }
       });
@@ -52,15 +70,19 @@
     const version = ++searchVersion;
     choices.replaceChildren();
     result.replaceChildren();
-    status.textContent = "Searching TMDb and verifying poster styles…";
+    form.setAttribute("aria-busy", "true");
+    input.blur();
+    showStatus(`Searching TMDb for ${sourcePerson?.name || query} and verifying poster styles…`);
+    revealSearch();
     try {
       const data = await readResponse(await fetch(`/api/people/search?${new URLSearchParams({ q: query })}`));
       if (version !== searchVersion) return;
       if (data.people?.length) {
         showPerson(data.people[0], sourcePerson);
-        status.textContent = "";
+        showStatus(`Poster check complete for ${data.people[0].name}. Review the result below.`, "View result");
       } else {
-        status.textContent = data.choices.length ? `Select the correct TMDb person${sourcePerson ? ` for ${sourcePerson.name}` : ""}.` : "No people found on TMDb.";
+        const count = data.choices.length;
+        showStatus(count ? `Found ${count} TMDb ${count === 1 ? "match" : "matches"}${sourcePerson ? ` for ${sourcePerson.name}` : ""}. Select the correct person below.` : "No people found on TMDb. Try another name or a TMDb ID.", count ? "View matches" : "View search");
         data.choices.forEach((person) => {
           const button = document.createElement("button");
           button.type = "button";
@@ -98,7 +120,12 @@
         });
       }
     } catch (error) {
-      if (version === searchVersion) status.textContent = error.message;
+      if (version === searchVersion) showStatus(error.message);
+    } finally {
+      if (version === searchVersion) {
+        form.setAttribute("aria-busy", "false");
+        revealSearch();
+      }
     }
   }
 
@@ -109,8 +136,6 @@
   window.PeopleSearch = {
     searchFor(person) {
       input.value = person.original_name || person.name;
-      form.scrollIntoView?.({ behavior: "smooth", block: "start" });
-      input.focus?.({ preventScroll: true });
       return search(input.value.trim(), person);
     },
   };

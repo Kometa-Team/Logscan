@@ -64,8 +64,11 @@ function searchHarness(responses) {
     replaceChildren(...children) { this.children = children; }
     setAttribute(key, value) { this.attributes[key] = value; }
     addEventListener(key, callback) { this.events[key] = callback; }
+    focus(options) { this.focusOptions = options; this.focusCount = (this.focusCount || 0) + 1; }
+    blur() { this.blurred = true; }
+    scrollIntoView(options) { this.scrollOptions = options; this.scrollCount = (this.scrollCount || 0) + 1; }
   }
-  const ids = Object.fromEntries(["poster-search", "poster-search-input", "poster-search-status", "poster-search-choices", "poster-search-result"].map((id) => [id, new Element("div")]));
+  const ids = Object.fromEntries(["poster-search", "poster-search-input", "poster-search-status", "poster-search-choices", "poster-search-result", "poster-search-notice", "poster-search-notice-message", "poster-search-notice-view", "poster-search-notice-dismiss"].map((id) => [id, new Element("div")]));
   ids["poster-search"].dataset.csrf = "server-token";
   const calls = [];
   const sandbox = vm.createContext({
@@ -73,7 +76,7 @@ function searchHarness(responses) {
     window: {}, URLSearchParams,
     fetch: async (...args) => {
       calls.push(args);
-      const next = responses.shift();
+      const next = await responses.shift();
       return { ok: !next.error, json: async () => next };
     },
   });
@@ -129,7 +132,7 @@ test("unresolved cards offer candidate selection and request the chosen ID for t
   await search.events.click();
   assert.equal(harness.ids["poster-search-input"].value, "Andy Wilman");
   assert.equal(harness.calls[0][0], "/api/people/search?q=Andy+Wilman");
-  assert.equal(harness.ids["poster-search-status"].textContent, "Select the correct TMDb person for Andy Wylman.");
+  assert.equal(harness.ids["poster-search-status"].textContent, "Found 2 TMDb matches for Andy Wylman. Select the correct person below.");
   assert.equal(harness.calls.length, 1);
   await harness.ids["poster-search-choices"].children[0].events.click();
   assert.equal(harness.calls[1][0], "/api/people/search?q=777");
@@ -157,6 +160,66 @@ test("starting a separate manual search clears the original-record association",
   const request = descendants(harness.ids["poster-search-result"], (node) => node.textContent === "Request poster")[0];
   await request.events.click();
   assert.deepEqual(JSON.parse(harness.calls[2][1].body), { tmdb_id: 777 });
+});
+
+test("search shows progress and brings completed matches into view without opening a mobile keyboard", async () => {
+  let finish;
+  const harness = searchHarness([new Promise((resolve) => { finish = resolve; })]);
+  const pending = harness.sandbox.window.PeopleSearch.searchFor({ name: "Andy Wilman", person_key: "name-andy" });
+  const status = harness.ids["poster-search-status"];
+  const notice = harness.ids["poster-search-notice"];
+  assert.equal(harness.ids["poster-search"].attributes["aria-busy"], "true");
+  assert.equal(harness.ids["poster-search-input"].blurred, true);
+  assert.equal(harness.ids["poster-search-input"].focusCount, undefined);
+  assert.equal(notice.hidden, false);
+  assert.match(harness.ids["poster-search-notice-message"].textContent, /Searching TMDb for Andy Wilman/);
+  assert.equal(status.scrollCount, 1);
+  finish({ choices: [{ tmdb_id: 777, name: "Andy Wilman" }] });
+  await pending;
+  assert.equal(harness.ids["poster-search"].attributes["aria-busy"], "false");
+  assert.match(status.textContent, /Found 1 TMDb match for Andy Wilman/);
+  assert.equal(status.scrollCount, 2);
+  assert.equal(status.focusCount, 2);
+  assert.equal(status.scrollOptions.behavior, "instant");
+  assert.equal(status.focusOptions.preventScroll, true);
+  assert.equal(harness.ids["poster-search-notice-message"].textContent, status.textContent);
+  assert.equal(harness.ids["poster-search-notice-view"].textContent, "View matches");
+  // The completion notice remains actionable if the user scrolls away.
+  harness.ids["poster-search-notice-view"].events.click();
+  assert.equal(status.scrollCount, 3);
+  assert.equal(notice.hidden, true);
+});
+
+test("no matches, lookup errors and verified results all have visible completion notices", async () => {
+  for (const [response, message, action] of [
+    [{ choices: [] }, /No people found/, "View search"],
+    [{ error: "TMDb unavailable" }, /TMDb unavailable/, "View search"],
+    [{ people: [searchPerson()] }, /Poster check complete/, "View result"],
+  ]) {
+    const harness = searchHarness([response]);
+    await harness.search("Andy Wilman");
+    assert.match(harness.ids["poster-search-status"].textContent, message);
+    assert.equal(harness.ids["poster-search-notice"].hidden, false);
+    assert.equal(harness.ids["poster-search-notice-view"].textContent, action);
+    assert.equal(harness.ids["poster-search-status"].scrollCount, 2);
+    assert.equal(harness.ids["poster-search"].attributes["aria-busy"], "false");
+    harness.ids["poster-search-notice-dismiss"].events.click();
+    assert.equal(harness.ids["poster-search-notice"].hidden, true);
+  }
+});
+
+test("an older search cannot replace the current results or steal focus", async () => {
+  let finishOld;
+  const harness = searchHarness([new Promise((resolve) => { finishOld = resolve; }), { choices: [{ tmdb_id: 778, name: "New person" }] }]);
+  const old = harness.sandbox.window.PeopleSearch.searchFor({ name: "Old person", person_key: "name-old" });
+  await harness.sandbox.window.PeopleSearch.searchFor({ name: "New person", person_key: "name-new" });
+  const status = harness.ids["poster-search-status"];
+  const focused = status.focusCount;
+  finishOld({ error: "Old error" });
+  await old;
+  assert.match(status.textContent, /Found 1 TMDb match for New person/);
+  assert.equal(status.focusCount, focused);
+  assert.equal(harness.ids["poster-search-notice-message"].textContent, status.textContent);
 });
 
 test("search reuses the People card with only the TMDb image expanded and seven styles collapsed", async () => {
